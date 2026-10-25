@@ -28,10 +28,13 @@ public interface FaqEditHistoryRepository extends JpaRepository<FaqEditHistory, 
     // 분석 및 수정자 복합 조회
     List<FaqEditHistory> findByAnalysisJob_AnalysisIdAndEditedBy_UserId(Long analysisId, Long userId);
 
-    // 전체 변경 이력 페이징 조회, editType이 null이면 전체
+    // 변경 이력 페이징 조회, faqId·editType이 null이면 그 조건을 적용하지 않는다
     @EntityGraph(attributePaths = {"faq", "analysisJob", "editedBy"})
-    @Query("SELECT h FROM FaqEditHistory h WHERE (:editType IS NULL OR h.editType = :editType)")
-    Page<FaqEditHistory> search(@Param("editType") FaqEditHistory.EditType editType, Pageable pageable);
+    @Query("SELECT h FROM FaqEditHistory h WHERE (:faqId IS NULL OR h.faq.faqId = :faqId) "
+            + "AND (:editType IS NULL OR h.editType = :editType)")
+    Page<FaqEditHistory> search(@Param("faqId") Long faqId,
+                                @Param("editType") FaqEditHistory.EditType editType,
+                                Pageable pageable);
 
     // 아직 버전으로 묶이지 않은 변경의 유형별 건수
     @Query("SELECT h.editType, COUNT(h) FROM FaqEditHistory h WHERE h.version IS NULL GROUP BY h.editType")

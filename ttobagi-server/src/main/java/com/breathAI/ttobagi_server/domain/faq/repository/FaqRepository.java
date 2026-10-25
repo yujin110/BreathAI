@@ -46,11 +46,26 @@ public interface FaqRepository extends JpaRepository<Faq, Long> {
                      @Param("keyword") String keyword,
                      Pageable pageable);
 
-    // 카테고리 표시명으로 카테고리 코드 조회
+    // 카테고리 표시명으로 카테고리 코드 조회, 이름 일부만 맞아도 찾는다 (예: 열차운영 → 열차운영관련)
     // 카테고리 마스터는 AI 서버가 적재하는 Bronze 테이블이라 읽기만 한다
-    @Query(value = "SELECT DISTINCT q_type FROM bronze_cate_info WHERE q_disp_name = :name",
+    @Query(value = "SELECT DISTINCT q_type FROM bronze_cate_info WHERE q_disp_name LIKE CONCAT('%', :name, '%')",
             nativeQuery = true)
     List<Integer> findQTypesByCategoryName(@Param("name") String name);
+
+    // 카테고리 코드별 표시명 전체, 같은 코드가 여러 번 적재되면 가장 최근 이름 하나만 쓴다
+    @Query(value = "SELECT q_type AS code, q_disp_name AS name FROM ("
+            + "  SELECT q_type, q_disp_name, ROW_NUMBER() OVER ("
+            + "    PARTITION BY q_type ORDER BY _ingested_at DESC, seq_num DESC) AS rn"
+            + "  FROM bronze_cate_info) c "
+            + "WHERE rn = 1 ORDER BY q_type",
+            nativeQuery = true)
+    List<CategoryRow> findLatestCategories();
+
+    // getQType은 프로젝션 속성 이름이 QType으로 잡혀 별칭과 맞지 않을 수 있어 code로 둔다
+    interface CategoryRow {
+        Integer getCode();
+        String getName();
+    }
 
     // 카테고리 코드로 표시명 조회, 같은 코드가 여러 번 적재되면 가장 최근 이름을 쓴다 (CSV 다운로드와 같은 규칙)
     @Query(value = "SELECT q_disp_name FROM bronze_cate_info WHERE q_type = :qType "
