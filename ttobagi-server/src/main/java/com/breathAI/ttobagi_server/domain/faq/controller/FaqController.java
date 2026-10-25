@@ -42,6 +42,13 @@ public class FaqController {
         return ResponseEntity.ok(ApiResponse.success(faqService.getFaqList(versionId, page, size, category, keyword)));
     }
 
+    // 카테고리 목록 조회, 카테고리 필터 선택지용
+    @GetMapping("/categories")
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<FaqCategoryListResponse>> getCategories() {
+        return ResponseEntity.ok(ApiResponse.success(faqService.getCategories(), "카테고리 목록을 조회했습니다."));
+    }
+
     // FAQ 단건 상세 조회
     @GetMapping("/{faqId}")
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
@@ -102,14 +109,15 @@ public class FaqController {
                 .body(file.content());
     }
 
-    // FAQ 변경 이력 조회, 변경 유형으로 필터링 가능
+    // FAQ 변경 이력 조회, FAQ와 변경 유형으로 필터링 가능
     @GetMapping("/history")
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
     public ResponseEntity<ApiResponse<FaqEditHistoryResponse>> getFaqHistory(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) Long faqId,
             @RequestParam(required = false) EditType editType) {
-        return ResponseEntity.ok(ApiResponse.success(faqService.getFaqHistory(page, size, editType), "FAQ 수정 이력을 성공적으로 조회했습니다."));
+        return ResponseEntity.ok(ApiResponse.success(faqService.getFaqHistory(page, size, faqId, editType), "FAQ 수정 이력을 성공적으로 조회했습니다."));
     }
 
     // 분석 결과 기반 FAQ 후보 추천 목록 조회

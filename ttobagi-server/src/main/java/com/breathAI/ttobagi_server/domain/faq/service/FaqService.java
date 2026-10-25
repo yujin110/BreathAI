@@ -78,6 +78,9 @@ public class FaqService {
             }
         }
 
+        // 저장된 카테고리 이름이 비어 있으면 마스터의 이름을 쓴다, 목록마다 마스터를 한 번만 읽는다
+        Map<Integer, String> masterNames = categoryNamesByQType();
+
         if (version != null) {
             Page<FaqVersionItem> itemPage = faqVersionItemRepository.search(
                     version.getVersionId(), categoryName != null, qTypes, blankToNull(keyword),
@@ -93,7 +96,7 @@ public class FaqService {
                                     .answer(i.getAnswer())
                                     .keywords(parseKeywords(i.getKeywords()))
                                     .qType(i.getQType())
-                                    .category(i.getCategory())
+                                    .category(displayCategory(i.getCategory(), i.getQType(), masterNames))
                                     .createdAt(i.getFaqCreatedAt().toLocalDate())
                                     .build())
                             .collect(Collectors.toList()))
@@ -114,7 +117,7 @@ public class FaqService {
                         .answer(f.getAnswer())
                         .keywords(parseKeywords(f.getKeywords()))
                         .qType(f.getQType())
-                        .category(f.getCategory())
+                        .category(displayCategory(f.getCategory(), f.getQType(), masterNames))
                         .createdAt(f.getCreatedAt().toLocalDate())
                         .build())
                 .collect(Collectors.toList());
@@ -125,6 +128,19 @@ public class FaqService {
                 .totalPages(faqPage.getTotalPages())
                 .currentPage(page)
                 .size(size)
+                .build();
+    }
+
+    // 카테고리 목록 조회, 카테고리 필터 선택지용
+    @Transactional(readOnly = true)
+    public FaqCategoryListResponse getCategories() {
+        return FaqCategoryListResponse.builder()
+                .categories(faqRepository.findLatestCategories().stream()
+                        .map(c -> FaqCategoryListResponse.CategoryItem.builder()
+                                .qType(c.getCode())
+                                .name(c.getName())
+                                .build())
+                        .collect(Collectors.toList()))
                 .build();
     }
 
@@ -140,7 +156,9 @@ public class FaqService {
                 .answer(faq.getAnswer())
                 .keywords(parseKeywords(faq.getKeywords()))
                 .qType(faq.getQType())
-                .category(faq.getCategory())
+                .category(faq.getCategory() != null || faq.getQType() == null
+                        ? faq.getCategory()
+                        : faqRepository.findCategoryNameByQType(faq.getQType()).orElse(null))
                 .qaCnt(faq.getQaCnt())
                 .createdAt(faq.getCreatedAt().toLocalDate())
                 .updatedAt(faq.getUpdatedAt().toLocalDate())
@@ -216,12 +234,13 @@ public class FaqService {
         log.info("FAQ 삭제 완료: faqId={}", faqId);
     }
 
-    // FAQ 변경 이력 조회, 전체 FAQ 대상 최신순 페이징
+    // FAQ 변경 이력 조회, 최신순 페이징
+    // faqId가 있으면 그 FAQ의 이력만 (삭제된 FAQ 포함, 없는 FAQ면 빈 목록)
     @Transactional(readOnly = true)
-    public FaqEditHistoryResponse getFaqHistory(int page, int size, EditType editType) {
+    public FaqEditHistoryResponse getFaqHistory(int page, int size, Long faqId, EditType editType) {
         PageRequest pageRequest = PageRequest.of(page, size,
                 Sort.by("createdAt").descending().and(Sort.by("historyId").descending()));
-        Page<FaqEditHistory> historyPage = faqEditHistoryRepository.search(editType, pageRequest);
+        Page<FaqEditHistory> historyPage = faqEditHistoryRepository.search(faqId, editType, pageRequest);
 
         List<FaqEditHistoryResponse.HistoryItem> items =
                 historyPage.getContent().stream()
@@ -473,6 +492,18 @@ public class FaqService {
     }
 
     // 빈 검색 조건은 미지정으로 취급
+    // 화면에 보일 카테고리 이름, 저장된 이름이 있으면 그대로 두고 없을 때만 마스터에서 찾는다
+    // 저장된 이름은 카테고리 코드가 바뀔 때만 마스터로 갱신한다는 규칙을 따른다
+    private String displayCategory(String stored, Integer qType, Map<Integer, String> masterNames) {
+        if (stored != null || qType == null) return stored;
+        return masterNames.get(qType);
+    }
+
+    private Map<Integer, String> categoryNamesByQType() {
+        return faqRepository.findLatestCategories().stream()
+                .collect(Collectors.toMap(FaqRepository.CategoryRow::getCode, FaqRepository.CategoryRow::getName));
+    }
+
     private String blankToNull(String value) {
         return (value == null || value.isBlank()) ? null : value.trim();
     }

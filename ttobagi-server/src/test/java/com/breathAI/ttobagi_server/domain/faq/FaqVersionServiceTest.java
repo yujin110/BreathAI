@@ -117,7 +117,7 @@ class FaqVersionServiceTest {
         assertEquals(204, mine.get(3).getQType());
 
         // 변경 이력 조회에 버전 번호가 붙는다
-        FaqEditHistoryResponse histories = faqService.getFaqHistory(0, 4, null);
+        FaqEditHistoryResponse histories = faqService.getFaqHistory(0, 4, null, null);
         assertTrue(histories.getHistories().stream().allMatch(h -> version.getVersionId().equals(h.getVersionId())));
     }
 
