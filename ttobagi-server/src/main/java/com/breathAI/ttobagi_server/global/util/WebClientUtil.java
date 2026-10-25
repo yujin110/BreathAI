@@ -38,6 +38,8 @@ public class WebClientUtil {
             Boolean isTranslationEnabled,
             String periodStartDate,
             String periodEndDate,
+            Integer minClusterSize,
+            Integer minSamples,
             Consumer<String> onFailure) {
         try {
             MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
@@ -47,6 +49,9 @@ public class WebClientUtil {
             body.add("isTranslationEnabled", isTranslationEnabled != null ? isTranslationEnabled.toString() : "false");
             body.add("periodStartDate", periodStartDate != null ? periodStartDate : "");
             body.add("periodEndDate", periodEndDate != null ? periodEndDate : "");
+            // 군집화 설정은 값이 있을 때만 보내고, 없으면 AI 서버 기본값을 쓴다
+            if (minClusterSize != null) body.add("minClusterSize", minClusterSize.toString());
+            if (minSamples != null) body.add("minSamples", minSamples.toString());
             body.add("file", new ByteArrayResource(fileBytes) {
                 @Override
                 public String getFilename() {

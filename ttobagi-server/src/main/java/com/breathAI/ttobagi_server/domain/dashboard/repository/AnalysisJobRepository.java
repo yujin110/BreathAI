@@ -1,5 +1,6 @@
 package com.breathAI.ttobagi_server.domain.dashboard.repository;
 
+import com.breathAI.ttobagi_server.domain.auth.entity.User;
 import com.breathAI.ttobagi_server.domain.dashboard.entity.AnalysisJob;
 import com.breathAI.ttobagi_server.domain.dashboard.entity.UploadFile;
 import com.breathAI.ttobagi_server.domain.dashboard.entity.AnalysisJob.Status;
@@ -41,6 +42,30 @@ public interface AnalysisJobRepository extends JpaRepository<AnalysisJob, Long> 
             @Param("status") Status status,
             @Param("startDate") LocalDate startDate,
         @Param("endDate") LocalDate endDate);
+
+    // 사용자가 이력에 남겨 둔 분석만 조회 (대시보드 scope=mine)
+    @EntityGraph(attributePaths = {"uploadFile"})
+    @Query("SELECT a FROM AnalysisJob a WHERE a.status = :status "
+        + "AND EXISTS (SELECT h FROM AnalysisHistory h WHERE h.analysisJob = a AND h.user = :user) "
+        + "ORDER BY a.finishedAt DESC")
+    List<AnalysisJob> findRequestedByStatus(
+            @Param("user") User user,
+            @Param("status") Status status,
+            Pageable pageable);
+
+    @EntityGraph(attributePaths = {"uploadFile"})
+    @Query("SELECT a FROM AnalysisJob a WHERE a.status = :status "
+        + "AND a.periodStartDate >= :startDate AND a.periodEndDate <= :endDate "
+        + "AND EXISTS (SELECT h FROM AnalysisHistory h WHERE h.analysisJob = a AND h.user = :user) "
+        + "ORDER BY a.finishedAt DESC")
+    List<AnalysisJob> findRequestedByStatusAndPeriod(
+            @Param("user") User user,
+            @Param("status") Status status,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
+    // 같은 업로드 기록으로 돌린 분석 전체, 최신순 (옵션별 기존 결과 찾기용)
+    List<AnalysisJob> findByUploadFileOrderByCreatedAtDesc(UploadFile uploadFile);
 
     Optional<AnalysisJob> findByAnalysisId(Long analysisId);
 

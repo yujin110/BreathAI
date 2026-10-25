@@ -11,6 +11,7 @@ import org.hibernate.annotations.DynamicInsert;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Objects;
 
 // 데이터 분석 작업 이력 및 상태
 @Entity
@@ -67,6 +68,13 @@ public class AnalysisJob {
     @ColumnDefault("0")
     private Boolean isTranslationEnabled;
 
+    // 군집화 설정, 비어 있으면 AI 서버 기본값을 썼다는 뜻이다
+    @Column(name = "min_cluster_size")
+    private Integer minClusterSize;
+
+    @Column(name = "min_samples")
+    private Integer minSamples;
+
     // AI가 보낸 업로드 파일별 요약값, 보내지 않은 예전 분석은 비어 있다
     @Column(name = "total_log_count")
     private Integer totalLogCount;
@@ -104,14 +112,29 @@ public class AnalysisJob {
     @Builder
     public AnalysisJob(UploadFile uploadFile, String fileName,
                        Boolean isMaskingEnabled, Boolean isTranslationEnabled,
-                       LocalDate periodStartDate, LocalDate periodEndDate) {
+                       LocalDate periodStartDate, LocalDate periodEndDate,
+                       Integer minClusterSize, Integer minSamples) {
         this.uploadFile = uploadFile;
         this.fileName = fileName;
         this.isMaskingEnabled = isMaskingEnabled != null ? isMaskingEnabled : false;
         this.isTranslationEnabled = isTranslationEnabled != null ? isTranslationEnabled : false;
         this.periodStartDate = periodStartDate;
         this.periodEndDate = periodEndDate;
+        this.minClusterSize = minClusterSize;
+        this.minSamples = minSamples;
         this.status = Status.PENDING;
+    }
+
+    // 결과에 영향을 주는 분석 옵션이 모두 같은지 확인, 같은 파일의 기존 결과를 재사용할 때 쓴다
+    public boolean hasSameOptions(LocalDate periodStartDate, LocalDate periodEndDate,
+                                  boolean isMaskingEnabled, boolean isTranslationEnabled,
+                                  Integer minClusterSize, Integer minSamples) {
+        return Objects.equals(this.periodStartDate, periodStartDate)
+                && Objects.equals(this.periodEndDate, periodEndDate)
+                && Boolean.TRUE.equals(this.isMaskingEnabled) == isMaskingEnabled
+                && Boolean.TRUE.equals(this.isTranslationEnabled) == isTranslationEnabled
+                && Objects.equals(this.minClusterSize, minClusterSize)
+                && Objects.equals(this.minSamples, minSamples);
     }
 
     // 전처리 단계 진입, 분석 시작 시각 기록

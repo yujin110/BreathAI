@@ -48,6 +48,10 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class DashboardService {
 
+    // AI 서버(/pipeline)가 받는 군집화 설정의 최솟값
+    private static final int MIN_CLUSTER_SIZE_LIMIT = 2;
+    private static final int MIN_SAMPLES_LIMIT = 1;
+
     private final UploadFileRepository uploadFileRepository;
     private final AnalysisJobRepository analysisJobRepository;
     private final UsageStatRepository usageStatRepository;
@@ -68,6 +72,7 @@ public class DashboardService {
     private final ObjectMapper objectMapper;
     private final SseEmitterManager sseEmitterManager;
     private final UploadArchiveService uploadArchiveService;
+    private final AnalysisHistoryRepository analysisHistoryRepository;
 
     // 월 단위 챗봇 사용량 조회, 전월 대비 증가율 포함
     @Transactional(readOnly = true)
@@ -106,17 +111,26 @@ public class DashboardService {
     }
 
     // 기간 내 완료된 분석을 합산해 조회, 기간 미지정 시 최신 분석 1건 사용
+    // mine은 내 이력에 남은 분석만, all은 이력 삭제와 관계없이 완료된 분석 전체를 쓴다
     @Transactional(readOnly = true)
-    public AnalyzeResultResponse getAnalyzeResult(LocalDate startDate, LocalDate endDate) {
+    public AnalyzeResultResponse getAnalyzeResult(LocalDate startDate, LocalDate endDate,
+                                                  HistoryScope scope, String email) {
+        User user = scope == HistoryScope.MINE ? findUser(email) : null;
         List<AnalysisJob> jobs;
 
         if (startDate != null && endDate != null) {
-                jobs = analysisJobRepository.findByStatusAndPeriod(
-                        AnalysisJob.Status.COMPLETED, startDate, endDate);
+                jobs = user != null
+                        ? analysisJobRepository.findRequestedByStatusAndPeriod(
+                                user, AnalysisJob.Status.COMPLETED, startDate, endDate)
+                        : analysisJobRepository.findByStatusAndPeriod(
+                                AnalysisJob.Status.COMPLETED, startDate, endDate);
                 if (jobs.isEmpty()) throw new CustomException(ErrorCode.ANALYSIS_NOT_FOUND);
         } else {
-                AnalysisJob latest = analysisJobRepository
-                        .findFirstByStatusOrderByFinishedAtDesc(AnalysisJob.Status.COMPLETED)
+                Optional<AnalysisJob> found = user != null
+                        ? analysisJobRepository.findRequestedByStatus(
+                                user, AnalysisJob.Status.COMPLETED, PageRequest.of(0, 1)).stream().findFirst()
+                        : analysisJobRepository.findFirstByStatusOrderByFinishedAtDesc(AnalysisJob.Status.COMPLETED);
+                AnalysisJob latest = found
                         .orElseThrow(() -> new CustomException(ErrorCode.ANALYSIS_NOT_FOUND));
                 jobs = List.of(latest);
                 startDate = latest.getPeriodStartDate();
@@ -377,7 +391,8 @@ public class DashboardService {
         }
 
     // 파일 업로드 후 AI 분석 파이프라인 시작
-    // 동일 해시 파일은 기존 결과를 반환하고, 이전 분석이 실패했으면 같은 업로드 기록으로 다시 분석한다
+    // 같은 파일을 같은 옵션으로 돌린 분석이 있으면 기존 결과를 반환하고, 없거나 실패했으면 같은 업로드 기록으로 새로 분석한다
+    // 어느 경우든 요청한 사람의 이력에 남긴다
     @Transactional
     public NewAnalyzeResponse uploadAndStartAnalysis(
             MultipartFile file,
@@ -385,10 +400,18 @@ public class DashboardService {
             String periodStartDate,
             String periodEndDate,
             boolean isMaskingEnabled,
-            boolean isTranslationEnabled) {
+            boolean isTranslationEnabled,
+            Integer minClusterSize,
+            Integer minSamples) {
 
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+
+        // AI 서버와 같은 범위로 미리 검사해, 분석이 시작된 뒤 거절되어 실패로 끝나지 않게 한다
+        if ((minClusterSize != null && minClusterSize < MIN_CLUSTER_SIZE_LIMIT)
+                || (minSamples != null && minSamples < MIN_SAMPLES_LIMIT)) {
+            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
+        }
 
         var pipelineFile = analysisUploadReader.read(file);
 
@@ -408,10 +431,15 @@ public class DashboardService {
         UploadFile uploadFile;
         Optional<UploadFile> existingUpload = uploadFileRepository.findByFileHash(fileHash);
         if (existingUpload.isPresent()) {
+                // 옵션이 같은 분석 중 가장 최근 것이 실패가 아니면 재사용한다
                 Optional<AnalysisJob> existingJob = analysisJobRepository
-                        .findFirstByUploadFileOrderByCreatedAtDesc(existingUpload.get());
+                        .findByUploadFileOrderByCreatedAtDesc(existingUpload.get()).stream()
+                        .filter(job -> job.hasSameOptions(parsedStartDate, parsedEndDate,
+                                isMaskingEnabled, isTranslationEnabled, minClusterSize, minSamples))
+                        .findFirst();
                 if (existingJob.isPresent() && existingJob.get().getStatus() != AnalysisJob.Status.FAIL) {
                 AnalysisJob job = existingJob.get();
+                recordHistory(user, job);
                 log.info("중복 파일 감지 - 기존 분석 결과 반환: analysisId={}", job.getAnalysisId());
                 return NewAnalyzeResponse.builder()
                         .analysisId(job.getAnalysisId())
@@ -424,7 +452,7 @@ public class DashboardService {
                 }
                 // 해시로 업로드 기록을 하나만 찾으므로, 새로 만들지 않고 기존 기록을 다시 쓴다
                 uploadFile = existingUpload.get();
-                log.info("이전 분석이 없거나 실패한 파일 재분석: uploadId={}", uploadFile.getUploadId());
+                log.info("같은 옵션의 분석이 없거나 실패한 파일 재분석: uploadId={}", uploadFile.getUploadId());
         } else {
             String newUploadId = UUID.randomUUID().toString();
             uploadFile = UploadFile.builder()
@@ -447,8 +475,11 @@ public class DashboardService {
                 .isTranslationEnabled(isTranslationEnabled)
                 .periodStartDate(parsedStartDate)
                 .periodEndDate(parsedEndDate)
+                .minClusterSize(minClusterSize)
+                .minSamples(minSamples)
                 .build();
         analysisJobRepository.save(analysisJob);
+        recordHistory(user, analysisJob);
         Long analysisId = analysisJob.getAnalysisId();
         // 실패 파일 재분석처럼 같은 업로드 기록을 다시 쓰는 경우 원본은 이미 보관돼 있다
         boolean alreadyArchived = uploadFile.getFilePath() != null && !uploadFile.getFilePath().isBlank();
@@ -466,6 +497,8 @@ public class DashboardService {
                         isTranslationEnabled,
                         periodStartDate != null ? periodStartDate : "",
                         periodEndDate != null ? periodEndDate : "",
+                        minClusterSize,
+                        minSamples,
                         reason -> markPipelineRequestFailed(analysisId, reason));
                 if (!alreadyArchived) {
                     // 변환 전 원본을 그대로 보관한다 (xlsx는 xlsx로)
@@ -532,28 +565,78 @@ public class DashboardService {
         return emitter;
     }
 
-    // 분석 이력 목록 조회, 최신순 페이징
+    // 분석 이력 목록 조회, 요청 시각 최신순 페이징
+    // mine은 내 이력만, all은 모든 사람의 이력이며 status를 주면 그 상태만 보여 준다
     @Transactional(readOnly = true)
-    public AnalyzeHistoryResponse getAnalysisHistory(int page, int size) {
+    public AnalyzeHistoryResponse getAnalysisHistory(int page, int size, HistoryScope scope,
+                                                     String status, String email) {
+        User user = findUser(email);
+        AnalysisJob.Status statusFilter = parseStatus(status);
         PageRequest pageRequest = PageRequest.of(page, size);
-        Page<AnalysisJob> jobPage = analysisJobRepository.findAllByOrderByCreatedAtDesc(pageRequest);
+        Page<AnalysisHistory> historyPage = scope == HistoryScope.MINE
+                ? analysisHistoryRepository.findMine(user, statusFilter, pageRequest)
+                : analysisHistoryRepository.findAllRequested(statusFilter, pageRequest);
 
-        List<AnalyzeHistoryResponse.HistoryItem> history = jobPage.getContent().stream()
-                .map(job -> AnalyzeHistoryResponse.HistoryItem.builder()
-                        .analysisId(job.getAnalysisId())
-                        .fileName(job.getFileName())
-                        .status(job.getStatus().name())
-                        .period(formatPeriod(job.getPeriodStartDate(), job.getPeriodEndDate()))
-                        .submittedAt(job.getCreatedAt())
-                        .build())
+        List<AnalyzeHistoryResponse.HistoryItem> history = historyPage.getContent().stream()
+                .map(h -> {
+                    AnalysisJob job = h.getAnalysisJob();
+                    return AnalyzeHistoryResponse.HistoryItem.builder()
+                            .analysisId(job.getAnalysisId())
+                            .fileName(job.getFileName())
+                            .status(job.getStatus().name())
+                            .period(formatPeriod(job.getPeriodStartDate(), job.getPeriodEndDate()))
+                            .submittedAt(job.getCreatedAt())
+                            .requestedBy(h.getUser().getEmail())
+                            .requestedAt(h.getRequestedAt())
+                            .isMine(h.getUser().getUserId().equals(user.getUserId()))
+                            .isMaskingEnabled(job.getIsMaskingEnabled())
+                            .isTranslationEnabled(job.getIsTranslationEnabled())
+                            .minClusterSize(job.getMinClusterSize())
+                            .minSamples(job.getMinSamples())
+                            .build();
+                })
                 .collect(Collectors.toList());
 
         return AnalyzeHistoryResponse.builder()
                 .history(history)
-                .totalCount(jobPage.getTotalElements())
-                .totalPages(jobPage.getTotalPages())
+                .totalCount(historyPage.getTotalElements())
+                .totalPages(historyPage.getTotalPages())
                 .currentPage(page)
                 .build();
+    }
+
+    // 내 이력에서 분석 하나를 지운다, 분석 데이터와 다른 사람의 이력은 그대로 둔다
+    @Transactional
+    public void deleteAnalysisHistory(Long analysisId, String email) {
+        User user = findUser(email);
+        AnalysisHistory history = analysisHistoryRepository.findByUserAndAnalysisJob_AnalysisId(user, analysisId)
+                .orElseThrow(() -> new CustomException(ErrorCode.ANALYSIS_NOT_FOUND));
+        analysisHistoryRepository.delete(history);
+    }
+
+    // 요청 이력 기록, 이미 있으면 요청 시각만 갱신한다
+    private void recordHistory(User user, AnalysisJob job) {
+        analysisHistoryRepository.findByUserAndAnalysisJob(user, job)
+                .ifPresentOrElse(
+                        AnalysisHistory::touch,
+                        () -> analysisHistoryRepository.save(AnalysisHistory.builder()
+                                .user(user)
+                                .analysisJob(job)
+                                .build()));
+    }
+
+    private User findUser(String email) {
+        return userRepository.findByEmail(email)
+                .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+    }
+
+    // 상태 필터 해석, 비어 있으면 전체이고 대소문자는 구분하지 않는다
+    private static AnalysisJob.Status parseStatus(String status) {
+        if (status == null || status.isBlank()) return null;
+        for (AnalysisJob.Status s : AnalysisJob.Status.values()) {
+            if (s.name().equalsIgnoreCase(status.trim())) return s;
+        }
+        throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
     }
 
     // AI 서버 콜백 수신, 진행 상태 갱신 또는 최종 분석 결과 적재
@@ -648,6 +731,13 @@ public class DashboardService {
         // 3. FAQ 후보 적재
         if (request.getFaqCandidates() != null) {
             for (AnalysisCallbackRequest.FaqCandidateResult candidateResult : request.getFaqCandidates()) {
+                // 질문이나 답변이 빈 후보는 검토할 수 없으므로 저장하지 않는다
+                if (isBlank(candidateResult.getStandardQuestion()) || isBlank(candidateResult.getAnswerDraft())) {
+                    log.warn("질문 또는 답변이 빈 FAQ 후보 제외: analysisId={}, clusterLabel={}",
+                            analysisId, candidateResult.getClusterLabel());
+                    continue;
+                }
+
                 Cluster relatedCluster = null;
                 if (candidateResult.getClusterLabel() != null) {
                     relatedCluster = clusterRepository
@@ -952,6 +1042,10 @@ public class DashboardService {
 
     private int zeroIfNull(Integer value) {
         return value != null ? value : 0;
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     // 분석 기간 표시, 기간이 없으면 null이고 한쪽만 있으면 그쪽만 쓴다

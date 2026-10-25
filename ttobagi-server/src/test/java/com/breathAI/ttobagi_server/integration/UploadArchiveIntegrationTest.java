@@ -67,7 +67,7 @@ class UploadArchiveIntegrationTest {
         String uploadId = upload(csv());
 
         verify(webClientUtil, timeout(5000)).sendPipeline(eq(uploadId), any(), any(), anyString(),
-                anyBoolean(), anyBoolean(), anyString(), anyString(), any());
+                anyBoolean(), anyBoolean(), anyString(), anyString(), any(), any(), any());
         verify(s3Client, timeout(5000)).putObject(any(PutObjectRequest.class), any(RequestBody.class));
         assertThat(uploadFileRepository.findByUploadId(uploadId).orElseThrow().getFilePath()).isEmpty();
     }
