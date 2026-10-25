@@ -35,5 +35,24 @@ public class AnalyzeHistoryResponse {
             timezone = "UTC"
         )
         private LocalDateTime submittedAt;
+
+        // 이 이력을 남긴 사람과 마지막 요청 시각, 같은 분석도 요청한 사람마다 한 줄씩 나온다
+        private String requestedBy;
+
+        @JsonFormat(
+            shape = JsonFormat.Shape.STRING,
+            pattern = "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            timezone = "UTC"
+        )
+        private LocalDateTime requestedAt;
+
+        // 내 이력인지, 삭제 버튼 표시용
+        private Boolean isMine;
+
+        // 분석 옵션, 군집화 값이 null이면 AI 서버 기본값을 썼다는 뜻이다
+        private Boolean isMaskingEnabled;
+        private Boolean isTranslationEnabled;
+        private Integer minClusterSize;
+        private Integer minSamples;
     }
 }

@@ -3,6 +3,7 @@ package com.breathAI.ttobagi_server.domain.dashboard;
 import com.breathAI.ttobagi_server.domain.auth.entity.User;
 import com.breathAI.ttobagi_server.domain.auth.repository.UserRepository;
 import com.breathAI.ttobagi_server.domain.dashboard.entity.UploadFile;
+import com.breathAI.ttobagi_server.domain.dashboard.repository.AnalysisHistoryRepository;
 import com.breathAI.ttobagi_server.domain.dashboard.repository.AnalysisJobRepository;
 import com.breathAI.ttobagi_server.domain.dashboard.repository.UploadFileRepository;
 import com.breathAI.ttobagi_server.domain.dashboard.service.AnalysisUploadReader;
@@ -38,6 +39,7 @@ class DashboardUploadTest {
     @Mock AnalysisJobRepository jobs;
     @Mock WebClientUtil client;
     @Mock UploadArchiveService archive;
+    @Mock AnalysisHistoryRepository histories;
     @Spy AnalysisUploadReader reader = new AnalysisUploadReader();
     @InjectMocks DashboardService service;
 
@@ -57,7 +59,7 @@ class DashboardUploadTest {
     void invalidUploadCreatesNoDatabaseRecordsOrAiRequest() {
         var file = new MockMultipartFile("file", "bad.xlsx", null, new byte[]{1});
         assertThrows(CustomException.class,
-                () -> service.uploadAndStartAnalysis(file, "admin@example.com", null, null, true, false));
+                () -> service.uploadAndStartAnalysis(file, "admin@example.com", null, null, true, false, null, null));
         verifyNoInteractions(uploads, jobs, client);
     }
 
@@ -73,7 +75,7 @@ class DashboardUploadTest {
         }
         when(uploads.findByFileHash(anyString())).thenReturn(Optional.empty());
         var file = new MockMultipartFile("file", "원본.xlsx", null, bytes);
-        var response = service.uploadAndStartAnalysis(file, "admin@example.com", "2026-01-01", "2026-01-31", false, true);
+        var response = service.uploadAndStartAnalysis(file, "admin@example.com", "2026-01-01", "2026-01-31", false, true, 3, 1);
         assertEquals("원본.xlsx", response.getFileName());
         var saved = ArgumentCaptor.forClass(UploadFile.class);
         verify(uploads).save(saved.capture());
@@ -82,7 +84,7 @@ class DashboardUploadTest {
         verifyNoInteractions(client);
         TransactionSynchronizationManager.getSynchronizations().forEach(sync -> sync.afterCommit());
         var sent = ArgumentCaptor.forClass(byte[].class);
-        verify(client).sendPipeline(anyString(), isNull(), sent.capture(), eq("원본.csv"), eq(false), eq(true), eq("2026-01-01"), eq("2026-01-31"), any());
+        verify(client).sendPipeline(anyString(), isNull(), sent.capture(), eq("원본.csv"), eq(false), eq(true), eq("2026-01-01"), eq("2026-01-31"), eq(3), eq(1), any());
         assertTrue(new String(sent.getValue(), StandardCharsets.UTF_8).contains("안녕하세요"));
         // 보관은 AI로 보낸 CSV가 아니라 변환 전 xlsx 원본으로 한다
         verify(archive).archive(anyString(), eq(bytes), eq("원본.xlsx"));

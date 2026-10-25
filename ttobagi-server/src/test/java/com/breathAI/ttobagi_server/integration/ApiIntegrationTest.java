@@ -157,7 +157,7 @@ class ApiIntegrationTest {
 
         ArgumentCaptor<byte[]> bytes = ArgumentCaptor.forClass(byte[].class);
         verify(webClientUtil, timeout(5000)).sendPipeline(anyString(), eq(analysisId), bytes.capture(), eq("data.csv"),
-                anyBoolean(), anyBoolean(), anyString(), anyString(), any());
+                anyBoolean(), anyBoolean(), anyString(), anyString(), any(), any(), any());
         assertThat(bytes.getValue()).isEqualTo(file.getBytes());
     }
 
@@ -168,7 +168,7 @@ class ApiIntegrationTest {
 
         ArgumentCaptor<byte[]> bytes = ArgumentCaptor.forClass(byte[].class);
         verify(webClientUtil, timeout(5000)).sendPipeline(anyString(), eq(analysisId), bytes.capture(), eq("data.csv"),
-                anyBoolean(), anyBoolean(), anyString(), anyString(), any());
+                anyBoolean(), anyBoolean(), anyString(), anyString(), any(), any(), any());
         assertThat(new String(bytes.getValue(), StandardCharsets.UTF_8)).startsWith("번호,질문,날짜");
     }
 
