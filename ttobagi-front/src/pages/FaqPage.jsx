@@ -61,6 +61,8 @@ export default function FaqPage() {
 
   const [loading, setLoading]       = useState(true);
   const [modal, setModal]           = useState(null);
+  // 특정 FAQ의 수정 이력 (GET /faq/history?faqId=)
+  const [faqHistory, setFaqHistory] = useState(null);
   const { user } = useAuth();
   const toast = useToast();
 
@@ -166,6 +168,19 @@ export default function FaqPage() {
     }
   };
 
+  // 이 FAQ의 수정 이력만 조회한다. 전체 "변경 이력" 탭은 그대로 둔다.
+  const openFaqHistory = async (faq) => {
+    setModal({ type: "faqHistory", data: faq });
+    setFaqHistory(null);
+    try {
+      const res = await faqApi.getHistory({ page: 0, size: 50, faqId: faq.faqId });
+      setFaqHistory(res.data?.histories || []);
+    } catch (err) {
+      setFaqHistory([]);
+      toast.error(err.message || "수정 이력을 불러오지 못했습니다.");
+    }
+  };
+
   const handleDelete = async (faqId) => {
     if (!confirm("이 FAQ를 삭제하시겠습니까?")) return;
     try {
@@ -266,12 +281,15 @@ export default function FaqPage() {
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, marginLeft: 16 }}>
                     {f.createdAt && <span style={S.meta}>{f.createdAt} 등록</span>}
-                    {isAdmin && (
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button style={S.btnSm} onClick={() => setModal({ type: "edit", data: f })}>수정</button>
-                        <button style={S.btnSmDanger} onClick={() => handleDelete(f.faqId)}>삭제</button>
-                      </div>
-                    )}
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button style={S.btnSm} onClick={() => openFaqHistory(f)}>이력</button>
+                      {isAdmin && (
+                        <>
+                          <button style={S.btnSm} onClick={() => setModal({ type: "edit", data: f })}>수정</button>
+                          <button style={S.btnSmDanger} onClick={() => handleDelete(f.faqId)}>삭제</button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -354,6 +372,50 @@ export default function FaqPage() {
 
 
       {/* ── 수정 모달 ── */}
+      {modal?.type === "faqHistory" && (
+        <div style={S.modalBg} onClick={() => setModal(null)}>
+          <div style={{ ...S.modal, maxWidth: 680 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalTitle}>이 FAQ의 수정 이력</div>
+            <div style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}>{modal.data.standardQuestion}</div>
+            <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 14 }}>#{modal.data.faqId}</div>
+
+            <div style={{ maxHeight: 420, overflowY: "auto" }}>
+              {faqHistory === null && <div style={{ fontSize: 12, color: "#9CA3AF" }}>불러오는 중...</div>}
+              {faqHistory?.length === 0 && (
+                <div style={{ fontSize: 12, color: "#9CA3AF" }}>이 FAQ의 수정 이력이 없습니다.</div>
+              )}
+              {faqHistory?.map((h) => (
+                <div key={h.historyId} style={S.historyItem}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <EditTypeTag editType={h.editType} />
+                    <span style={{ fontSize: 11, color: "#9CA3AF" }}>
+                      {h.editedBy} · {h.createdAt}
+                    </span>
+                  </div>
+                  {h.editReason && (
+                    <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 6 }}>사유: {h.editReason}</div>
+                  )}
+                  {h.beforeQuestion && h.beforeQuestion !== h.afterQuestion && (
+                    <div style={S.diffRow}>
+                      <span style={S.diffBefore}>{h.beforeQuestion}</span>
+                      <span style={{ color: "#9CA3AF" }}>→</span>
+                      <span style={S.diffAfter}>{h.afterQuestion}</span>
+                    </div>
+                  )}
+                  <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.6 }}>
+                    {toPlainText(h.afterAnswer)}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={S.modalActions}>
+              <button style={S.btnSm} onClick={() => setModal(null)}>닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {modal?.type === "edit" && (
         <div style={S.modalBg} onClick={() => setModal(null)}>
           <div style={S.modal} onClick={(e) => e.stopPropagation()}>
@@ -413,6 +475,10 @@ function EditFaqForm({ faq, onSave, onClose }) {
 }
 
 const S = {
+  historyItem: { padding: "12px 0", borderBottom: "1px solid #F3F4F6" },
+  diffRow:     { display: "flex", alignItems: "center", gap: 8, fontSize: 12, marginBottom: 6, flexWrap: "wrap" },
+  diffBefore:  { color: "#B91C1C", textDecoration: "line-through" },
+  diffAfter:   { color: "#065F46", fontWeight: 500 },
   page:        { padding: 28 },
   pageTitle:   { fontSize: 20, fontWeight: 700, color: "#111827", marginBottom: 4 },
   pageSub:     { fontSize: 13, color: "#6B7280", marginBottom: 20 },

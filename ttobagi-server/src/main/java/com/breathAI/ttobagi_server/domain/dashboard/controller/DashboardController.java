@@ -40,13 +40,16 @@ public class DashboardController {
     }
 
     // 기간 기반 분석 결과 조회, 기간 미지정 시 최신 분석 반환
+    // scope=mine(기본)은 내 이력의 분석만, all은 완료된 분석 전체
     @GetMapping("/analyze/result")
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
     public ResponseEntity<ApiResponse<AnalyzeResultResponse>> getAnalyzeResult(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(defaultValue = "mine") String scope,
+            @AuthenticationPrincipal String email) {
         return ResponseEntity.ok(ApiResponse.success(
-                dashboardService.getAnalyzeResult(startDate, endDate),
+                dashboardService.getAnalyzeResult(startDate, endDate, HistoryScope.from(scope), email),
                 "대시보드 분석 데이터 조회가 완료되었습니다."));
     }
 
@@ -70,9 +73,12 @@ public class DashboardController {
             @RequestParam(value = "periodEndDate", required = false) String periodEndDate,
             @RequestParam(value = "isMaskingEnabled", defaultValue = "true") boolean isMaskingEnabled,
             @RequestParam(value = "isTranslationEnabled", defaultValue = "false") boolean isTranslationEnabled,
+            @RequestParam(value = "minClusterSize", required = false) Integer minClusterSize,
+            @RequestParam(value = "minSamples", required = false) Integer minSamples,
             @AuthenticationPrincipal String email) {
         return ResponseEntity.ok(ApiResponse.success(
-                dashboardService.uploadAndStartAnalysis(file, email, periodStartDate, periodEndDate, isMaskingEnabled, isTranslationEnabled),
+                dashboardService.uploadAndStartAnalysis(file, email, periodStartDate, periodEndDate,
+                        isMaskingEnabled, isTranslationEnabled, minClusterSize, minSamples),
                 "분석 파이프라인이 성공적으로 시작되었습니다."));
     }
 
@@ -86,15 +92,29 @@ public class DashboardController {
                 "현재 분석 진행 상태를 조회합니다."));
     }
 
-    // 분석 이력 목록 조회
+    // 분석 이력 목록 조회, scope=mine(기본)은 내 이력만, all은 모든 사람의 이력
+    // status를 주면 그 상태의 분석만 보여 준다 (예: COMPLETED)
     @GetMapping("/analyze/history")
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
     public ResponseEntity<ApiResponse<AnalyzeHistoryResponse>> getAnalysisHistory(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "mine") String scope,
+            @RequestParam(required = false) String status,
+            @AuthenticationPrincipal String email) {
         return ResponseEntity.ok(ApiResponse.success(
-                dashboardService.getAnalysisHistory(page, size),
+                dashboardService.getAnalysisHistory(page, size, HistoryScope.from(scope), status, email),
                 "분석 이력 목록 조회가 완료되었습니다."));
+    }
+
+    // 내 분석 이력 삭제, 분석 결과와 반영된 FAQ는 그대로 남는다
+    @DeleteMapping("/analyze/history/{analysisId}")
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> deleteAnalysisHistory(
+            @PathVariable Long analysisId,
+            @AuthenticationPrincipal String email) {
+        dashboardService.deleteAnalysisHistory(analysisId, email);
+        return ResponseEntity.ok(ApiResponse.success(null, "분석 이력이 삭제되었습니다."));
     }
 
     // AI 서버 분석 콜백 수신
