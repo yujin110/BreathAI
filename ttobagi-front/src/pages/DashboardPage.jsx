@@ -9,13 +9,31 @@ export default function DashboardPage() {
   // scope=mine(기본)은 내 이력에 남은 완료 분석, all은 완료된 분석 전체
   const [scope, setScope]       = useState("mine");
   const [notFound, setNotFound] = useState(false);
+  // 분석 선택: ""(최신)이면 /analyze/result, 분석 ID면 /analyze/{id}/result 를 쓴다.
+  // 두 응답은 최상위 12개 필드가 같아 화면 코드를 그대로 쓸 수 있다.
+  const [picked, setPicked]     = useState("");
+  const [options, setOptions]   = useState([]);
   const toast = useToast();
 
-  const load = useCallback(async (nextScope) => {
+  // 선택지는 해당 scope 의 완료된 분석 목록으로 만든다
+  const loadOptions = useCallback(async (nextScope) => {
+    try {
+      const res = await dashApi.getAnalysisHistory({
+        page: 0, size: 50, scope: nextScope, status: "COMPLETED",
+      });
+      setOptions(res.data?.history || []);
+    } catch {
+      setOptions([]); // 목록을 못 받아도 "최신"으로는 계속 볼 수 있다
+    }
+  }, []);
+
+  const load = useCallback(async (nextScope, analysisId) => {
     setLoading(true);
     setNotFound(false);
     try {
-      const res = await dashApi.getAnalyzeResult({ scope: nextScope });
+      const res = analysisId
+        ? await dashApi.getFileAnalyzeResult(analysisId)
+        : await dashApi.getAnalyzeResult({ scope: nextScope });
       setAnalyze(res.data || null);
     } catch (err) {
       setAnalyze(null);
@@ -28,10 +46,27 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // scope 를 바꾸면 선택을 "최신"으로 되돌린다. 다른 scope 의 분석 ID가 남으면 혼란스럽다.
+  const changeScope = (next) => {
+    setScope(next);
+    setPicked("");
+    load(next, null);
+    loadOptions(next);
+  };
+
+  const changePicked = (next) => {
+    setPicked(next);
+    load(scope, next || null);
+  };
+
   useEffect(() => {
     // 비동기 콜백 안에서 상태를 바꿔야 set-state-in-effect 규칙에 걸리지 않는다
     let cancelled = false;
-    (async () => { if (!cancelled) await load("mine"); })();
+    (async () => {
+      if (cancelled) return;
+      await load("mine", null);
+      if (!cancelled) loadOptions("mine");
+    })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -76,14 +111,26 @@ export default function DashboardPage() {
   return (
     <div style={S.page}>
       <div style={S.pageTitle}>대시보드</div>
-      <div style={S.pageSub}>또타24 챗봇 응답 현황을 확인합니다.</div>
+      <div style={S.pageSub}>
+        또타24 챗봇 응답 현황을 확인합니다.
+        {analyze?.fileName && <> · 분석 <strong>#{analyze.analysisId}</strong> {analyze.fileName}</>}
+      </div>
 
       <div style={S.scopeRow}>
+        <select style={S.pickerSelect} value={picked}
+          onChange={(e) => changePicked(e.target.value)}>
+          <option value="">최신 분석</option>
+          {options.map((o) => (
+            <option key={o.analysisId} value={o.analysisId}>
+              #{o.analysisId} · {o.fileName}{o.period ? ` · ${o.period}` : ""}
+            </option>
+          ))}
+        </select>
         <div style={S.segment}>
-          {[{ key: "mine", label: "내 것" }, { key: "all", label: "전체" }].map((t) => (
+          {[{ key: "mine", label: "내 분석" }, { key: "all", label: "전체 분석" }].map((t) => (
             <button key={t.key}
               style={{ ...S.segmentBtn, ...(scope === t.key ? S.segmentBtnOn : {}) }}
-              onClick={() => { setScope(t.key); load(t.key); }}>
+              onClick={() => changeScope(t.key)}>
               {t.label}
             </button>
           ))}
@@ -93,7 +140,7 @@ export default function DashboardPage() {
       {!analyze && (
         <div style={S.notice}>
           {notFound && scope === "mine"
-            ? <>아직 완료된 내 분석이 없습니다. <strong>전체</strong>를 눌러 보세요.</>
+            ? <>아직 완료된 내 분석이 없습니다. <strong>전체 분석</strong>을 눌러 보세요.</>
             : notFound
               ? "분석 결과가 없습니다."
               : <>아직 분석 결과가 없습니다. <strong>신규 데이터 분석</strong>에서 로그를 업로드하면 이곳에 응답 현황이 표시됩니다.</>}
@@ -235,7 +282,8 @@ const S = {
   cardHeader: { padding: "14px 20px", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "space-between" },
   cardTitle:  { fontSize: 14, fontWeight: 600, color: "#111827" },
   newTag:     { fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#DBEAFE", color: "#1E40AF", border: "1px solid #BFDBFE" },
-  scopeRow:    { display: "flex", justifyContent: "flex-end", marginBottom: 12 },
+  scopeRow:    { display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" },
+  pickerSelect:{ maxWidth: 420, padding: "6px 10px", fontSize: 12, border: "1px solid #E5E7EB", borderRadius: 8, background: "#fff", color: "#374151", cursor: "pointer" },
   segment:     { display: "flex", border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" },
   segmentBtn:  { padding: "5px 14px", fontSize: 12, background: "#fff", border: "none", cursor: "pointer", color: "#6B7280" },
   segmentBtnOn:{ background: "#1565C0", color: "#fff", fontWeight: 600 },

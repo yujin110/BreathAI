@@ -403,8 +403,7 @@ export default function AnalyzePage() {
         periodStartDate: options.periodStartDate,
         periodEndDate: options.periodEndDate,
         isMaskingEnabled: options.isMaskingEnabled,
-        // 외국어 번역은 화면에서 막아 둔 상태라 항상 false로 보낸다
-        isTranslationEnabled: false,
+        isTranslationEnabled: options.isTranslationEnabled,
         clustering: {
           minClusterSize: options.minClusterSize,
           minSamples: options.minSamples,
@@ -568,14 +567,13 @@ export default function AnalyzePage() {
                           onChange={setOption("isMaskingEnabled")} />
                         개인정보 마스킹
                       </label>
-                      {/* 외국어 번역은 당분간 선택하지 못하게 막아 둔다.
-                          되살릴 때는 disabled와 S.checkLabelDisabled, 아래 안내 문구를 지운다. */}
-                      <label style={{ ...S.checkLabel, ...S.checkLabelDisabled }}
-                        title="외국어 번역은 현재 사용할 수 없습니다.">
-                        <input type="checkbox" disabled checked={false} readOnly
-                          style={{ cursor: "not-allowed" }} />
+                      {/* AI preprocess.translate_to_ko 가 외국어 질의를 한국어로 번역한다.
+                          백엔드는 isTranslationEnabled 를 그대로 AI로 전달한다. */}
+                      <label style={S.checkLabel}
+                        title="외국어 질의를 한국어로 번역한 뒤 분석합니다.">
+                        <input type="checkbox" checked={options.isTranslationEnabled}
+                          onChange={setOption("isTranslationEnabled")} />
                         외국어 번역
-                        <span style={S.pendingTag}>준비 중</span>
                       </label>
                     </div>
                   </div>
@@ -687,9 +685,9 @@ export default function AnalyzePage() {
             </div>
 
             <div style={S.historyFilters}>
-              {/* scope=mine 이 기본. 전체 보기는 다른 사람의 이력까지 본다. */}
+              {/* scope=mine 이 기본. 전체 분석은 다른 사람이 올린 분석까지 본다. */}
               <div style={S.segment}>
-                {[{ key: "mine", label: "내 이력" }, { key: "all", label: "전체 보기" }].map((t) => (
+                {[{ key: "mine", label: "내 분석" }, { key: "all", label: "전체 분석" }].map((t) => (
                   <button key={t.key}
                     style={{ ...S.segmentBtn, ...(historyScope === t.key ? S.segmentBtnOn : {}) }}
                     onClick={() => { setHistoryScope(t.key); loadHistory(0, t.key, onlyCompleted); }}>
@@ -710,7 +708,7 @@ export default function AnalyzePage() {
               {!historyLoading && history.length === 0 && (
                 <div style={S.historyEmpty}>
                   {historyScope === "mine"
-                    ? "아직 요청한 분석이 없습니다. 전체 보기를 누르면 다른 사람의 분석을 볼 수 있습니다."
+                    ? "아직 요청한 분석이 없습니다. 전체 분석을 누르면 다른 사람의 분석을 볼 수 있습니다."
                     : "분석 이력이 없습니다."}
                 </div>
               )}
@@ -958,7 +956,6 @@ const S = {
   optionLabel: { fontSize: 12, color: "#6B7280", display: "flex", alignItems: "center", gap: 6 },
   optionInput: { height: 32, padding: "0 10px", border: "1px solid #D1D5DB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", width: 132 },
   checkLabel:  { fontSize: 12, color: "#374151", display: "flex", alignItems: "center", gap: 5, cursor: "pointer" },
-  checkLabelDisabled: { color: "#9CA3AF", cursor: "not-allowed" },
   pendingTag:  { fontSize: 9, fontWeight: 600, padding: "1px 6px", borderRadius: 8, background: "#FEF3C7", color: "#92400E", border: "1px solid #FDE68A" },
   dropzoneDrag:{ borderColor: "#1565C0", background: "#EFF8FF" },
   dropzoneDisabled: { opacity: 0.5, cursor: "not-allowed", background: "#F9FAFB" },
