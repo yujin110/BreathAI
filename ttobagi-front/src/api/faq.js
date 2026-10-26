@@ -35,8 +35,9 @@ export const faqApi = {
   // GET /api/v1/faq/history?page=0&size=10&editType=MANUAL
   // FAQ 단건이 아니라 전역 변경 이력이다. 서버가 faqId 필터를 받지 않으므로
   // 특정 FAQ의 이력만 뽑아낼 수는 없고, 목록의 각 행이 faqId를 들고 있다.
-  getHistory: ({ page = 0, size = 10, editType } = {}) =>
-    request("GET", `/api/v1/faq/history${toQueryString({ page, size, editType })}`),
+  // faqId를 주면 그 FAQ의 수정 이력만, 없으면 전체 이력
+  getHistory: ({ page = 0, size = 10, editType, faqId } = {}) =>
+    request("GET", `/api/v1/faq/history${toQueryString({ page, size, editType, faqId })}`),
 
   // GET /api/v1/faq/versions?page=0&size=10
   getVersions: (page = 0, size = 10) => request("GET", `/api/v1/faq/versions?page=${page}&size=${size}`),
@@ -45,9 +46,8 @@ export const faqApi = {
   getVersionDetail: (versionId) => request("GET", `/api/v1/faq/versions/${versionId}`),
 
   // GET /api/v1/faq/categories
-  // 카테고리 필터 선택지. 아직 명세서·백엔드에 없고 docs/backend-api-requests.md 로
-  // 요청해 둔 상태라, 호출부(FaqPage)는 실패하면 문자열 입력으로 떨어지게 되어 있다.
-  // 구현되면 프론트 수정 없이 드롭다운으로 바뀐다.
+  // 카테고리 필터 선택지. 응답은 { categories: [{ qType, name }] }.
+  // 호출부(FaqPage)는 실패하면 문자열 입력으로 떨어진다.
   getCategories: () => request("GET", "/api/v1/faq/categories"),
 
   // GET /api/v1/faq/download?versionId=

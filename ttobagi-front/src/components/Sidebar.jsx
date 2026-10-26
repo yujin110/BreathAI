@@ -42,7 +42,7 @@ const S = {
   logoText:    { fontSize: 14, fontWeight: 700, color: "#fff" },
   logoSub:     { fontSize: 10, color: "rgba(255,255,255,.5)" },
   section:     { fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,.4)", letterSpacing: ".08em", textTransform: "uppercase", padding: "16px 20px 6px" },
-  navItem:     { display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", fontSize: 13, color: "rgba(255,255,255,.7)", cursor: "pointer", borderLeft: "3px solid transparent", transition: "all .15s", textDecoration: "none" },
+  navItem:     { display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", fontSize: 13, color: "rgba(255,255,255,.7)", cursor: "pointer", borderLeftWidth: 3, borderLeftStyle: "solid", borderLeftColor: "transparent", transition: "all .15s", textDecoration: "none" },
   navActive:   { background: "rgba(255,255,255,.1)", color: "#fff", borderLeftColor: "#64B5F6" },
   footer:      { padding: "14px 20px", borderTop: "1px solid rgba(255,255,255,.1)", fontSize: 11, color: "rgba(255,255,255,.3)" },
 };

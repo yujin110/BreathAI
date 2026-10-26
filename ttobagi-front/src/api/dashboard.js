@@ -1,5 +1,14 @@
 import { request, getStoredTokens, BASE_URL } from "./client.js";
 
+function toQueryString(params) {
+  const usp = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") usp.set(key, value);
+  });
+  const qs = usp.toString();
+  return qs ? `?${qs}` : "";
+}
+
 export const dashApi = {
   // GET /api/v1/dashboard/usage?year=2026&month=4
   // 월 단위 챗봇 사용량(UsageResponse: totalUsageCount, increaseRate, dailyUsage).
@@ -10,8 +19,8 @@ export const dashApi = {
   // POST /api/v1/dashboard/analyze/upload (업로드 + 분석 통합)
   // 기간은 백엔드가 LocalDate.parse()로 포맷터 없이 파싱하므로 ISO(yyyy-MM-dd)여야 하고,
   // 빈 문자열을 보내면 parse("")가 터져 500이 되므로 미입력 항목은 아예 append하지 않는다.
-  // clustering* 파라미터는 아직 백엔드 uploadAndStartAnalysis가 받지 않아 무시된다
-  // (docs/backend-api-requests.md 참고) — 백엔드가 추가되면 그대로 전달된다.
+  // 군집화 설정(minClusterSize >= 2, minSamples >= 1)은 백엔드가 그대로 AI로 전달한다.
+  // 범위를 벗어나면 백엔드가 400(INVALID_INPUT_VALUE)을 낸다. 빈 값은 보내지 않는다.
   uploadAndAnalyze: (file, opts = {}) => {
     const { periodStartDate, periodEndDate, isMaskingEnabled, isTranslationEnabled, clustering } = opts;
 
@@ -37,16 +46,20 @@ export const dashApi = {
   // GET /api/v1/dashboard/analyze/result?startDate=yyyy-MM-dd&endDate=yyyy-MM-dd
   // 날짜는 @DateTimeFormat(iso = ISO.DATE)로 파싱되므로 ISO 형식(2026-04-01)이어야 한다.
   // 미지정(기간 없음) 시 최신 분석을 반환하도록 백엔드가 처리하므로, 빈 값은 아예 쿼리에서 뺀다.
-  getAnalyzeResult: (startDate, endDate) => {
-    const params = new URLSearchParams();
-    if (startDate) params.set("startDate", startDate);
-    if (endDate) params.set("endDate", endDate);
-    const qs = params.toString();
-    return request("GET", `/api/v1/dashboard/analyze/result${qs ? `?${qs}` : ""}`);
-  },
+  // scope 기본값은 mine(내 이력에 남은 완료 분석). all이면 완료된 분석 전체.
+  getAnalyzeResult: ({ startDate, endDate, scope } = {}) =>
+    request("GET", `/api/v1/dashboard/analyze/result${toQueryString({ startDate, endDate, scope })}`),
 
-  // GET /api/v1/dashboard/analyze/history
-  getAnalysisHistory: (page = 0, size = 10) => request("GET", `/api/v1/dashboard/analyze/history?page=${page}&size=${size}`),
+  // GET /api/v1/dashboard/analyze/history?page=&size=&scope=mine|all&status=
+  // scope 기본값은 mine(내 이력). all이면 모든 사람의 이력을 본다.
+  // status를 주면 그 상태만 (예: COMPLETED). 토큰으로 사용자를 식별하므로 별도 파라미터는 없다.
+  getAnalysisHistory: ({ page = 0, size = 10, scope, status } = {}) =>
+    request("GET", `/api/v1/dashboard/analyze/history${toQueryString({ page, size, scope, status })}`),
+
+  // DELETE /api/v1/dashboard/analyze/history/{analysisId}
+  // 내 이력에서만 지운다. 분석 결과·후보·반영된 FAQ는 그대로 남고, 남의 줄은 404가 된다.
+  deleteAnalysisHistory: (analysisId) =>
+    request("DELETE", `/api/v1/dashboard/analyze/history/${analysisId}`),
 
   // GET /api/v1/dashboard/analyze/stream/{analysisId} (SSE)
   // 이 백엔드의 JwtAuthenticationFilter는 Authorization 헤더만 읽고 쿼리 파라미터 토큰은
