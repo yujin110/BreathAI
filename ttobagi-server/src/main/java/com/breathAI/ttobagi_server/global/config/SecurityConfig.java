@@ -1,5 +1,6 @@
 package com.breathAI.ttobagi_server.global.config;
 
+import com.breathAI.ttobagi_server.global.security.AuditLogFilter;
 import com.breathAI.ttobagi_server.global.security.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,6 +36,7 @@ public class SecurityConfig {
     private List<String> allowedOrigins;
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final AuditLogFilter auditLogFilter;
 
     // 비밀번호 단방향 암호화 인코더
     @Bean
@@ -82,6 +84,7 @@ public class SecurityConfig {
                 // 로그인 전에 쓰는 인증 API만 연다 (내 정보·탈퇴·승격은 로그인 필요)
                 .requestMatchers(HttpMethod.POST,
                         "/api/v1/auth/signup",
+                        "/api/v1/auth/signup/code",
                         "/api/v1/auth/login",
                         "/api/v1/auth/logout",
                         "/api/v1/auth/reissue",
@@ -96,7 +99,9 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.DELETE, "/api/v1/faq/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )
-            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+            // 토큰의 사용자를 알 수 있고 401·403으로 막힌 요청도 남도록 JWT 필터 바로 뒤에 둔다
+            .addFilterAfter(auditLogFilter, JwtAuthenticationFilter.class);
 
         return http.build();
     }

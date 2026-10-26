@@ -58,6 +58,7 @@ public class DashboardService {
     private final UserRepository userRepository;
     private final WebClientUtil webClientUtil;
     private final AnalysisUploadReader analysisUploadReader;
+    private final AnalysisUploadValidator analysisUploadValidator;
     private final ClusterRepository clusterRepository;
     private final ClusterLogMapRepository clusterLogMapRepository;
     private final FaqCandidateRepository faqCandidateRepository;
@@ -414,6 +415,8 @@ public class DashboardService {
         }
 
         var pipelineFile = analysisUploadReader.read(file);
+        // AI가 거절할 내용을 미리 찾아 행별로 알려 준다 (분석 기록을 만들기 전)
+        analysisUploadValidator.validate(pipelineFile);
 
         // 요청이 끝나면 업로드 임시 파일이 지워질 수 있어, AI 전송용 내용을 여기서 미리 읽는다
         byte[] fileBytes;

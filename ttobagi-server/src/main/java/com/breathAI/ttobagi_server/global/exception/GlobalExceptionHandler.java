@@ -1,5 +1,6 @@
 package com.breathAI.ttobagi_server.global.exception;
 
+import com.breathAI.ttobagi_server.domain.dashboard.dto.UploadErrorResponse;
 import com.breathAI.ttobagi_server.global.dto.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -40,6 +41,17 @@ public class GlobalExceptionHandler {
                 .status(errorCode.getStatus())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.error(errorCode));
+    }
+
+    // 업로드 파일 내용 오류 처리, data에 행별 오류 목록을 담는다
+    @ExceptionHandler(UploadValidationException.class)
+    public ResponseEntity<ApiResponse<UploadErrorResponse>> handleUploadValidation(UploadValidationException ex) {
+        ErrorCode errorCode = ex.getErrorCode();
+        log.warn("업로드 파일 내용 오류: {}건", ex.getReport().getTotalErrors());
+        return ResponseEntity
+                .status(errorCode.getStatus())
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new ApiResponse<>(false, errorCode.getMessage(), ex.getReport(), errorCode.getStatus()));
     }
 
     // @Valid 검증 실패 처리 (필드별 사유 반환)

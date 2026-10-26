@@ -146,9 +146,7 @@ class FaqCategoryHistoryIntegrationTest {
     }
 
     private String token(String email, String adminCode) throws Exception {
-        String code = adminCode == null ? "" : ",\"adminCode\":\"" + adminCode + "\"";
-        mvc.perform(withJson(post("/api/v1/auth/signup"), "{\"email\":\"" + email + "\",\"password\":\"" + PASSWORD + "\"" + code + "}"))
-                .andExpect(status().isCreated());
+        TestSignup.signup(mvc, emailService, email, PASSWORD, adminCode);
         String login = body(mvc.perform(withJson(post("/api/v1/auth/login"),
                         "{\"email\":\"" + email + "\",\"password\":\"" + PASSWORD + "\"}"))
                 .andExpect(status().isOk()).andReturn());

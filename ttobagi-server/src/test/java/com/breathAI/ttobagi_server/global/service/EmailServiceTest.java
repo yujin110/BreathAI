@@ -51,6 +51,30 @@ class EmailServiceTest {
         assertEquals(6, html.split("</div></td>", -1).length - 1);
     }
 
+    @Test
+    @DisplayName("가입 인증 메일은 재설정 메일과 같은 양식에 가입 안내 문구를 담는다")
+    void signupMailUsesSameLayout() throws Exception {
+        JavaMailSender sender = mock(JavaMailSender.class);
+        when(sender.createMimeMessage()).thenReturn(new MimeMessage(Session.getInstance(new Properties())));
+        EmailService emailService = new EmailService(sender);
+        ReflectionTestUtils.setField(emailService, "fromEmail", "sender@example.com");
+
+        emailService.sendSignupCodeEmail("new@seoulmetro.co.kr", "Qw3rT7");
+
+        ArgumentCaptor<MimeMessage> sent = ArgumentCaptor.forClass(MimeMessage.class);
+        verify(sender).send(sent.capture());
+        MimeMessage message = sent.getValue();
+        message.saveChanges();
+        assertEquals("[또타24 현행화 시스템] 회원가입 인증 코드 안내입니다.", message.getSubject());
+
+        Map<String, String> bodies = new HashMap<>();
+        collectBodies(message, bodies);
+        assertTrue(bodies.get("text/plain").contains("인증 코드: Qw3rT7"), bodies.get("text/plain"));
+        String html = bodies.get("text/html");
+        assertTrue(html.contains("회원가입 인증 코드"));
+        assertEquals(6, html.split("</div></td>", -1).length - 1);
+    }
+
     private void collectBodies(Part part, Map<String, String> bodies) throws Exception {
         Object content = part.getContent();
         if (content instanceof Multipart multipart) {

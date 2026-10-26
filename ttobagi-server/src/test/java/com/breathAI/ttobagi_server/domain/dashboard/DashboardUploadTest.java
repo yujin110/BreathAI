@@ -7,6 +7,7 @@ import com.breathAI.ttobagi_server.domain.dashboard.repository.AnalysisHistoryRe
 import com.breathAI.ttobagi_server.domain.dashboard.repository.AnalysisJobRepository;
 import com.breathAI.ttobagi_server.domain.dashboard.repository.UploadFileRepository;
 import com.breathAI.ttobagi_server.domain.dashboard.service.AnalysisUploadReader;
+import com.breathAI.ttobagi_server.domain.dashboard.service.AnalysisUploadValidator;
 import com.breathAI.ttobagi_server.domain.dashboard.service.DashboardService;
 import com.breathAI.ttobagi_server.domain.dashboard.service.UploadArchiveService;
 import com.breathAI.ttobagi_server.global.exception.CustomException;
@@ -41,6 +42,7 @@ class DashboardUploadTest {
     @Mock UploadArchiveService archive;
     @Mock AnalysisHistoryRepository histories;
     @Spy AnalysisUploadReader reader = new AnalysisUploadReader();
+    @Spy AnalysisUploadValidator validator = new AnalysisUploadValidator();
     @InjectMocks DashboardService service;
 
     @BeforeEach
@@ -68,8 +70,14 @@ class DashboardUploadTest {
         byte[] bytes;
         try (var workbook = new XSSFWorkbook(); var output = new ByteArrayOutputStream()) {
             var sheet = workbook.createSheet();
-            sheet.createRow(0).createCell(0).setCellValue("질문");
-            sheet.createRow(1).createCell(0).setCellValue("안녕하세요");
+            var header = sheet.createRow(0);
+            header.createCell(0).setCellValue("번호");
+            header.createCell(1).setCellValue("질문");
+            header.createCell(2).setCellValue("날짜");
+            var row = sheet.createRow(1);
+            row.createCell(0).setCellValue(1);
+            row.createCell(1).setCellValue("안녕하세요");
+            row.createCell(2).setCellValue("2026-01-02");
             workbook.write(output);
             bytes = output.toByteArray();
         }

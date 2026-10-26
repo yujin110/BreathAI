@@ -13,6 +13,7 @@ public enum ErrorCode {
     INVALID_INPUT_VALUE(400, "G-001", "입력값이 올바르지 않습니다."),
     INVALID_UPLOAD_FILE(400, "D-004", "비어 있거나 읽을 수 없는 파일입니다."),
     UNSUPPORTED_UPLOAD_FORMAT(400, "D-005", "CSV 또는 XLSX 파일만 업로드할 수 있습니다."),
+    INVALID_UPLOAD_ROWS(400, "D-006", "파일 내용에 오류가 있습니다. 오류 목록을 확인해 주세요."),
     ALREADY_USED_TOKEN(400, "G-002", "이미 사용되었거나 만료된 토큰입니다."),
     INVALID_RESET_CODE(400, "A-008", "인증 코드가 일치하지 않습니다."),
     EXPIRED_RESET_CODE(400, "A-009", "인증 코드가 만료되었습니다. 코드를 다시 발급받아 주세요."),
@@ -47,6 +48,7 @@ public enum ErrorCode {
 
     // 429 TOO MANY REQUESTS: 시도 횟수 초과
     RESET_CODE_ATTEMPTS_EXCEEDED(429, "A-010", "인증 코드 입력 횟수를 초과했습니다. 코드를 다시 발급받아 주세요."),
+    SIGNUP_CODE_REQUEST_TOO_SOON(429, "A-011", "인증 코드는 1분에 한 번만 받을 수 있습니다. 잠시 후 다시 시도해 주세요."),
 
     // 500 INTERNAL SERVER ERROR: 서버 에러
     INTERNAL_SERVER_ERROR(500, "S-001", "서버 내부 오류가 발생했습니다."),
