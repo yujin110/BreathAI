@@ -1,6 +1,7 @@
 package com.breathAI.ttobagi_server.integration;
 
 import com.breathAI.ttobagi_server.domain.dashboard.repository.UploadFileRepository;
+import com.breathAI.ttobagi_server.global.service.EmailService;
 import com.breathAI.ttobagi_server.global.util.WebClientUtil;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.DisplayName;
@@ -43,6 +44,7 @@ class UploadArchiveIntegrationTest {
 
     @MockitoBean private S3Client s3Client;
     @MockitoBean private WebClientUtil webClientUtil;
+    @MockitoBean private EmailService emailService;
 
     @Test
     @DisplayName("업로드하면 변환 전 원본을 보관하고 업로드 기록에 위치를 남긴다")
@@ -74,9 +76,7 @@ class UploadArchiveIntegrationTest {
 
     private String upload(MockMultipartFile file) throws Exception {
         String email = "archive-" + UUID.randomUUID().toString().substring(0, 8) + "@seoulmetro.co.kr";
-        mvc.perform(post("/api/v1/auth/signup").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"email\":\"" + email + "\",\"password\":\"qatest1!\",\"adminCode\":\"test-admin-code\"}"))
-                .andExpect(status().isCreated());
+        TestSignup.signup(mvc, emailService, email, "qatest1!", "test-admin-code");
         String login = mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"" + email + "\",\"password\":\"qatest1!\"}"))
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);

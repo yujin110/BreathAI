@@ -448,10 +448,7 @@ class ApiIntegrationTest {
     }
 
     private void signup(String email, String adminCode) throws Exception {
-        String code = adminCode == null ? "" : ",\"adminCode\":\"" + adminCode + "\"";
-        mvc.perform(withJson(post("/api/v1/auth/signup"), "{\"email\":\"" + email + "\",\"password\":\"" + PASSWORD + "\"" + code + "}"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value(201));
+        TestSignup.signup(mvc, emailService, email, PASSWORD, adminCode);
     }
 
     private String login(String email, String password) throws Exception {

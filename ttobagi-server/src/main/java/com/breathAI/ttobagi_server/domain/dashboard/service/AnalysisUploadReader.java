@@ -21,6 +21,7 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 /** Materializes the upload before asynchronous dispatch; XLSX uses its first sheet. */
@@ -28,7 +29,8 @@ import java.util.Locale;
 public class AnalysisUploadReader {
     private static final DateTimeFormatter ISO_DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    public record PipelineFile(String filename, byte[] content) {}
+    // rowNumbers는 엑셀에서 변환한 경우 CSV 각 줄(머리글 포함)의 원래 엑셀 행 번호, CSV를 그대로 쓰면 null
+    public record PipelineFile(String filename, byte[] content, List<Integer> rowNumbers) {}
 
     public PipelineFile read(MultipartFile file) {
         if (file == null || file.isEmpty()) {
@@ -42,7 +44,7 @@ public class AnalysisUploadReader {
         try {
             if (filename.toLowerCase(Locale.ROOT).endsWith(".csv")) {
                 // Preserve existing CSV encoding and contents for the AI CSV reader.
-                return new PipelineFile(filename, file.getBytes());
+                return new PipelineFile(filename, file.getBytes(), null);
             }
             try (var input = file.getInputStream(); var workbook = new XSSFWorkbook(input)) {
                 if (workbook.getNumberOfSheets() == 0) {
@@ -57,6 +59,7 @@ public class AnalysisUploadReader {
                 var formatter = new DataFormatter(Locale.ROOT);
                 var evaluator = workbook.getCreationHelper().createFormulaEvaluator();
                 var output = new StringWriter();
+                var rowNumbers = new ArrayList<Integer>();
                 try (var csv = new CSVPrinter(output, CSVFormat.DEFAULT)) {
                     for (Row row : sheet) {
                         var values = new ArrayList<String>();
@@ -65,6 +68,7 @@ public class AnalysisUploadReader {
                         }
                         if (values.stream().anyMatch(value -> !value.isBlank())) {
                             csv.printRecord(values);
+                            rowNumbers.add(row.getRowNum() + 1);
                         }
                     }
                 }
@@ -72,7 +76,7 @@ public class AnalysisUploadReader {
                     throw new CustomException(ErrorCode.INVALID_UPLOAD_FILE);
                 }
                 return new PipelineFile(filename.substring(0, filename.length() - 5) + ".csv",
-                        output.toString().getBytes(StandardCharsets.UTF_8));
+                        output.toString().getBytes(StandardCharsets.UTF_8), rowNumbers);
             }
         } catch (CustomException e) {
             throw e;

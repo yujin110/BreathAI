@@ -1,5 +1,6 @@
 package com.breathAI.ttobagi_server.domain.auth.controller;
 
+import com.breathAI.ttobagi_server.domain.auth.dto.SignupCodeRequest;
 import com.breathAI.ttobagi_server.domain.auth.dto.SignupRequest;
 import com.breathAI.ttobagi_server.global.dto.ApiResponse;
 import com.breathAI.ttobagi_server.domain.auth.dto.LoginRequest;
@@ -13,6 +14,8 @@ import com.breathAI.ttobagi_server.domain.auth.dto.UserUpdateRequest;
 import com.breathAI.ttobagi_server.domain.auth.dto.TokenRequest;
 import com.breathAI.ttobagi_server.domain.auth.dto.TokenResponse;
 import com.breathAI.ttobagi_server.domain.auth.service.AuthService;
+import com.breathAI.ttobagi_server.global.security.AuditLogFilter;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -27,7 +30,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 // 계정 관련 API
-// 가입·로그인·로그아웃·재발급·재설정 요청·재설정 확정만 인증 없이 접근 가능 (SecurityConfig)
+// 가입 인증 코드·가입·로그인·로그아웃·재발급·재설정 요청·재설정 확정만 인증 없이 접근 가능 (SecurityConfig)
 @RestController
 @RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
@@ -35,9 +38,20 @@ public class AuthController {
 
     private final AuthService authService;
 
-    // 회원가입, 성공 시 201 반환
+    // 회원가입 인증 코드 메일 발송, 가입 전에 먼저 받는다
+    @PostMapping("/signup/code")
+    public ResponseEntity<ApiResponse<Void>> sendSignupCode(@RequestBody @Valid SignupCodeRequest request,
+                                                            HttpServletRequest httpRequest) {
+        AuditLogFilter.setRequestEmail(httpRequest, request.getEmail());
+        authService.sendSignupCode(request);
+        return ResponseEntity.ok(ApiResponse.success(null, "인증 코드를 메일로 보냈습니다."));
+    }
+
+    // 회원가입, 메일로 받은 인증 코드 필요, 성공 시 201 반환
     @PostMapping("/signup")
-    public ResponseEntity<ApiResponse<Void>> signup(@RequestBody @Valid SignupRequest request) {
+    public ResponseEntity<ApiResponse<Void>> signup(@RequestBody @Valid SignupRequest request,
+                                                    HttpServletRequest httpRequest) {
+        AuditLogFilter.setRequestEmail(httpRequest, request.getEmail());
         authService.signUp(request);
         // 본문 status도 HTTP 상태와 같은 201로 맞춘다
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -46,7 +60,10 @@ public class AuthController {
 
     // 로그인, 액세스·리프레시 토큰 발급
     @PostMapping("/login")
-    public ResponseEntity<ApiResponse<LoginResponse>> login(@RequestBody @Valid LoginRequest request) {
+    public ResponseEntity<ApiResponse<LoginResponse>> login(@RequestBody @Valid LoginRequest request,
+                                                            HttpServletRequest httpRequest) {
+        // 로그인 실패도 누가 시도했는지 감사로그에 남긴다
+        AuditLogFilter.setRequestEmail(httpRequest, request.getEmail());
         return ResponseEntity.ok(ApiResponse.success(authService.login(request), "로그인에 성공하였습니다."));
     }
 
@@ -59,14 +76,16 @@ public class AuthController {
     // 비밀번호 재설정 메일 발송 요청
     @PostMapping("/password/reset")
     public ResponseEntity<ApiResponse<PasswordResetResponse>> resetPassword(
-            @RequestBody @Valid PasswordResetRequest request) {
+            @RequestBody @Valid PasswordResetRequest request, HttpServletRequest httpRequest) {
+        AuditLogFilter.setRequestEmail(httpRequest, request.getEmail());
         return ResponseEntity.ok(ApiResponse.success(authService.resetPassword(request), "비밀번호 재설정 메일이 발송되었습니다."));
     }
 
     // 비밀번호 재설정 확정, 메일로 받은 토큰 필요
     @PostMapping("/password/reset/confirm")
     public ResponseEntity<ApiResponse<Void>> confirmPassword(
-            @RequestBody @Valid PasswordResetConfirmRequest request) {
+            @RequestBody @Valid PasswordResetConfirmRequest request, HttpServletRequest httpRequest) {
+        AuditLogFilter.setRequestEmail(httpRequest, request.getEmail());
         authService.confirmResetPassword(request);
         return ResponseEntity.ok(ApiResponse.success(null));
     }
