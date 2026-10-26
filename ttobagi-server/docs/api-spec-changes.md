@@ -100,7 +100,7 @@ FE·AI 연동은 이 문서의 "실제 동작"을 기준으로 한다.
 
 ## 6. DB 설계
 
-Flyway V6(2026-10-18)·V7·V8(2026-10-26)에서 바뀌었다. 팀 ERD는 V6까지 반영됐고(2026-10-19), V7·V8은 아직 반영 전이다.
+Flyway V6(2026-10-18)·V7·V8(2026-10-26)에서 바뀌었다. 팀 ERD는 V8까지 반영됐다(2026-10-26).
 
 - `gold_analysis_job`: `total_log_count`, `correct_count`, `low_quality_count`, `unanswer_count`, `current_unanswer_rate`, `predicted_accuracy_gain`, `resolved_count_by_ai` 추가 (모두 빈 값 허용)
 - `gold_analysis_daily_stat` 새 테이블: 분석·날짜별 `total_cnt`, `answer_cnt`, `low_quality_count`, `unanswer_cnt` (`analysis_id` + `stat_date` 고유)
