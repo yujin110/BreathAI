@@ -50,8 +50,20 @@ public class AuditLog {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    // 작업 이름·분류·대상, 메서드와 경로로 정한다 (AuditActionCatalog)
+    @Column(name = "action", length = 50)
+    private String action;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "category", length = 20)
+    private AuditCategory category;
+
+    @Column(name = "target", length = 100)
+    private String target;
+
     @Builder
-    public AuditLog(String email, String method, String path, String query, int status, String ip, long durationMs) {
+    public AuditLog(String email, String method, String path, String query, int status, String ip, long durationMs,
+                    String action, AuditCategory category, String target) {
         this.email = email;
         this.method = method;
         this.path = path;
@@ -61,5 +73,8 @@ public class AuditLog {
         this.ip = ip;
         this.durationMs = durationMs;
         this.createdAt = LocalDateTime.now();
+        this.action = action;
+        this.category = category;
+        this.target = target;
     }
 }

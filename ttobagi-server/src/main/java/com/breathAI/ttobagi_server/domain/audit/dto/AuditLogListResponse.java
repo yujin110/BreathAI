@@ -1,5 +1,6 @@
 package com.breathAI.ttobagi_server.domain.audit.dto;
 
+import com.breathAI.ttobagi_server.domain.audit.entity.AuditCategory;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Builder;
 import lombok.Getter;
@@ -38,5 +39,11 @@ public class AuditLogListResponse {
         private Boolean success;
         private String ip;
         private Long durationMs;
+
+        // 화면용 작업 이름·분류·대상과 결과 (예: "FAQ 수정", FAQ, "FAQ #123", "권한 없음")
+        private String action;
+        private AuditCategory category;
+        private String target;
+        private String resultLabel;
     }
 }

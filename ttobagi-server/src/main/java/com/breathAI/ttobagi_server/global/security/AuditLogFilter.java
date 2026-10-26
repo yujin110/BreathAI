@@ -1,6 +1,7 @@
 package com.breathAI.ttobagi_server.global.security;
 
 import com.breathAI.ttobagi_server.domain.audit.entity.AuditLog;
+import com.breathAI.ttobagi_server.domain.audit.service.AuditActionCatalog;
 import com.breathAI.ttobagi_server.domain.audit.service.AuditLogService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -47,6 +48,7 @@ public class AuditLogFilter extends OncePerRequestFilter {
         } finally {
             // 처리되지 않은 예외로 끝나면 응답 상태가 아직 정해지지 않았을 수 있어 500으로 남긴다
             int status = failed ? HttpServletResponse.SC_INTERNAL_SERVER_ERROR : response.getStatus();
+            AuditActionCatalog.Resolved resolved = AuditActionCatalog.resolve(request.getMethod(), request.getRequestURI());
             auditLogService.record(AuditLog.builder()
                     .email(resolveEmail(request))
                     .method(request.getMethod())
@@ -55,6 +57,9 @@ public class AuditLogFilter extends OncePerRequestFilter {
                     .status(status)
                     .ip(resolveIp(request))
                     .durationMs((System.nanoTime() - start) / 1_000_000)
+                    .action(resolved.action())
+                    .category(resolved.category())
+                    .target(truncate(resolved.target(), 100))
                     .build());
         }
     }
