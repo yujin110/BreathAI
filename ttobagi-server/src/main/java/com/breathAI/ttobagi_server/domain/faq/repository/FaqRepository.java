@@ -23,6 +23,9 @@ public interface FaqRepository extends JpaRepository<Faq, Long> {
     // 활성 FAQ 수
     long countByIsActiveTrue();
 
+    // 활성 FAQ 전체, 버전 복원과 현재 상태 비교에 쓴다
+    List<Faq> findByIsActiveTrue();
+
     // 단건 조회 (활성만)
     Optional<Faq> findByFaqIdAndIsActiveTrue(Long faqId);
 

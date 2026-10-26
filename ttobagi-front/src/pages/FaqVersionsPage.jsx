@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { faqApi } from "../api/faq.js";
 import { saveBlob } from "../api/client.js";
 import { useToast } from "../hooks/useToast.js";
+import { toPlainText } from "../utils/text.js";
+import { useAuth } from "../hooks/useAuth.js";
 
 const PAGE_SIZE = 10;
 
@@ -14,7 +16,25 @@ const CHANGE_LABEL = {
 };
 
 // 백엔드 FaqVersion.VersionType
-const VERSION_TYPE_LABEL = { UPLOAD: "분석 반영", DOWNLOAD: "다운로드 시점" };
+const VERSION_TYPE_LABEL = {
+  UPLOAD: "분석 반영", DOWNLOAD: "다운로드 시점",
+  MANUAL: "직접 만듦", RESTORE: "복원",
+};
+
+// 버전 비교 응답의 changes[].field
+const FIELD_LABEL = {
+  standardQuestion: "질문", answer: "답변", keywords: "키워드",
+  qType: "카테고리 코드", category: "카테고리",
+};
+
+// keywords 는 배열로 오고 나머지는 문자열이다.
+// answer 에는 HTML·이미지가 들어 있을 수 있어 FAQ 목록·이력과 같게 태그를 걷어낸다.
+function fieldText(field, value) {
+  if (value == null) return "(없음)";
+  if (Array.isArray(value)) return value.join(", ");
+  const text = String(value);
+  return field === "answer" ? toPlainText(text) : text;
+}
 
 export default function FaqVersionsPage() {
   const [versions, setVersions] = useState([]);
@@ -23,7 +43,16 @@ export default function FaqVersionsPage() {
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState(null); // { loading, data }
   const [downloadingId, setDownloadingId] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [restoringId, setRestoringId] = useState(null);
+  const [compare, setCompare] = useState(null);   // { loading, data }
+  const [baseId, setBaseId] = useState("");       // 비교 기준 버전
+  const [targetId, setTargetId] = useState("");   // 빈 값이면 현재 운영 FAQ와 비교
+  const { user } = useAuth();
   const toast = useToast();
+
+  // 버전 만들기·복원은 백엔드가 @PreAuthorize("hasRole('ADMIN')")로 막는다
+  const isAdmin = user?.role === "ADMIN";
 
   const applyList = useCallback((res) => {
     setVersions(res.data?.versions || []);
@@ -87,6 +116,68 @@ export default function FaqVersionsPage() {
     }
   };
 
+  // 다운로드하지 않고 지금 상태를 버전으로 저장한다
+  const handleCreateVersion = async () => {
+    setCreating(true);
+    try {
+      const res = await faqApi.createVersion();
+      toast.success(`${res.data?.versionName || "새 버전"}을 만들었습니다.`);
+      const list = await faqApi.getVersions(0, PAGE_SIZE);
+      applyList(list);
+      setPage(0);
+    } catch (err) {
+      toast.error(err.message || "버전을 만들지 못했습니다.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // 그 버전 이후의 수정·등록·삭제와 후보 반영이 모두 취소되고 결과가 새 버전으로 저장된다
+  const handleRestore = async (version) => {
+    const name = version.versionName || `버전 #${version.versionId}`;
+    if (!window.confirm(
+      `현재 FAQ를 ${name} 내용으로 되돌립니다.\n` +
+      "이 버전 이후의 수정·등록·삭제와 후보 반영이 모두 취소되고, 결과는 새 버전으로 저장됩니다."
+    )) return;
+
+    setRestoringId(version.versionId);
+    try {
+      const d = (await faqApi.restoreVersion(version.versionId)).data || {};
+      // 바뀐 게 없으면 새 버전을 만들지 않는다
+      if (!d.newVersionId) {
+        toast.info("바뀐 내용이 없습니다.");
+      } else {
+        toast.success(
+          `수정 ${d.updatedCount ?? 0}건, 삭제 ${d.deletedCount ?? 0}건, ` +
+          `되살림 ${d.reactivatedCount ?? 0}건, 후보 ${d.revertedCandidateCount ?? 0}건이 대기로 돌아갔습니다. ` +
+          `새 버전 ${d.newVersionName || `#${d.newVersionId}`}이 만들어졌습니다.`
+        );
+      }
+      setDetail(null);
+      const list = await faqApi.getVersions(0, PAGE_SIZE);
+      applyList(list);
+      setPage(0);
+    } catch (err) {
+      toast.error(err.message || "복원에 실패했습니다.");
+    } finally {
+      setRestoringId(null);
+    }
+  };
+
+  // targetId 를 비우면 기준 버전과 현재 운영 FAQ 를 비교한다
+  const runCompare = async () => {
+    if (!baseId) { toast.error("기준 버전을 선택해주세요."); return; }
+    if (baseId === targetId) { toast.error("서로 다른 버전을 선택해주세요."); return; }
+    setCompare({ loading: true, data: null });
+    try {
+      const res = await faqApi.compareVersions(baseId, targetId || undefined);
+      setCompare({ loading: false, data: res.data });
+    } catch (err) {
+      toast.error(err.message || "버전 비교에 실패했습니다.");
+      setCompare(null);
+    }
+  };
+
   if (loading) return <div style={{ padding: 40, color: "#6B7280" }}>불러오는 중...</div>;
 
   return (
@@ -96,11 +187,16 @@ export default function FaqVersionsPage() {
         분석 반영과 다운로드 시점마다 FAQ 스냅샷이 버전으로 쌓입니다. 버전별로 CSV를 내려받을 수 있습니다.
       </div>
 
-      <div style={{ marginBottom: 14, display: "flex", gap: 10, alignItems: "center" }}>
+      <div style={{ marginBottom: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <button style={S.btnPrimary} disabled={downloadingId === "latest"}
           onClick={() => handleDownload(undefined)}>
           {downloadingId === "latest" ? "내려받는 중..." : "최신 내용 CSV 다운로드"}
         </button>
+        {isAdmin && (
+          <button style={S.btnOutline} disabled={creating} onClick={handleCreateVersion}>
+            {creating ? "만드는 중..." : "버전 만들기"}
+          </button>
+        )}
         <span style={{ fontSize: 12, color: "#6B7280" }}>
           총 {pageInfo.totalCount.toLocaleString()}개 버전
           {pageInfo.totalPages > 1 && ` · ${page + 1}/${pageInfo.totalPages} 페이지`}
@@ -108,6 +204,26 @@ export default function FaqVersionsPage() {
       </div>
       <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 16 }}>
         최신 내용을 내려받으면 그 시점의 스냅샷이 새 버전으로 기록됩니다.
+        {isAdmin && " 버전 만들기는 내려받지 않고 지금 상태만 저장합니다."}
+      </div>
+
+      {/* 버전 비교 — 비교 대상을 비우면 현재 운영 FAQ와 비교한다 */}
+      <div style={S.compareBar}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>버전 비교</span>
+        <select style={S.compareSelect} value={baseId} onChange={(e) => setBaseId(e.target.value)}>
+          <option value="">기준 버전</option>
+          {versions.map((v) => (
+            <option key={v.versionId} value={v.versionId}>{v.versionName || `#${v.versionId}`}</option>
+          ))}
+        </select>
+        <span style={{ color: "#9CA3AF" }}>→</span>
+        <select style={S.compareSelect} value={targetId} onChange={(e) => setTargetId(e.target.value)}>
+          <option value="">현재 운영 FAQ</option>
+          {versions.map((v) => (
+            <option key={v.versionId} value={v.versionId}>{v.versionName || `#${v.versionId}`}</option>
+          ))}
+        </select>
+        <button style={S.btnSm} onClick={runCompare}>비교</button>
       </div>
 
       {versions.length === 0 ? (
@@ -163,8 +279,16 @@ export default function FaqVersionsPage() {
               <div style={{ padding: 20, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>불러오는 중...</div>
             ) : (
               <>
-                <div style={S.modalTitle}>
-                  {detail.data?.versionName || `버전 #${detail.data?.versionId}`}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <div style={{ ...S.modalTitle, marginBottom: 0 }}>
+                    {detail.data?.versionName || `버전 #${detail.data?.versionId}`}
+                  </div>
+                  {isAdmin && (
+                    <button style={S.btnOutline} disabled={restoringId === detail.data?.versionId}
+                      onClick={() => handleRestore(detail.data)}>
+                      {restoringId === detail.data?.versionId ? "복원 중..." : "이 버전으로 복원"}
+                    </button>
+                  )}
                 </div>
 
                 <div style={S.statRow}>
@@ -222,11 +346,113 @@ export default function FaqVersionsPage() {
           </div>
         </div>
       )}
+
+      {/* ── 버전 비교 결과 ── */}
+      {compare && (
+        <div style={S.modalBg} onClick={() => setCompare(null)}>
+          <div style={{ ...S.modal, maxWidth: 760 }} onClick={(e) => e.stopPropagation()}>
+            {compare.loading ? (
+              <div style={{ padding: 20, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>비교 중...</div>
+            ) : (
+              <>
+                <div style={S.modalTitle}>버전 비교</div>
+                <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 14 }}>
+                  {compare.data?.baseVersionName || `#${compare.data?.baseVersionId}`}
+                  {" → "}
+                  {/* targetId 를 비우면 응답에 targetVersionId 가 없다 */}
+                  {compare.data?.targetVersionId
+                    ? (compare.data?.targetVersionName || `#${compare.data.targetVersionId}`)
+                    : "현재 운영 FAQ"}
+                </div>
+
+                <div style={S.statRow}>
+                  {[
+                    { label: "추가", value: compare.data?.addedCount ?? 0, color: "#1565C0" },
+                    { label: "삭제", value: compare.data?.deletedCount ?? 0, color: "#B91C1C" },
+                    { label: "변경", value: compare.data?.changedCount ?? 0, color: "#92400E" },
+                  ].map((s2) => (
+                    <div key={s2.label} style={S.statBox}>
+                      <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 4 }}>{s2.label}</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: s2.color }}>{s2.value.toLocaleString()}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ maxHeight: 420, overflowY: "auto" }}>
+                  {[
+                    { key: "added", title: "추가된 FAQ", color: "#1565C0" },
+                    { key: "deleted", title: "삭제된 FAQ", color: "#B91C1C" },
+                  ].map((sec) => (
+                    (compare.data?.[sec.key] || []).length > 0 && (
+                      <div key={sec.key} style={S.diffSection}>
+                        <div style={{ ...S.diffHead, color: sec.color }}>{sec.title}</div>
+                        {compare.data[sec.key].map((f) => (
+                          <div key={f.faqId} style={S.diffItem}>
+                            <span style={{ color: "#9CA3AF", marginRight: 6 }}>#{f.faqId}</span>
+                            {f.category && <span style={S.typeTag}>{f.category}</span>}{" "}
+                            {f.standardQuestion}
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  ))}
+
+                  {(compare.data?.changed || []).length > 0 && (
+                    <div style={S.diffSection}>
+                      <div style={{ ...S.diffHead, color: "#92400E" }}>변경된 FAQ</div>
+                      {compare.data.changed.map((f) => (
+                        <div key={f.faqId} style={S.diffItem}>
+                          <div style={{ marginBottom: 6 }}>
+                            <span style={{ color: "#9CA3AF", marginRight: 6 }}>#{f.faqId}</span>
+                            <strong>{f.standardQuestion}</strong>
+                          </div>
+                          {/* 바뀐 칸만 온다. keywords 는 배열이라 fieldText 로 펼친다. */}
+                          {(f.changes || []).map((c, i) => (
+                            <div key={i} style={{ marginBottom: 4, paddingLeft: 10 }}>
+                              <span style={{ fontSize: 11, color: "#6B7280" }}>
+                                {FIELD_LABEL[c.field] || c.field}
+                              </span>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
+                                <span style={S.diffBefore}>{fieldText(c.field, c.before)}</span>
+                                <span style={{ color: "#9CA3AF" }}>→</span>
+                                <span style={S.diffAfter}>{fieldText(c.field, c.after)}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {!compare.data?.addedCount && !compare.data?.deletedCount && !compare.data?.changedCount && (
+                    <div style={{ padding: 20, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>
+                      두 버전의 내용이 같습니다.
+                    </div>
+                  )}
+                </div>
+
+                <div style={S.modalActions}>
+                  <button style={S.btnSm} onClick={() => setCompare(null)}>닫기</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 const S = {
+  btnOutline:   { padding: "9px 16px", fontSize: 13, fontWeight: 600, border: "1.5px solid #1565C0", borderRadius: 8, background: "#fff", color: "#1565C0", cursor: "pointer", fontFamily: "inherit" },
+  compareBar:   { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 14px", marginBottom: 16, background: "#F9FAFB", border: "1px solid #F3F4F6", borderRadius: 10 },
+  compareSelect:{ padding: "6px 10px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, background: "#fff", color: "#374151", cursor: "pointer", maxWidth: 220 },
+  diffSection:  { marginTop: 14 },
+  diffHead:     { fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 },
+  diffItem:     { padding: "8px 0", borderBottom: "1px solid #F3F4F6", fontSize: 12, color: "#374151" },
+  diffBefore:   { color: "#B91C1C", textDecoration: "line-through" },
+  diffAfter:    { color: "#065F46", fontWeight: 500 },
+
   page:        { padding: 28 },
   pageTitle:   { fontSize: 20, fontWeight: 700, color: "#111827", marginBottom: 4 },
   pageSub:     { fontSize: 13, color: "#6B7280", marginBottom: 20, lineHeight: 1.6 },

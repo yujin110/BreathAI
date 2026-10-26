@@ -26,6 +26,10 @@ public class SignupRequest {
     )
     private String password;
 
+    // 메일로 받은 6자리 인증 코드 (POST /auth/signup/code)
+    @NotBlank(message = "인증 코드는 필수 입력 값입니다.")
+    private String code;
+
     private String adminCode;
     
 }

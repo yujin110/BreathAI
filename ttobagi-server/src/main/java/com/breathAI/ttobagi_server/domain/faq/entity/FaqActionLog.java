@@ -50,8 +50,9 @@ public class FaqActionLog {
     @ColumnDefault("CURRENT_TIMESTAMP")
     private LocalDateTime createdAt;
 
+    // EDIT은 승인 전 후보 내용 수정, REVERT는 버전 복원으로 반영이 취소된 경우
     public enum Action {
-        ACCEPT, REJECT, APPLY, REVERT
+        ACCEPT, REJECT, APPLY, REVERT, EDIT
     }
 
     @PrePersist

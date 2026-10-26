@@ -6,8 +6,10 @@ import com.breathAI.ttobagi_server.domain.auth.dto.UserUpdateRequest;
 import com.breathAI.ttobagi_server.domain.auth.entity.User;
 import com.breathAI.ttobagi_server.domain.auth.entity.User.Role;
 import com.breathAI.ttobagi_server.domain.auth.entity.PasswordResetToken;
+import com.breathAI.ttobagi_server.domain.auth.entity.SignupVerification;
 import com.breathAI.ttobagi_server.domain.auth.repository.UserRepository;
 import com.breathAI.ttobagi_server.domain.auth.repository.PasswordResetTokenRepository;
+import com.breathAI.ttobagi_server.domain.auth.repository.SignupVerificationRepository;
 import com.breathAI.ttobagi_server.domain.dashboard.repository.AnalysisHistoryRepository;
 import com.breathAI.ttobagi_server.domain.dashboard.repository.UploadFileRepository;
 import com.breathAI.ttobagi_server.domain.faq.repository.FaqActionLogRepository;    
@@ -41,6 +43,7 @@ public class AuthService {
     
     private final UserRepository userRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
+    private final SignupVerificationRepository signupVerificationRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final EmailService emailService;
@@ -60,18 +63,47 @@ public class AuthService {
     private static final int RESET_CODE_LENGTH = 6;
     private static final int MAX_RESET_ATTEMPTS = 5;
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    // 회원가입 인증 코드는 재설정 코드와 같은 규칙을 쓰고, 메일을 마구 보내지 않도록 다시 받기 간격을 둔다
+    private static final int CODE_EXPIRY_MINUTES = 30;
+    private static final int SIGNUP_CODE_RESEND_SECONDS = 60;
 
     // 관리자 승격용 인증 코드 (환경변수 SYSTEM_ADMIN_CODE)
     @Value("${system.admin-code}")
     private String systemAdminCode;
 
-    // 회원가입, 관리자 코드 일치 시 ADMIN 권한 부여
+    // 회원가입 인증 코드 발송, 이미 가입된 이메일은 409, 1분 안에 다시 요청하면 429
+    // 다시 받으면 이전 코드는 쓸 수 없다
     @Transactional
+    public void sendSignupCode(SignupCodeRequest request) {
+        String email = request.getEmail().toLowerCase();
+        if (userRepository.existsByEmail(email)) {
+            throw new CustomException(ErrorCode.EMAIL_DUPLICATED);
+        }
+        signupVerificationRepository.findByEmail(email).ifPresent(previous -> {
+            if (previous.isResentTooSoon(SIGNUP_CODE_RESEND_SECONDS)) {
+                throw new CustomException(ErrorCode.SIGNUP_CODE_REQUEST_TOO_SOON);
+            }
+        });
+        signupVerificationRepository.deleteByEmail(email);
+
+        String code = generateCode();
+        signupVerificationRepository.save(SignupVerification.builder()
+                .email(email)
+                .code(code)
+                .expiryMinutes(CODE_EXPIRY_MINUTES)
+                .build());
+        emailService.sendSignupCodeEmail(email, code);
+    }
+
+    // 회원가입, 메일로 받은 인증 코드가 맞아야 계정을 만든다. 관리자 코드 일치 시 ADMIN 권한 부여
+    // 실패 횟수 기록과 만료 코드 삭제가 예외와 함께 되돌려지지 않도록 CustomException 에는 롤백하지 않는다
+    @Transactional(noRollbackFor = CustomException.class)
     public void signUp(SignupRequest request) {
         // 이메일 중복 체크
         if (userRepository.existsByEmail(request.getEmail().toLowerCase())) {
             throw new CustomException(ErrorCode.EMAIL_DUPLICATED);
         }
+        verifySignupCode(request.getEmail().toLowerCase(), request.getCode());
 
         // 관리자 코드 검증 및 Role 결정
         Role role = (request.getAdminCode() != null && request.getAdminCode().equals(systemAdminCode))
@@ -185,13 +217,41 @@ public class AuthService {
     private String generateResetCode() {
         String code;
         do {
-            StringBuilder sb = new StringBuilder(RESET_CODE_LENGTH);
-            for (int i = 0; i < RESET_CODE_LENGTH; i++) {
-                sb.append(RESET_CODE_CHARS.charAt(SECURE_RANDOM.nextInt(RESET_CODE_CHARS.length())));
-            }
-            code = sb.toString();
+            code = generateCode();
         } while (passwordResetTokenRepository.existsByToken(code));
         return code;
+    }
+
+    private String generateCode() {
+        StringBuilder sb = new StringBuilder(RESET_CODE_LENGTH);
+        for (int i = 0; i < RESET_CODE_LENGTH; i++) {
+            sb.append(RESET_CODE_CHARS.charAt(SECURE_RANDOM.nextInt(RESET_CODE_CHARS.length())));
+        }
+        return sb.toString();
+    }
+
+    // 회원가입 인증 코드 검사, 오류 응답은 비밀번호 재설정 코드와 같다
+    // 맞으면 코드를 지워 다시 쓸 수 없게 한다
+    private void verifySignupCode(String email, String code) {
+        SignupVerification verification = signupVerificationRepository.findByEmail(email)
+                .orElseThrow(() -> new CustomException(ErrorCode.INVALID_RESET_CODE));
+
+        if (verification.isExpired()) {
+            signupVerificationRepository.delete(verification);
+            throw new CustomException(ErrorCode.EXPIRED_RESET_CODE);
+        }
+        if (verification.isLocked(MAX_RESET_ATTEMPTS)) {
+            throw new CustomException(ErrorCode.RESET_CODE_ATTEMPTS_EXCEEDED);
+        }
+        // DB 는 대소문자를 구분하지 않고 비교하므로 여기서 직접 비교한다
+        boolean matches = MessageDigest.isEqual(
+                verification.getCode().getBytes(StandardCharsets.UTF_8),
+                code.getBytes(StandardCharsets.UTF_8));
+        if (!matches) {
+            verification.recordFailedAttempt();
+            throw new CustomException(ErrorCode.INVALID_RESET_CODE);
+        }
+        signupVerificationRepository.delete(verification);
     }
 
     // 관리자 권한 승격, 관리자 코드 검증 필요
