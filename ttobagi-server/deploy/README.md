@@ -153,14 +153,126 @@ echo '0 4 * * * root /usr/local/bin/breathai-db-backup.sh >> /var/log/breathai-d
 - 수명 주기로 지워진 뒤에도 `file_path`는 남는다. 위치 기록일 뿐 파일이 남아 있다는 뜻은 아니다.
 - 인증키는 Sub Account(`NCP_OBJECT_STORAGE_MANAGER` 정책만)로 만든다. Sub Account의 접근 Source 제한은 Object Storage에 적용되지 않는다.
 
-## 8. 업데이트
+## 8. AI 서버 연결 (SSH 터널)
+
+AI 서버(Vast.ai GPU)와는 이 서버가 여는 SSH 터널 하나로 주고받는다. 서버의 8080·3306을 밖에 열지 않고, AI 서버 주소가 바뀌어도 AI 쪽 설정은 그대로 둘 수 있다.
+
+```
+BE 컨테이너 ─ host.docker.internal:18000 ─▶ 서버 172.17.0.1:18000 ══(-L)══▶ Vast 127.0.0.1:18000  AI API(pipeline_api)
+Vast AI(콜백) ─ 127.0.0.1:18080 ══(-R)══▶ 서버 127.0.0.1:8080   BE
+Vast AI(DB)   ─ 127.0.0.1:13306 ══(-R)══▶ 서버 127.0.0.1:3306   MariaDB
+```
+
+- BE `.env`: `TTOBAGI_AI_SERVER=http://host.docker.internal:18000` (compose의 `extra_hosts`로 서버를 가리킨다). `-L`을 도커 bridge 주소(`172.17.0.1`)에 묶어야 BE 컨테이너가 닿는다.
+- AI 쪽 설정: BE 주소 `http://127.0.0.1:18080`, DB `127.0.0.1:13306`, 계정 `ai_pipeline`. 터널 덕분에 AI 서버를 바꿔도 이 값은 그대로다.
+
+### 8-1. 키
+
+```bash
+ssh-keygen -t ed25519 -f /root/.ssh/breathai_vast_tunnel -N "" -C breathai-ncp-tunnel
+cat /root/.ssh/breathai_vast_tunnel.pub
+```
+
+공개키(`.pub` 한 줄)를 AI 담당에게 보내 Vast 인스턴스의 `/root/.ssh/authorized_keys`에 넣어 달라고 한다(Vast 콘솔의 SSH 키 추가 메뉴도 된다). 공개키는 알려져도 괜찮고, 개인키는 서버 밖으로 내보내지 않는다.
+
+서비스는 `StrictHostKeyChecking=yes`라 처음 한 번은 직접 접속해 서버 지문을 저장해야 한다.
+
+```bash
+ssh -i /root/.ssh/breathai_vast_tunnel -p 포트 -o StrictHostKeyChecking=accept-new root@IP 'hostname'
+```
+
+### 8-2. 서비스
+
+`/etc/systemd/system/breathai-tunnel.service`
+
+```ini
+[Unit]
+Description=BreathAI SSH tunnel to Vast.ai AI server
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/ssh -N -i /root/.ssh/breathai_vast_tunnel -p 34034 \
+  -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes \
+  -o BatchMode=yes -o StrictHostKeyChecking=yes \
+  -L 172.17.0.1:18000:127.0.0.1:18000 \
+  -R 127.0.0.1:18080:127.0.0.1:8080 \
+  -R 127.0.0.1:13306:127.0.0.1:3306 \
+  root@171.235.173.155
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+systemctl daemon-reload
+systemctl enable --now breathai-tunnel
+```
+
+- 끊기면 10초마다 다시 붙는다(`Restart=always`). 서버를 껐다 켜도 자동으로 시작한다.
+- `ExitOnForwardFailure=yes`: 포워딩 하나라도 실패하면 접속을 끊고 다시 시도한다. 반쯤 붙은 상태로 남지 않게 하기 위해서다.
+- 포트(`-p`)와 `root@IP`는 AI 서버를 빌릴 때마다 바뀐다(8-5).
+
+### 8-3. AI 전용 DB 계정
+
+AI는 Bronze 원본 적재와 FAQ 읽기에 필요한 표만 쓸 수 있다. 비밀번호는 이 문서에 적지 않고 AI 담당에게 직접 전달한다.
+
+```sql
+CREATE USER 'ai_pipeline'@'%' IDENTIFIED BY '비밀번호';
+GRANT SELECT ON `ttobagi_db`.`gold_faq` TO 'ai_pipeline'@'%';
+GRANT SELECT ON `ttobagi_db`.`bronze_cate_info` TO 'ai_pipeline'@'%';
+GRANT SELECT ON `ttobagi_db`.`bronze_counselling_info` TO 'ai_pipeline'@'%';
+GRANT SELECT, INSERT, UPDATE ON `ttobagi_db`.`bronze_ingest_batch` TO 'ai_pipeline'@'%';
+GRANT SELECT, INSERT, UPDATE ON `ttobagi_db`.`bronze_unanswered_learning` TO 'ai_pipeline'@'%';
+```
+
+권한 확인: `SHOW GRANTS FOR 'ai_pipeline'@'%'` (계정·분석 표 등 나머지 `gold_*`에는 접근할 수 없어야 한다)
+
+### 8-4. 확인
+
+```bash
+cd /opt/breathai/ttobagi-server && C="docker compose -f docker-compose.prod.yml"
+systemctl is-active breathai-tunnel                                                  # active
+$C exec -T app curl -s -o /dev/null -w "%{http_code}\n" http://host.docker.internal:18000/   # 404면 연결됨, 000이면 안 됨
+ssh -i /root/.ssh/breathai_vast_tunnel -p 34034 -o BatchMode=yes -o ConnectTimeout=15 root@171.235.173.155 \
+  'echo 접속됨; pgrep -fa "pipeline_api|pipeline_worker" | head -3'                 # 접속 + AI 프로그램 2개
+journalctl -u breathai-tunnel -n 20 --no-pager                                       # 최근 기록
+```
+
+AI 쪽에서는 `curl -s http://127.0.0.1:18080/actuator/health`가 BE의 `UP`을 돌려주면 콜백 길이 열린 것이다.
+
+### 8-5. AI 서버를 바꿨을 때 (주소 변경)
+
+Vast는 대여 기간이 끝나거나 다른 GPU로 옮기면 IP·포트가 바뀐다. 연결 방식은 그대로 두고 주소만 바꾼다.
+
+1. AI 담당이 새 인스턴스에 공개키(8-1)를 등록하고, AI 프로그램(`pipeline_api`, `pipeline_worker`)을 띄운다.
+2. 새 주소로 지문을 저장한다: `ssh -i /root/.ssh/breathai_vast_tunnel -p 새포트 -o StrictHostKeyChecking=accept-new root@새IP 'hostname'`
+3. 서비스 파일에서 `-p 포트 \` 줄과 `root@IP` 줄만 바꾼다.
+4. `systemctl daemon-reload && systemctl restart breathai-tunnel`
+5. 8-4로 `404`를 확인한다.
+
+### 8-6. 문제별 대처
+
+| 증상 (`journalctl` 또는 직접 SSH) | 원인 | 대처 |
+|---|---|---|
+| `Permission denied (publickey)` | Vast 인스턴스에 공개키가 없다(인스턴스를 새로 만들거나 키가 지워짐) | AI 담당에게 공개키(8-1) 재등록 요청 |
+| `Connection refused`, `Connection timed out` | 인스턴스가 꺼졌거나 IP·포트가 바뀜 | AI 담당에게 현재 주소 확인 → 8-5 |
+| `REMOTE HOST IDENTIFICATION HAS CHANGED` | 같은 IP·포트에 새 인스턴스가 들어옴 | `ssh-keygen -R "[IP]:포트"` 후 8-5의 2번 |
+| `remote port forwarding failed` | 이전 접속이 Vast에 남아 18080·13306을 잡고 있음 | 잠시 뒤 자동 재시도로 풀린다. 계속되면 AI 담당이 남은 `sshd` 세션을 끊는다 |
+| 서비스는 `active`인데 BE→AI가 `000` | AI 프로그램이 꺼짐 | AI 담당이 `pipeline_api`·`pipeline_worker`를 다시 띄운다 |
+
+터널이 끊긴 동안 올린 분석은 AI에 요청하지 못하고 바로 실패(`FAIL`)로 끝난다. 다시 올리면 같은 파일이라도 새로 분석한다.
+
+## 9. 업데이트
 
 ```bash
 cd /opt/breathai && git pull
 cd ttobagi-server && docker compose -f docker-compose.prod.yml up -d --build --wait app
 ```
 
-## 9. 겪은 문제
+## 10. 겪은 문제
 
 | 증상 | 원인 | 해결 |
 |---|---|---|
@@ -169,3 +281,4 @@ cd ttobagi-server && docker compose -f docker-compose.prod.yml up -d --build --w
 | `snap: command not found` | NCP Ubuntu 이미지에 snapd 없음 | `apt-get install -y snapd` |
 | `.env` 값 끝에 보이지 않는 문자 | Windows에서 복사한 BOM·CRLF | `sed`로 제거 |
 | apt 업그레이드 중 설정 파일 질문 | NCP가 바꿔 둔 설정 파일 | `N`(현재 유지), 설치 시 `--force-confold` |
+| 10-19~10-26 AI 연결 끊김(BE→AI `000`, 터널 재시작 6만 번 넘게 반복) | Vast 인스턴스에 터널 공개키가 없어 새 접속이 `Permission denied (publickey)`. 그전에 붙어 있던 접속이 끊긴 뒤로 다시 붙지 못함 | AI 담당이 공개키 재등록(8-1). 주기적으로 8-4 확인 |
