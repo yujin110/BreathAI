@@ -9,6 +9,23 @@ import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 
 // Spring의 spring.servlet.multipart.max-file-size=50MB 와 동일하게 맞춘다
+const HISTORY_SIZE = 10;
+
+// 백엔드 AnalysisJob.Status 5종에 맞춘 색. 진행 중은 파랑, 완료 초록, 실패 빨강.
+function statusStyle(status) {
+  if (status === "COMPLETED") return { background: "#D1FAE5", color: "#065F46" };
+  if (status === "FAIL")      return { background: "#FDECEA", color: "#B91C1C" };
+  return { background: "#DBEAFE", color: "#1E40AF" };
+}
+
+// requestedAt은 LocalDateTime(타임존 없음)이라 Date가 로컬로 읽는다. 표시만 쓰므로 그대로 둔다.
+function formatDateTime(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 const MAX_UPLOAD_MB = 50;
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
@@ -116,6 +133,13 @@ export default function AnalyzePage() {
   const [done, setDone]             = useState(false);
   const [candidates, setCandidates] = useState([]);
   const [history, setHistory]       = useState([]);
+  // 이력 패널: scope=mine(기본) / all, 완료만 보기, 페이지
+  const [historyScope, setHistoryScope]   = useState("mine");
+  const [onlyCompleted, setOnlyCompleted] = useState(false);
+  const [historyPage, setHistoryPage]     = useState(0);
+  const [historyInfo, setHistoryInfo]     = useState({ totalCount: 0, totalPages: 0 });
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [deleting, setDeleting]           = useState(null);
   const [analyzeResult, setAnalyzeResult] = useState(null);
   const [analysisId, setAnalysisId] = useState(null);
   const [reviewing, setReviewing]   = useState(null); // 반영 중인 candidateId
@@ -126,8 +150,6 @@ export default function AnalyzePage() {
     periodEndDate: "",
     isMaskingEnabled: true,
     isTranslationEnabled: false,
-    // 군집화 파라미터는 현재 화면에서 숨겨져 있다(위 주석 블록 참고).
-    // 되살릴 때 바로 쓰도록 상태는 남겨 둔다.
     minClusterSize: "",
     minSamples: "",
   });
@@ -151,6 +173,70 @@ export default function AnalyzePage() {
     stopPolling();
   }, [stopPolling]);
 
+  // 분석 진행 감시. 업로드 직후와, 이력에서 진행 중인 분석을 열었을 때 모두 쓴다.
+  // SSE를 먼저 붙이고 끊기면 폴링으로 이어받는다.
+  const watchAnalysis = useCallback((id) => {
+    streamRef.current?.close();
+    stopPolling();
+
+    const loadResults = () => {
+      stopPolling();
+      setStep(4);
+      setDone(true);
+      setRunning(false);
+      faqApi.getCandidates(id).then((r) => {
+        if (r.data?.recommendations) setCandidates(r.data.recommendations);
+      }).catch((err) => toast.error(err.message || "FAQ 후보를 불러오지 못했습니다."));
+      dashApi.getFileAnalyzeResult(id).then((r) => {
+        if (r.data) setAnalyzeResult(r.data);
+      }).catch((err) => toast.error(err.message || "분석 결과를 불러오지 못했습니다."));
+    };
+
+    // 백엔드 AnalysisJob.Status는 PENDING / PREPROCESSING / ANALYZING / COMPLETED / FAIL이고,
+    // 구독 즉시 현재 상태를 한 번 보내준다. 화면 단계는 5개인데 상태는 3개뿐이라 대표 지점만 찍는다.
+    const applyStatus = (status) => {
+      if (status === "PENDING")       setStep(-1);
+      if (status === "PREPROCESSING") setStep(0);
+      if (status === "ANALYZING")     setStep(2);
+      if (status === "COMPLETED")     loadResults();
+      if (status === "FAIL") {
+        setRunning(false);
+        toast.error("분석에 실패했습니다.");
+      }
+      return status === "COMPLETED" || status === "FAIL";
+    };
+
+    // SSE가 끊기면 폴링으로 이어받는다. 중복 시작을 막아야 interval이 여러 개 돌지 않는다.
+    const startPolling = () => {
+      if (pollRef.current) return;
+      pollRef.current = setInterval(async () => {
+        try {
+          const statusRes = await dashApi.getAnalysisStatus(id);
+          if (applyStatus(statusRes.data?.status)) stopPolling();
+        } catch (err) {
+          stopPolling();
+          setRunning(false);
+          toast.error(err.message || "분석 상태 조회에 실패했습니다.");
+        }
+      }, 3000);
+    };
+
+    streamRef.current = dashApi.streamAnalysisStatus(
+      id,
+      (data) => {
+        try {
+          applyStatus(JSON.parse(data).status);
+        } catch {
+          // 상태 JSON이 깨졌으면 스트림을 신뢰할 수 없으니 폴링으로 전환
+          startPolling();
+        }
+      },
+      startPolling, // 연결 실패
+      startPolling  // 종료 상태 없이 스트림이 끊긴 경우 (타임아웃·네트워크 단절)
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stopPolling]);
+
   // AI가 중간 단계를 보고하지 않아 진행률이 멈춘 것처럼 보이므로,
   // 경과 시간을 표시해 작업이 살아 있다는 것을 알린다.
   useEffect(() => {
@@ -170,26 +256,104 @@ export default function AnalyzePage() {
 
   const STEPS = ["데이터 전처리", "문장 임베딩", "군집화 (HDBSCAN)", "FAQ 초안 생성", "검증 완료"];
 
-  useEffect(() => {
-    // 우측 "분석 이력" 패널이 같은 응답을 쓰므로 1건이 아니라 최근 10건을 받는다
-    dashApi.getAnalysisHistory(0, 10).then((r) => {
-      if (r.data?.history) {
-        setHistory(r.data.history);
-        // 최신 분석이 COMPLETED면 FAQ 후보 자동 로드
-        const latest = r.data.history[0];
-        if (latest?.status === "COMPLETED" && latest?.analysisId) {
-          setAnalysisId(latest.analysisId);
-          faqApi.getCandidates(latest.analysisId).then((res) => {
-            if (res.data?.recommendations) setCandidates(res.data.recommendations);
-          }).catch(() => {});
-          dashApi.getFileAnalyzeResult(latest.analysisId).then((res) => {
-            if (res.data) setAnalyzeResult(res.data);
-          }).catch(() => {});
-          setDone(true);
-          setStep(4);
-        }
+  // 이력 목록 조회. scope·status는 백엔드가 받는 파라미터 그대로다.
+  const loadHistory = useCallback(async (page, scope, completedOnly) => {
+    setHistoryLoading(true);
+    try {
+      const r = await dashApi.getAnalysisHistory({
+        page, size: HISTORY_SIZE, scope,
+        status: completedOnly ? "COMPLETED" : undefined,
+      });
+      setHistory(r.data?.history || []);
+      setHistoryInfo({
+        totalCount: r.data?.totalCount ?? 0,
+        totalPages: r.data?.totalPages ?? 0,
+      });
+      setHistoryPage(page);
+    } catch (err) {
+      toast.error(err.message || "분석 이력을 불러오지 못했습니다.");
+    } finally {
+      setHistoryLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 특정 분석을 화면으로 불러온다 (시각화 탭 + FAQ 추천 탭)
+  const openAnalysis = useCallback(async (item) => {
+    if (!item?.analysisId) return;
+    const id = item.analysisId;
+    setAnalysisId(id);
+    setAnalyzeResult(null);
+    setCandidates([]);
+
+    if (item.status === "FAIL") {
+      setDone(false); setRunning(false); setStep(-1);
+      toast.error("실패한 분석입니다. 결과를 불러올 수 없습니다.");
+      return;
+    }
+    if (item.status !== "COMPLETED") {
+      // 대기·전처리·분석 중이면 진행 상태를 이어서 보여 준다
+      setDone(false); setRunning(true);
+      watchAnalysis(id);
+      toast.info("분석이 진행 중입니다.");
+      return;
+    }
+
+    setRunning(false); setDone(true); setStep(4);
+    const [resultRes, candRes] = await Promise.allSettled([
+      dashApi.getFileAnalyzeResult(id),
+      faqApi.getCandidates(id),
+    ]);
+    if (resultRes.status === "fulfilled" && resultRes.value?.data) setAnalyzeResult(resultRes.value.data);
+    if (candRes.status === "fulfilled" && candRes.value?.data?.recommendations) {
+      setCandidates(candRes.value.data.recommendations);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 내 이력에서만 삭제한다. 분석 결과·후보·반영된 FAQ는 그대로 남는다.
+  const handleDeleteHistory = async (item) => {
+    if (!window.confirm("내 이력에서 삭제합니다. 분석 결과와 반영된 FAQ는 그대로 남습니다.")) return;
+    setDeleting(item.analysisId);
+    try {
+      await dashApi.deleteAnalysisHistory(item.analysisId);
+      toast.success("분석 이력이 삭제되었습니다.");
+
+      // 보고 있던 분석을 지웠으면 화면을 비운다
+      if (analysisId === item.analysisId) {
+        streamRef.current?.close();
+        stopPolling();
+        setAnalysisId(null);
+        setAnalyzeResult(null);
+        setCandidates([]);
+        setDone(false);
+        setRunning(false);
+        setStep(-1);
       }
-    }).catch((err) => toast.error(err.message || "분석 이력을 불러오지 못했습니다."));
+      // 마지막 줄을 지워 현재 페이지가 비면 한 페이지 앞으로
+      const nextPage = history.length === 1 && historyPage > 0 ? historyPage - 1 : historyPage;
+      await loadHistory(nextPage, historyScope, onlyCompleted);
+    } catch (err) {
+      toast.error(err.message || "분석 이력을 삭제하지 못했습니다.");
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await loadHistory(0, "mine", false);
+      // 완료된 내 분석 중 가장 최근 것을 불러온다. 맨 위가 실패·진행 중이어도 화면이 비지 않는다.
+      try {
+        const r = await dashApi.getAnalysisHistory({ page: 0, size: 1, scope: "mine", status: "COMPLETED" });
+        const latest = r.data?.history?.[0];
+        if (!cancelled && latest) openAnalysis(latest);
+      } catch {
+        /* 완료된 분석이 없으면 빈 화면 안내를 그대로 둔다 */
+      }
+    })();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -211,6 +375,19 @@ export default function AnalyzePage() {
 
   const doUpload = async () => {
     if (!file) return;
+
+    // 백엔드가 같은 범위로 검사해 400을 내므로, 보내기 전에 걸러 분석이 헛돌지 않게 한다
+    const cluster = Number(options.minClusterSize);
+    const samples = Number(options.minSamples);
+    if (options.minClusterSize !== "" && (!Number.isInteger(cluster) || cluster < 2)) {
+      toast.error("최소 클러스터 크기는 2 이상의 정수여야 합니다.");
+      return;
+    }
+    if (options.minSamples !== "" && (!Number.isInteger(samples) || samples < 1)) {
+      toast.error("최소 샘플 수는 1 이상의 정수여야 합니다.");
+      return;
+    }
+
     // 이전 분석의 구독이 남아 있으면 단계 표시가 섞이므로 먼저 정리한다
     streamRef.current?.close();
     stopPolling();
@@ -226,71 +403,29 @@ export default function AnalyzePage() {
         periodStartDate: options.periodStartDate,
         periodEndDate: options.periodEndDate,
         isMaskingEnabled: options.isMaskingEnabled,
-        // 외국어 번역은 화면에서 막아 둔 상태라 항상 false로 보낸다
-        isTranslationEnabled: false,
-        // clustering: { minClusterSize, minSamples } — 백엔드·AI 미구현으로 전송하지 않는다
+        isTranslationEnabled: options.isTranslationEnabled,
+        clustering: {
+          minClusterSize: options.minClusterSize,
+          minSamples: options.minSamples,
+        },
       });
       setUploading(false);
       setUploadResult(res.data);
       const analysisId = res.data?.analysisId;
       if (!analysisId) throw new Error("서버가 분석 ID를 반환하지 않았습니다.");
       setAnalysisId(analysisId);
+      await loadHistory(0, historyScope, onlyCompleted);
 
-      const loadResults = () => {
-        stopPolling();
-        setStep(4);
-        setDone(true);
-        setRunning(false);
-        faqApi.getCandidates(analysisId).then((r) => {
-          if (r.data?.recommendations) setCandidates(r.data.recommendations);
-        }).catch((err) => toast.error(err.message || "FAQ 후보를 불러오지 못했습니다."));
-        dashApi.getFileAnalyzeResult(analysisId).then((r) => {
-          if (r.data) setAnalyzeResult(r.data);
-        }).catch((err) => toast.error(err.message || "분석 결과를 불러오지 못했습니다."));
-      };
+      // 같은 파일을 같은 옵션으로 다시 올리면 백엔드가 에러 대신 기존 분석을 돌려준다.
+      // 이미 끝난 분석이면 진행 단계를 기다릴 필요 없이 바로 결과를 연다.
+      if (res.data?.status === "COMPLETED") {
+        if (res.data?.message) toast.info(res.data.message);
+        openAnalysis({ analysisId, status: "COMPLETED" });
+        return;
+      }
+      if (res.data?.message) toast.info(res.data.message);
 
-      // 백엔드 AnalysisJob.Status는 PENDING / PREPROCESSING / ANALYZING / COMPLETED / FAIL이고,
-      // 구독 즉시 현재 상태를 한 번 보내준다. 화면 단계는 5개인데 상태는 3개뿐이라 대표 지점만 찍는다.
-      const applyStatus = (status) => {
-        if (status === "PENDING")       setStep(-1);
-        if (status === "PREPROCESSING") setStep(0);
-        if (status === "ANALYZING")     setStep(2);
-        if (status === "COMPLETED")     loadResults();
-        if (status === "FAIL") {
-          setRunning(false);
-          toast.error("분석에 실패했습니다.");
-        }
-        return status === "COMPLETED" || status === "FAIL";
-      };
-
-      // SSE가 끊기면 폴링으로 이어받는다. 중복 시작을 막아야 interval이 여러 개 돌지 않는다.
-      const startPolling = () => {
-        if (pollRef.current) return;
-        pollRef.current = setInterval(async () => {
-          try {
-            const statusRes = await dashApi.getAnalysisStatus(analysisId);
-            if (applyStatus(statusRes.data?.status)) stopPolling();
-          } catch (err) {
-            stopPolling();
-            setRunning(false);
-            toast.error(err.message || "분석 상태 조회에 실패했습니다.");
-          }
-        }, 3000);
-      };
-
-      streamRef.current = dashApi.streamAnalysisStatus(
-        analysisId,
-        (data) => {
-          try {
-            applyStatus(JSON.parse(data).status);
-          } catch {
-            // 상태 JSON이 깨졌으면 스트림을 신뢰할 수 없으니 폴링으로 전환
-            startPolling();
-          }
-        },
-        startPolling, // 연결 실패
-        startPolling  // 종료 상태 없이 스트림이 끊긴 경우 (타임아웃·네트워크 단절)
-      );
+      watchAnalysis(analysisId);
     } catch (err) {
       setUploading(false);
       setRunning(false);
@@ -432,41 +567,37 @@ export default function AnalyzePage() {
                           onChange={setOption("isMaskingEnabled")} />
                         개인정보 마스킹
                       </label>
-                      {/* 외국어 번역은 당분간 선택하지 못하게 막아 둔다.
-                          되살릴 때는 disabled와 S.checkLabelDisabled, 아래 안내 문구를 지운다. */}
-                      <label style={{ ...S.checkLabel, ...S.checkLabelDisabled }}
-                        title="외국어 번역은 현재 사용할 수 없습니다.">
-                        <input type="checkbox" disabled checked={false} readOnly
-                          style={{ cursor: "not-allowed" }} />
+                      {/* AI preprocess.translate_to_ko 가 외국어 질의를 한국어로 번역한다.
+                          백엔드는 isTranslationEnabled 를 그대로 AI로 전달한다. */}
+                      <label style={S.checkLabel}
+                        title="외국어 질의를 한국어로 번역한 뒤 분석합니다.">
+                        <input type="checkbox" checked={options.isTranslationEnabled}
+                          onChange={setOption("isTranslationEnabled")} />
                         외국어 번역
-                        <span style={S.pendingTag}>준비 중</span>
                       </label>
                     </div>
                   </div>
 
-                  {/* 군집화 파라미터(최소 클러스터 크기·최소 샘플 수)는 백엔드·AI 양쪽 모두
-                      아직 받지 않아 보내도 무시된다. 구현되면 아래 블록과 options의
-                      minClusterSize/minSamples, uploadAndAnalyze의 clustering 인자를 되살린다.
-                      (2026-10-19 서연님 요청으로 임시 제거)
-
                   {/* HDBSCAN은 클러스터 개수를 직접 지정할 수 없어 min_cluster_size로 조절한다.
-                      값을 올리면 클러스터가 적고 커지며, 낮추면 많고 작아진다. *\/}
+                      값을 올리면 클러스터가 적고 커지며, 낮추면 많고 작아진다.
+                      백엔드가 AI 서버로 그대로 전달하며, 범위를 벗어나면 400이 된다. */}
                   <div style={{ ...S.optionRow, borderBottom: "none", paddingBottom: 0 }}>
-                    <label style={S.optionLabel}>
-                      군집화 <span style={S.pendingTag}>백엔드 반영 대기</span>
-                    </label>
+                    <label style={S.optionLabel}>군집화</label>
                     <div style={{ display: "flex", gap: 8 }}>
-                      <input type="number" min="2" placeholder="최소 클러스터 크기" style={S.optionInput}
+                      <input type="number" min="2" step="1" placeholder="최소 클러스터 크기 (2 이상)"
+                        style={S.optionInput}
                         value={options.minClusterSize} onChange={setOption("minClusterSize")} />
-                      <input type="number" min="1" placeholder="최소 샘플 수" style={S.optionInput}
+                      <input type="number" min="1" step="1" placeholder="최소 샘플 수 (1 이상)"
+                        style={S.optionInput}
                         value={options.minSamples} onChange={setOption("minSamples")} />
                     </div>
                   </div>
                   <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 6, lineHeight: 1.5 }}>
                     클러스터 개수는 HDBSCAN 특성상 직접 지정할 수 없어 최소 크기로 조절합니다.
-                    값을 키우면 클러스터가 적고 커집니다. (현재 백엔드가 이 두 값을 받지 않아 전송되어도 무시됩니다)
+                    값을 키우면 클러스터가 적고 커집니다. 비워 두면 기본값(5 / 2)을 씁니다.
+                    <br />
+                    같은 파일이라도 기간·마스킹·군집화 값을 바꾸면 새로 분석합니다.
                   </div>
-                  */}
 
                 </div>
 
@@ -546,26 +677,93 @@ export default function AnalyzePage() {
           </div>
 
           <div style={S.card}>
-            <div style={S.cardHeader}><span style={S.cardTitle}>분석 이력</span></div>
+            <div style={S.cardHeader}>
+              <span style={S.cardTitle}>분석 이력</span>
+              <span style={{ fontSize: 11, color: "#9CA3AF" }}>
+                {historyInfo.totalCount.toLocaleString()}건
+              </span>
+            </div>
+
+            <div style={S.historyFilters}>
+              {/* scope=mine 이 기본. 전체 분석은 다른 사람이 올린 분석까지 본다. */}
+              <div style={S.segment}>
+                {[{ key: "mine", label: "내 분석" }, { key: "all", label: "전체 분석" }].map((t) => (
+                  <button key={t.key}
+                    style={{ ...S.segmentBtn, ...(historyScope === t.key ? S.segmentBtnOn : {}) }}
+                    onClick={() => { setHistoryScope(t.key); loadHistory(0, t.key, onlyCompleted); }}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <label style={S.checkLabelSm}>
+                <input type="checkbox" checked={onlyCompleted}
+                  onChange={(e) => { setOnlyCompleted(e.target.checked); loadHistory(0, historyScope, e.target.checked); }} />
+                완료만 보기
+              </label>
+            </div>
+
             <div style={{ padding: 0 }}>
-              {history.length === 0
-                ? <div style={{ padding: 16, fontSize: 12, color: "#9CA3AF" }}>이력 없음</div>
-                : history.map((r, i) => (
-                  <div key={i} style={{ padding: "12px 16px", borderBottom: "1px solid #F3F4F6", fontSize: 12 }}>
+              {historyLoading && <div style={S.historyEmpty}>불러오는 중...</div>}
+
+              {!historyLoading && history.length === 0 && (
+                <div style={S.historyEmpty}>
+                  {historyScope === "mine"
+                    ? "아직 요청한 분석이 없습니다. 전체 분석을 누르면 다른 사람의 분석을 볼 수 있습니다."
+                    : "분석 이력이 없습니다."}
+                </div>
+              )}
+
+              {!historyLoading && history.map((r) => {
+                const isOpen = analysisId === r.analysisId;
+                return (
+                  <div key={`${r.analysisId}-${r.requestedBy || ""}`}
+                    onClick={() => openAnalysis(r)}
+                    style={{ ...S.historyRow, ...(isOpen ? S.historyRowOn : {}) }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                      <span style={{ fontFamily: "monospace", color: "#374151" }}>#{r.analysisId}</span>
-                      <span style={{
-                        fontSize: 10, fontWeight: 500, padding: "2px 8px", borderRadius: 10,
-                        background: r.status === "COMPLETED" ? "#D1FAE5" : "#FDECEA",
-                        color: r.status === "COMPLETED" ? "#065F46" : "#B91C1C",
-                      }}>{r.status}</span>
+                      <span style={{ fontFamily: "monospace", color: "#374151" }}>
+                        #{r.analysisId}{isOpen && <span style={S.nowTag}>보는 중</span>}
+                      </span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ ...S.statusTag, ...statusStyle(r.status) }}>{r.status}</span>
+                        {r.isMine && (
+                          <button style={S.btnDeleteSm} disabled={deleting === r.analysisId}
+                            title="내 이력에서 삭제"
+                            onClick={(e) => { e.stopPropagation(); handleDeleteHistory(r); }}>
+                            {deleting === r.analysisId ? "…" : "✕"}
+                          </button>
+                        )}
+                      </span>
                     </div>
+
                     <div style={{ color: "#6B7280" }}>{r.fileName}</div>
                     <div style={{ color: "#9CA3AF", marginTop: 2 }}>{r.period}</div>
+
+                    <div style={S.historyMeta}>
+                      {historyScope === "all" && r.requestedBy && <span>요청자 {r.requestedBy}</span>}
+                      {r.requestedAt && <span>{formatDateTime(r.requestedAt)}</span>}
+                    </div>
+                    <div style={S.historyMeta}>
+                      {r.isMaskingEnabled && <span>마스킹</span>}
+                      {r.isTranslationEnabled && <span>번역</span>}
+                      {typeof r.minClusterSize === "number" && <span>최소 클러스터 {r.minClusterSize}</span>}
+                      {typeof r.minSamples === "number" && <span>최소 샘플 {r.minSamples}</span>}
+                    </div>
                   </div>
-                ))
-              }
+                );
+              })}
             </div>
+
+            {historyInfo.totalPages > 1 && (
+              <div style={S.historyPager}>
+                <button style={S.pagerBtn} disabled={historyPage === 0}
+                  onClick={() => loadHistory(historyPage - 1, historyScope, onlyCompleted)}>이전</button>
+                <span style={{ fontSize: 11, color: "#6B7280" }}>
+                  {historyPage + 1} / {historyInfo.totalPages}
+                </span>
+                <button style={S.pagerBtn} disabled={historyPage >= historyInfo.totalPages - 1}
+                  onClick={() => loadHistory(historyPage + 1, historyScope, onlyCompleted)}>다음</button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -731,6 +929,21 @@ const S = {
   tabs:        { display: "flex", gap: 2, background: "#F3F4F6", borderRadius: 10, padding: 4, width: "fit-content", marginBottom: 20 },
   tab:         { padding: "8px 20px", borderRadius: 8, fontSize: 13, cursor: "pointer", color: "#6B7280" },
   tabActive:   { background: "#fff", color: "#1565C0", fontWeight: 600, boxShadow: "0 1px 3px rgba(0,0,0,.08)" },
+  historyFilters: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 16px", borderBottom: "1px solid #F3F4F6", flexWrap: "wrap" },
+  segment:     { display: "flex", border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" },
+  segmentBtn:  { padding: "5px 12px", fontSize: 11, background: "#fff", border: "none", cursor: "pointer", color: "#6B7280" },
+  segmentBtnOn:{ background: "#1565C0", color: "#fff", fontWeight: 600 },
+  checkLabelSm:{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#6B7280", cursor: "pointer" },
+  historyEmpty:{ padding: 16, fontSize: 12, color: "#9CA3AF", lineHeight: 1.6 },
+  historyRow:  { padding: "12px 13px 12px 16px", borderBottom: "1px solid #F3F4F6", fontSize: 12, cursor: "pointer", transition: "background .12s",
+                 borderLeftWidth: 3, borderLeftStyle: "solid", borderLeftColor: "transparent" },
+  historyRowOn:{ background: "#EFF6FF", borderLeftColor: "#1565C0" },
+  historyMeta: { display: "flex", flexWrap: "wrap", gap: "2px 10px", marginTop: 4, fontSize: 10, color: "#9CA3AF" },
+  historyPager:{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "10px 16px", borderTop: "1px solid #F3F4F6" },
+  pagerBtn:    { padding: "4px 10px", fontSize: 11, border: "1px solid #E5E7EB", borderRadius: 6, background: "#fff", cursor: "pointer" },
+  statusTag:   { fontSize: 10, fontWeight: 500, padding: "2px 8px", borderRadius: 10 },
+  nowTag:      { fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 8, background: "#1565C0", color: "#fff", marginLeft: 6 },
+  btnDeleteSm: { fontSize: 11, lineHeight: 1, padding: "3px 6px", border: "1px solid #FECACA", borderRadius: 6, background: "#fff", color: "#B91C1C", cursor: "pointer" },
   card:        { background: "#fff", borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,.08)", border: "1px solid rgba(0,0,0,.06)" },
   cardHeader:  { padding: "14px 20px", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "space-between" },
   cardTitle:   { fontSize: 14, fontWeight: 600, color: "#111827" },
@@ -743,7 +956,6 @@ const S = {
   optionLabel: { fontSize: 12, color: "#6B7280", display: "flex", alignItems: "center", gap: 6 },
   optionInput: { height: 32, padding: "0 10px", border: "1px solid #D1D5DB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", width: 132 },
   checkLabel:  { fontSize: 12, color: "#374151", display: "flex", alignItems: "center", gap: 5, cursor: "pointer" },
-  checkLabelDisabled: { color: "#9CA3AF", cursor: "not-allowed" },
   pendingTag:  { fontSize: 9, fontWeight: 600, padding: "1px 6px", borderRadius: 8, background: "#FEF3C7", color: "#92400E", border: "1px solid #FDE68A" },
   dropzoneDrag:{ borderColor: "#1565C0", background: "#EFF8FF" },
   dropzoneDisabled: { opacity: 0.5, cursor: "not-allowed", background: "#F9FAFB" },
