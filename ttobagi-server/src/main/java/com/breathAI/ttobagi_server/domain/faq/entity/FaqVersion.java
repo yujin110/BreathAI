@@ -66,7 +66,8 @@ public class FaqVersion {
     @ColumnDefault("CURRENT_TIMESTAMP")
     private LocalDateTime createdAt;
 
-    public enum VersionType { UPLOAD, DOWNLOAD }
+    // MANUAL은 관리자가 직접 만든 버전, RESTORE는 이전 버전으로 복원한 직후의 버전
+    public enum VersionType { UPLOAD, DOWNLOAD, MANUAL, RESTORE }
 
     @PrePersist
     protected void onCreate() {

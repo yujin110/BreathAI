@@ -3,7 +3,7 @@
 API 명세서(`API_명세서__DTO.pdf`, 19쪽)와 실제 BE 동작이 다른 부분을 정리한다.
 FE·AI 연동은 이 문서의 "실제 동작"을 기준으로 한다.
 
-- 기준 코드: `develop` `d47e1fc` (2026-10-18), 이후 #61 수정(응답 형식·이력 기간·FAQ 카테고리), #64(SSE 8시간), #66(AI 파일별 요약값 저장), #84(계정별 분석 이력·군집화 설정), #86(FAQ 카테고리·FAQ별 수정 이력) 반영
+- 기준 코드: `develop` `d47e1fc` (2026-10-18), 이후 #61 수정(응답 형식·이력 기간·FAQ 카테고리), #64(SSE 8시간), #66(AI 파일별 요약값 저장), #84(계정별 분석 이력·군집화 설정), #86(FAQ 카테고리·FAQ별 수정 이력), #90(FAQ 관리 보강) 반영
 - 확인 방법: 명세서 원문과 코드를 대조하고, 로컬에서 BE를 띄워 모든 API(69건)를 실제로 호출해 응답을 확인했다.
 - 명세서와 같은 부분은 적지 않는다. 표의 "결정일"이 비어 있으면 이번 정리에서 처음 기록한 것이다.
 - [7. 결정 대기](#7-결정-대기)에 있는 항목은 코드를 고칠지 명세를 고칠지 아직 정하지 않았다.
@@ -69,10 +69,16 @@ FE·AI 연동은 이 문서의 "실제 동작"을 기준으로 한다.
 | `PATCH /faq/{faqId}` | — | 관리자만. `standardQuestion`, `answer`는 필수(없으면 400). 응답은 명세대로 `question` 이름을 쓴다. `qType`을 바꾸면 `category`도 카테고리 마스터의 이름으로 바뀐다(마스터에 없는 코드면 `null`). 같은 `qType`으로 다시 보내면 `category`는 그대로 | 2026-10-18 |
 | `DELETE /faq/{faqId}` | — | 관리자만. 실제로 지우지 않고 비활성 처리하며, 이력에 `DELETE`로 남는다 | |
 | `GET /faq/history` | — | `editType`은 `CREATE`, `EXPAND`, `MANUAL`, `DELETE` 중 하나. **`faqId`(새 파라미터, 선택)**를 주면 그 FAQ의 이력만 보여 준다(삭제된 FAQ 포함, 없는 FAQ면 빈 목록). 둘 다 줄 수 있다 | 2026-10-26 |
-| `GET /faq/versions`, `/faq/versions/{versionId}` | — | 같다 (시각만 `Z`) | 2026-10-10 |
+| `GET /faq/versions`, `/faq/versions/{versionId}` | — | 같다 (시각만 `Z`). `versionType`에 `MANUAL`(직접 만든 버전), `RESTORE`(복원 직후 버전)가 더 있다 | 2026-10-26 |
+| `POST /faq/versions` (새 API) | 없음 | 관리자만. 다운로드 없이 지금 운영 FAQ를 버전(`MANUAL`)으로 저장한다. 응답은 버전 상세와 같다 | 2026-10-26 |
+| `POST /faq/versions/{versionId}/restore` (새 API) | 없음 | 관리자만. 지금 운영 FAQ를 그 버전 사본대로 되돌린다: 사본에 있는데 삭제된 FAQ는 되살리고(이력 `CREATE`), 내용(질문·답변·키워드·카테고리 코드·카테고리)이 다르면 사본 값으로 바꾸고(`MANUAL`), 사본에 없는 FAQ는 삭제(`DELETE`)한다. 이력 사유는 `"v3_20261020 버전으로 복원"` 형식. **그 버전을 만든 뒤에 반영된 FAQ 후보는 대기(`PENDING`)로 되돌린다**(검토 기록 `REVERT`). 바뀐 것이 있으면 결과를 새 버전(`RESTORE`)으로 남긴다. 응답 `{restoredVersionId, restoredVersionName, newVersionId, newVersionName, updatedCount, deletedCount, reactivatedCount, revertedCandidateCount}`, 바뀐 것이 없으면 `newVersionId`·`newVersionName`이 없다. 없는 버전은 404 | 2026-10-26 |
+| `GET /faq/versions/compare?baseId=&targetId=` (새 API) | 없음 | 로그인한 사용자 누구나. `targetId`를 생략하면 기준 버전과 지금 운영 FAQ를 비교한다. 응답 `{baseVersionId, baseVersionName, targetVersionId, targetVersionName, addedCount, deletedCount, changedCount, added, deleted, changed}`. `added`·`deleted`는 `[{faqId, qType, category, standardQuestion}]`, `changed`는 `[{faqId, standardQuestion, changes: [{field, before, after}]}]`로 **바뀐 칸만** 담는다(`field`는 `standardQuestion`, `answer`, `keywords`, `qType`, `category`, 그림이 든 긴 답변 때문에 전체 내용은 보내지 않는다) | 2026-10-26 |
 | `GET /faq/download` | 엑셀(`.xlsx`), `faq_v3_20260831.xlsx` | **CSV**(`text/csv; charset=UTF-8`, 엑셀에서 한글이 깨지지 않게 UTF-8 BOM). 파일 이름 `faq_v{버전번호}_{다운로드한 날 yyyyMMdd}.csv`. 열은 `ID, 카테고리, 질문, 답변, 키워드`(키워드는 쉼표로 이어 씀, 유사질문 제외). 답변은 DB 내용(HTML) 그대로. `ApiResponse`가 아니라 파일 자체가 응답이다 | 2026-10-05 |
 | (위 동작) | — | `versionId`를 생략하면 마지막 버전 이후 바뀐 것이 있을 때 **새 버전(DOWNLOAD)을 만들고** 그 버전을 내려준다. 바뀐 것이 없으면 마지막 버전, 버전이 하나도 없으면 첫 버전을 만든다. 로그인한 사용자는 누구나 다운로드할 수 있다 | 2026-10-05 |
 | `GET /faq/recommendations/{analysisId}` | `matchedFaqs[]`는 `matchedFaqId`, `question`, `matchScore` | `clusterLabel`, `category`, `similarQuestions`가 더 온다. `matchedFaqs[]`에는 `matchedFaqSeqNum`(AI가 보낸 원본 번호)이 더 온다 | |
+| `PATCH /faq/recommendations/{candidateId}` (새 API) | 없음 | 관리자만. 승인 전 후보의 `standardQuestion`·`answerDraft`(필수), `keywords`·`qType`(선택, 생략하면 유지)을 저장한다. 코드가 바뀌면 카테고리 이름은 마스터에서 찾는다. 대기(`PENDING`) 후보만 가능하고 아니면 409. 바뀐 칸의 전후 값을 검토 기록(`gold_faq_action_log`, `EDIT`)에 남긴다. 응답은 후보 목록의 항목과 같은 형식 | 2026-10-26 |
+| `PATCH /faq/recommendations/{candidateId}/reject` (새 API) | 없음 | 관리자만. 본문 `{ "reason": "…" }`은 선택(본문 없이 보내도 된다). 후보를 반려(`REJECTED`)하고 반려한 사람·시각·사유를 검토 기록(`REJECT`)에 남긴다. 대기 후보만 가능하고 아니면 409, 없는 후보는 404. 응답 `data` 없음 | 2026-10-26 |
+| `POST /faq` (새 API) | 없음 | 관리자만. `{ standardQuestion, answer, keywords, qType }`(질문·답변 필수). 카테고리 이름은 `qType`으로 마스터에서 찾는다. 변경 이력에 `CREATE`로 남는다. 응답은 FAQ 상세와 같다 | 2026-10-26 |
 | `POST /faq/apply` | — | 관리자만. 요청에 `clusterLabel`을 더 보낼 수 있다(선택). 이미 반영한 후보는 409. 응답 `editType`은 신규면 `CREATE`, 기존 FAQ 확장이면 `EXPAND`. `qType`을 생략하거나 후보와 같게 보내면 후보의 카테고리를 쓰고, 다른 코드로 바꾸면 카테고리 이름을 마스터에서 다시 찾는다(FAQ 수정과 같은 규칙) | 2026-10-18 |
 
 ## 5. BE↔AI 연동 (명세에 없음)

@@ -57,6 +57,15 @@ public class FaqController {
         return ResponseEntity.ok(ApiResponse.success(faqService.getFaqDetail(faqId), "FAQ를 성공적으로 조회했습니다."));
     }
 
+    // FAQ 직접 등록
+    @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<FaqDetailResponse>> createFaq(
+            @RequestBody @Valid FaqCreateRequest request,
+            @AuthenticationPrincipal String email) {
+        return ResponseEntity.ok(ApiResponse.success(faqService.createFaq(request, email), "FAQ가 등록되었습니다."));
+    }
+
     // FAQ 수정, 전달된 필드만 반영
     @PatchMapping("/{faqId}")
     @PreAuthorize("hasRole('ADMIN')")
@@ -84,6 +93,32 @@ public class FaqController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
         return ResponseEntity.ok(ApiResponse.success(faqVersionService.getVersions(page, size)));
+    }
+
+    // FAQ 버전 직접 만들기, 다운로드 없이 현재 상태를 저장
+    @PostMapping("/versions")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<FaqVersionDetailResponse>> createFaqVersion(
+            @AuthenticationPrincipal String email) {
+        return ResponseEntity.ok(ApiResponse.success(faqVersionService.createManualVersion(email), "FAQ 버전을 만들었습니다."));
+    }
+
+    // FAQ 버전 비교, targetId를 생략하면 현재 운영 FAQ와 비교
+    @GetMapping("/versions/compare")
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<FaqVersionCompareResponse>> compareFaqVersions(
+            @RequestParam Long baseId,
+            @RequestParam(required = false) Long targetId) {
+        return ResponseEntity.ok(ApiResponse.success(faqVersionService.compareVersions(baseId, targetId), "FAQ 버전을 비교했습니다."));
+    }
+
+    // FAQ 버전 복원, 현재 FAQ를 그 버전 내용으로 되돌리고 결과를 새 버전으로 남긴다
+    @PostMapping("/versions/{versionId}/restore")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<FaqVersionRestoreResponse>> restoreFaqVersion(
+            @PathVariable Long versionId,
+            @AuthenticationPrincipal String email) {
+        return ResponseEntity.ok(ApiResponse.success(faqVersionService.restoreVersion(versionId, email), "FAQ 버전을 복원했습니다."));
     }
 
     // FAQ 버전 상세 조회, 버전에 묶인 변경 목록 포함
@@ -126,6 +161,27 @@ public class FaqController {
     public ResponseEntity<ApiResponse<FaqCandidateListResponse>> getFaqRecommendations(
             @PathVariable Long analysisId) {
         return ResponseEntity.ok(ApiResponse.success(faqService.getFaqRecommendations(analysisId), "추천 FAQ 리스트를 성공적으로 조회했습니다."));
+    }
+
+    // FAQ 후보 초안 수정, 승인 전에 내용만 저장
+    @PatchMapping("/recommendations/{candidateId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<FaqCandidateListResponse.FaqCandidateItem>> updateFaqCandidate(
+            @PathVariable Long candidateId,
+            @RequestBody @Valid FaqCandidateUpdateRequest request,
+            @AuthenticationPrincipal String email) {
+        return ResponseEntity.ok(ApiResponse.success(faqService.updateCandidate(candidateId, request, email), "FAQ 후보를 수정했습니다."));
+    }
+
+    // FAQ 후보 반려, 사유는 선택
+    @PatchMapping("/recommendations/{candidateId}/reject")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> rejectFaqCandidate(
+            @PathVariable Long candidateId,
+            @RequestBody(required = false) FaqCandidateRejectRequest request,
+            @AuthenticationPrincipal String email) {
+        faqService.rejectCandidate(candidateId, request != null ? request.getReason() : null, email);
+        return ResponseEntity.ok(ApiResponse.success(null, "FAQ 후보를 반려했습니다."));
     }
 
     // FAQ 후보를 운영 FAQ로 반영
