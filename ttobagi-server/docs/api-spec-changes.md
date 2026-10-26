@@ -3,7 +3,7 @@
 API 명세서(`API_명세서__DTO.pdf`, 19쪽)와 실제 BE 동작이 다른 부분을 정리한다.
 FE·AI 연동은 이 문서의 "실제 동작"을 기준으로 한다.
 
-- 기준 코드: `develop` `d47e1fc` (2026-10-18), 이후 #61 수정(응답 형식·이력 기간·FAQ 카테고리), #64(SSE 8시간), #66(AI 파일별 요약값 저장), #84(계정별 분석 이력·군집화 설정), #86(FAQ 카테고리·FAQ별 수정 이력), #90(FAQ 관리 보강), #92(가입 이메일 인증·감사로그·업로드 오류 행) 반영
+- 기준 코드: `develop` `d47e1fc` (2026-10-18), 이후 #61 수정(응답 형식·이력 기간·FAQ 카테고리), #64(SSE 8시간), #66(AI 파일별 요약값 저장), #84(계정별 분석 이력·군집화 설정), #86(FAQ 카테고리·FAQ별 수정 이력), #90(FAQ 관리 보강), #92(가입 이메일 인증·감사로그·업로드 오류 행), #96(감사로그 작업 분류) 반영
 - 확인 방법: 명세서 원문과 코드를 대조하고, 로컬에서 BE를 띄워 모든 API(69건)를 실제로 호출해 응답을 확인했다.
 - 명세서와 같은 부분은 적지 않는다. 표의 "결정일"이 비어 있으면 이번 정리에서 처음 기록한 것이다.
 - [7. 결정 대기](#7-결정-대기)에 있는 항목은 코드를 고칠지 명세를 고칠지 아직 정하지 않았다.
@@ -23,8 +23,8 @@ FE·AI 연동은 이 문서의 "실제 동작"을 기준으로 한다.
 | 인증 | Bearer 토큰 | 같다. 토큰 없이 부를 수 있는 API는 회원가입 인증 코드 요청·회원가입·로그인·로그아웃·토큰 재발급·재설정 요청·재설정 확정, `/actuator/health`, AI 콜백(별도 토큰)뿐이다 | 2026-10-26 |
 | 상태 확인 | 없음 | `GET /actuator/health` → `{"groups":["liveness","readiness"],"status":"UP"}` (인증 없음, `ApiResponse` 형식 아님) | 2026-10-17 |
 | Swagger | 없음 | 배포 서버(prod)에서는 꺼져 있다. `SWAGGER_ENABLED=true`로 켠다 | 2026-10-17 |
-| 감사로그 (명세에 없음) | 없음 | `/api/`로 시작하는 **모든 API 호출**을 `gold_audit_log`에 남긴다: 시각, 사용자 이메일(토큰의 사용자, 로그인 전 요청은 요청에 적힌 이메일, AI 콜백 등은 없음), 메서드, 경로, 쿼리 문자열, 응답 상태, 성공 여부(400 미만), IP(nginx의 `X-Real-IP`), 처리 시간. **요청 본문은 남기지 않는다**(비밀번호 보호). 401·403으로 막힌 요청과 로그인 실패도 남는다. 서버 상태 확인·Swagger·OPTIONS는 남기지 않는다. 탈퇴해도 지우지 않는다(계정과 연결하지 않고 이메일을 글자로 저장). 보관은 실증 종료까지, 자동 삭제 없음 | 2026-10-26 |
-| `GET /audit-logs` (새 API) | 없음 | 관리자만. `from`·`to`(yyyy-MM-dd, 끝 날짜 포함), `email`·`path`(일부만 맞아도 찾음), `method`(대소문자 무관), `result`(`success`·`fail`, 그 외 400), `page`(기본 0), `size`(기본 50). 최신순. 응답 `{totalCount, totalPages, currentPage, size, logs: [{logId, createdAt, email, method, path, query, status, success, ip, durationMs}]}` | 2026-10-26 |
+| 감사로그 (명세에 없음) | 없음 | `/api/`로 시작하는 **모든 API 호출**을 `gold_audit_log`에 남긴다: 시각, 사용자 이메일(토큰의 사용자, 로그인 전 요청은 요청에 적힌 이메일, AI 콜백 등은 없음), 메서드, 경로, 쿼리 문자열, 응답 상태, 성공 여부(400 미만), IP(nginx의 `X-Real-IP`), 처리 시간, **작업 이름·분류·대상**(예: "FAQ 수정", `FAQ`, "FAQ #123", 2026-10-27). 분류는 `AUTH`(계정·보안), `ANALYSIS`(분석 업로드·이력 삭제), `FAQ`(FAQ·후보·버전 변경), `EXPORT`(FAQ 다운로드·감사로그 조회), `READ`(일반 조회), `AUTO`(진행 상태 확인·실시간 연결·AI 콜백·토큰 재발급). 표에 없는 요청은 "기타 요청"(GET은 `READ`, 그 외는 분류 없음). **요청 본문은 남기지 않는다**(비밀번호 보호). 401·403으로 막힌 요청과 로그인 실패도 남는다. 서버 상태 확인·Swagger·OPTIONS는 남기지 않는다. 탈퇴해도 지우지 않는다(계정과 연결하지 않고 이메일을 글자로 저장). 보관은 실증 종료까지, 자동 삭제 없음 | 2026-10-26 |
+| `GET /audit-logs` (새 API) | 없음 | 관리자만. **기본은 주요 작업만**: `AUTH`·`ANALYSIS`·`FAQ`·`EXPORT`·분류 없음 + 401·403으로 막힌 조회. `includeReads=true`면 일반 조회(`READ`)까지. **`AUTO`는 어느 경우에도 보이지 않는다**(기록은 남음). 필터: `category`(`AUTH`·`ANALYSIS`·`FAQ`·`EXPORT`·`READ`, 대소문자 무관, 그 외·`AUTO`는 400), `from`·`to`(yyyy-MM-dd, 끝 날짜 포함), `email`·`path`(일부만 맞아도 찾음), `method`(대소문자 무관), `result`(`success`·`fail`, 그 외 400), `page`(기본 0), `size`(기본 50). 최신순. 응답 `{totalCount, totalPages, currentPage, size, logs: [{logId, createdAt, email, method, path, query, status, success, ip, durationMs, action, category, target, resultLabel}]}`. `resultLabel`: 성공 / 잘못된 요청(400) / 로그인 필요(401) / 권한 없음(403) / 없음(404) / 충돌(409) / 용량 초과(413) / 횟수 초과(429) / 서버 오류(5xx) / 실패(그 밖의 4xx) | 2026-10-27 |
 
 ## 2. auth
 
@@ -100,7 +100,7 @@ FE·AI 연동은 이 문서의 "실제 동작"을 기준으로 한다.
 
 ## 6. DB 설계
 
-Flyway V6(2026-10-18)·V7·V8(2026-10-26)에서 바뀌었다. 팀 ERD는 V8까지 반영됐다(2026-10-26).
+Flyway V6(2026-10-18)·V7·V8(2026-10-26)·V9(2026-10-27)에서 바뀌었다. 팀 ERD는 V9까지 반영됐다(2026-10-27).
 
 - `gold_analysis_job`: `total_log_count`, `correct_count`, `low_quality_count`, `unanswer_count`, `current_unanswer_rate`, `predicted_accuracy_gain`, `resolved_count_by_ai` 추가 (모두 빈 값 허용)
 - `gold_analysis_daily_stat` 새 테이블: 분석·날짜별 `total_cnt`, `answer_cnt`, `low_quality_count`, `unanswer_cnt` (`analysis_id` + `stat_date` 고유)
@@ -110,6 +110,7 @@ Flyway V6(2026-10-18)·V7·V8(2026-10-26)에서 바뀌었다. 팀 ERD는 V8까�
 - 분석 행을 지울 때는 `gold_analysis_history`의 해당 행도 먼저 지워야 한다 (외래키)
 - V8 `gold_signup_verification` 새 테이블: 이메일(고유)별 가입 인증 코드, 실패 횟수, 만료·보낸 시각. 계정과 연결하지 않으며 가입에 성공하면 지운다
 - V8 `gold_audit_log` 새 테이블: API 호출 감사로그(1장 참고). 계정과 연결하지 않는다(외래키 없음)
+- V9 `gold_audit_log`: `action`(작업 이름), `category`(분류), `target`(대상) 추가, `category` 색인
 
 ## 7. 결정 대기
 

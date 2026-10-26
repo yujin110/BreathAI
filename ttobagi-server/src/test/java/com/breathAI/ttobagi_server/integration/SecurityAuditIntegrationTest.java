@@ -135,16 +135,36 @@ class SecurityAuditIntegrationTest {
                 .andExpect(status().isForbidden());
         mvc.perform(get("/api/v1/auth/me")).andExpect(status().isUnauthorized());
         mvc.perform(get("/actuator/health")).andExpect(status().isOk());
+        // 화면이 자동으로 부르는 진행 상태 확인
+        mvc.perform(get("/api/v1/dashboard/analyze/999999999").header(HttpHeaders.AUTHORIZATION, bearer(user)))
+                .andExpect(status().isNotFound());
 
+        // 기본 조회는 주요 작업만: 로그인·가입·권한 없음은 보이고 일반 조회와 자동 요청은 안 보인다
         List<Map<String, Object>> logs = logs(admin, "email=" + userEmail);
         Map<String, Object> failedLogin = find(logs, "POST", "/api/v1/auth/login", 401);
         assertThat(failedLogin.get("success")).isEqualTo(false);
         assertThat(failedLogin.get("ip")).isEqualTo("203.0.113.7");
-        assertThat(find(logs, "GET", "/api/v1/faq/categories", 200).get("query")).isEqualTo("probe=" + userEmail.substring(0, 12));
-        assertThat(find(logs, "POST", "/api/v1/faq/versions", 403).get("success")).isEqualTo(false);
+        assertThat(failedLogin.get("action")).isEqualTo("로그인");
+        assertThat(failedLogin.get("category")).isEqualTo("AUTH");
+        assertThat(failedLogin.get("resultLabel")).isEqualTo("로그인 필요");
+        Map<String, Object> denied = find(logs, "POST", "/api/v1/faq/versions", 403);
+        assertThat(denied.get("action")).isEqualTo("FAQ 버전 만들기");
+        assertThat(denied.get("resultLabel")).isEqualTo("권한 없음");
         // 가입 인증 코드 요청과 가입도 요청에 적힌 이메일로 남는다
         find(logs, "POST", "/api/v1/auth/signup/code", 200);
-        find(logs, "POST", "/api/v1/auth/signup", 201);
+        assertThat(find(logs, "POST", "/api/v1/auth/signup", 201).get("resultLabel")).isEqualTo("성공");
+        assertThat(logs).noneMatch(l -> "/api/v1/faq/categories".equals(l.get("path")));
+        assertThat(logs).noneMatch(l -> "/api/v1/dashboard/analyze/999999999".equals(l.get("path")));
+
+        // 조회 포함이면 일반 조회도 보이지만, 자동 요청은 여전히 안 보인다
+        List<Map<String, Object>> withReads = logs(admin, "includeReads=true&email=" + userEmail);
+        Map<String, Object> read = find(withReads, "GET", "/api/v1/faq/categories", 200);
+        assertThat(read.get("query")).isEqualTo("probe=" + userEmail.substring(0, 12));
+        assertThat(read.get("category")).isEqualTo("READ");
+        assertThat(withReads).noneMatch(l -> "/api/v1/dashboard/analyze/999999999".equals(l.get("path")));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT category FROM gold_audit_log WHERE path = '/api/v1/dashboard/analyze/999999999' AND email = ?",
+                String.class, userEmail)).isEqualTo("AUTO");
 
         // 토큰 없는 호출은 사용자 없이 남고, 서버 상태 확인은 남기지 않는다
         assertThat(jdbcTemplate.queryForObject(
@@ -171,9 +191,20 @@ class SecurityAuditIntegrationTest {
         List<Map<String, Object>> failed = logs(admin, "email=" + adminEmail + "&result=fail&method=post&path=/restore");
         assertThat(failed).hasSize(1);
         assertThat(failed.get(0).get("status")).isEqualTo(404);
+        assertThat(failed.get(0).get("target")).isEqualTo("버전 #999999999");
+        assertThat(failed.get(0).get("resultLabel")).isEqualTo("없음");
         assertThat(logs(admin, "email=" + adminEmail + "&from=2000-01-01&to=2000-01-02")).isEmpty();
-        mvc.perform(get("/api/v1/audit-logs?result=maybe").header(HttpHeaders.AUTHORIZATION, bearer(admin)))
-                .andExpect(status().isBadRequest());
+
+        // 작업 종류로 거르기, 감사로그 조회 자체는 데이터 반출로 남는다
+        List<Map<String, Object>> faqOnly = logs(admin, "email=" + adminEmail + "&category=faq");
+        assertThat(faqOnly).isNotEmpty().allMatch(l -> "FAQ".equals(l.get("category")));
+        assertThat(logs(admin, "email=" + adminEmail + "&category=EXPORT"))
+                .anyMatch(l -> "감사로그 조회".equals(l.get("action")));
+
+        for (String query : List.of("result=maybe", "category=AUTO", "category=NONE")) {
+            mvc.perform(get("/api/v1/audit-logs?" + query).header(HttpHeaders.AUTHORIZATION, bearer(admin)))
+                    .andExpect(status().isBadRequest());
+        }
     }
 
     // ===== 업로드 오류 행 =====
