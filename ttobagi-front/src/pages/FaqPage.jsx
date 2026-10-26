@@ -47,7 +47,7 @@ export default function FaqPage() {
 
   // FAQ 후보 추천
 
-  // 변경 이력 (FAQ 단건이 아니라 전역 이력 — 서버가 faqId 필터를 받지 않는다)
+  // 전체 변경 이력 탭. FAQ 단건 이력은 카드의 "이력" 버튼(openFaqHistory)에서 faqId로 조회한다.
   const [histories, setHistories]   = useState([]);
   const [historyPage, setHistoryPage] = useState(0);
   const [historyInfo, setHistoryInfo] = useState({ totalCount: 0, totalPages: 0 });
@@ -55,14 +55,15 @@ export default function FaqPage() {
   const [historyLoaded, setHistoryLoaded] = useState(false);
 
 
-  // 카테고리 선택지. GET /api/v1/faq/categories 가 아직 없어서, 실패하면 null로 두고
-  // 명세서 GET /api/v1/faq 의 category 문자열 입력으로 떨어진다.
+  // 카테고리 선택지 [{ qType, name }]. 필터는 name 을, FAQ 등록 폼은 qType 을 쓴다.
+  // 받아오지 못하면 null 로 두고 필터는 문자열 입력으로 떨어진다.
   const [categories, setCategories] = useState(null);
 
   const [loading, setLoading]       = useState(true);
   const [modal, setModal]           = useState(null);
   // 특정 FAQ의 수정 이력 (GET /faq/history?faqId=)
   const [faqHistory, setFaqHistory] = useState(null);
+  const [creating, setCreating]     = useState(false);
   const { user } = useAuth();
   const toast = useToast();
 
@@ -87,12 +88,14 @@ export default function FaqPage() {
   const loadCategories = useCallback(async () => {
     try {
       const res = await faqApi.getCategories();
-      const names = (res.data?.categories || [])
-        .map((c) => (typeof c === "string" ? c : c?.name))
-        .filter(Boolean);
-      setCategories(names.length ? names : null);
+      // 문자열 배열로 오는 경우까지 받아 두고, 이름 기준으로 정렬한다
+      const list = (res.data?.categories || [])
+        .map((c) => (typeof c === "string" ? { qType: undefined, name: c } : c))
+        .filter((c) => c?.name);
+      list.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+      setCategories(list.length ? list : null);
     } catch {
-      setCategories(null); // 미구현(400/404)이든 다른 오류든 입력창으로 떨어진다
+      setCategories(null); // 조회 실패면 필터는 문자열 입력으로 떨어진다
     }
   }, []);
 
@@ -181,6 +184,31 @@ export default function FaqPage() {
     }
   };
 
+  // FAQ 직접 등록. 질문·답변은 필수이고 카테고리는 GET /faq/categories 드롭다운을 재사용한다.
+  const handleCreate = async (form) => {
+    if (!form.standardQuestion.trim() || !form.answer.trim()) {
+      toast.error("질문과 답변은 비워 둘 수 없습니다.");
+      return;
+    }
+    setCreating(true);
+    try {
+      const res = await faqApi.create({
+        standardQuestion: form.standardQuestion.trim(),
+        answer: form.answer.trim(),
+        keywords: form.keywords,
+        qType: form.qType,
+      });
+      toast.success(`FAQ #${res.data?.faqId}를 등록했습니다.`);
+      setModal(null);
+      await runSearch(0, query);
+      if (historyLoaded) runHistory(0, editType);
+    } catch (err) {
+      toast.error(err.message || "FAQ 등록에 실패했습니다.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const handleDelete = async (faqId) => {
     if (!confirm("이 FAQ를 삭제하시겠습니까?")) return;
     try {
@@ -235,7 +263,7 @@ export default function FaqPage() {
                   runSearch(0, { keyword: keywordInput.trim(), category: next });
                 }}>
                 <option value="">전체 카테고리</option>
-                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                {categories.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
             ) : (
               <input style={{ ...S.searchInput, width: 160 }} placeholder="카테고리명"
@@ -247,6 +275,11 @@ export default function FaqPage() {
               onClick={() => runSearch(0, { keyword: keywordInput.trim(), category: categoryInput.trim() })}>
               검색
             </button>
+            {isAdmin && (
+              <button style={S.btnCreate} onClick={() => setModal({ type: "create" })}>
+                + FAQ 등록
+              </button>
+            )}
             {(query.keyword || query.category) && (
               <button style={S.btnSm}
                 onClick={() => { setKeywordInput(""); setCategoryInput(""); runSearch(0, { keyword: "", category: "" }); }}>
@@ -416,6 +449,20 @@ export default function FaqPage() {
         </div>
       )}
 
+      {modal?.type === "create" && (
+        <div style={S.modalBg} onClick={() => setModal(null)}>
+          <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalTitle}>FAQ 등록</div>
+            <CreateFaqForm
+              categories={categories}
+              saving={creating}
+              onSave={handleCreate}
+              onClose={() => setModal(null)}
+            />
+          </div>
+        </div>
+      )}
+
       {modal?.type === "edit" && (
         <div style={S.modalBg} onClick={() => setModal(null)}>
           <div style={S.modal} onClick={(e) => e.stopPropagation()}>
@@ -424,6 +471,58 @@ export default function FaqPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// FAQ 직접 등록 폼. 질문·답변은 필수, 카테고리는 선택(생략하면 서버가 null 로 둔다).
+function CreateFaqForm({ categories, saving, onSave, onClose }) {
+  const [q, setQ]       = useState("");
+  const [a, setA]       = useState("");
+  const [tags, setTags] = useState("");
+  const [qType, setQType] = useState("");
+
+  return (
+    <div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
+        <div>
+          <label style={S.modalLabel}>표준 질문</label>
+          <input style={S.input} placeholder="예: 지하철 막차 시간이 언제인가요?"
+            value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div>
+          <label style={S.modalLabel}>답변</label>
+          <textarea style={{ ...S.input, height: 140, resize: "vertical", paddingTop: 10 }}
+            value={a} onChange={(e) => setA(e.target.value)} />
+        </div>
+        <div>
+          <label style={S.modalLabel}>키워드 (쉼표로 구분)</label>
+          <input style={S.input} placeholder="막차, 첫차, 시간"
+            value={tags} onChange={(e) => setTags(e.target.value)} />
+        </div>
+        <div>
+          <label style={S.modalLabel}>카테고리</label>
+          <select style={{ ...S.input, cursor: "pointer" }} value={qType}
+            onChange={(e) => setQType(e.target.value)}>
+            <option value="">선택 안 함</option>
+            {(categories || []).map((c) => (
+              <option key={c.qType} value={c.qType}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div style={S.modalActions}>
+        <button style={S.btnSm} onClick={onClose}>취소</button>
+        <button style={{ ...S.btnAccept, padding: "8px 20px" }} disabled={saving}
+          onClick={() => onSave({
+            standardQuestion: q,
+            answer: a,
+            keywords: tags.split(",").map((t) => t.trim()).filter(Boolean),
+            qType: qType === "" ? undefined : Number(qType),
+          })}>
+          {saving ? "등록 중..." : "등록"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -475,6 +574,8 @@ function EditFaqForm({ faq, onSave, onClose }) {
 }
 
 const S = {
+  btnCreate:   { padding: "8px 14px", fontSize: 12, fontWeight: 600, border: "1.5px solid #1565C0", borderRadius: 8, background: "#fff", color: "#1565C0", cursor: "pointer", fontFamily: "inherit" },
+
   historyItem: { padding: "12px 0", borderBottom: "1px solid #F3F4F6" },
   diffRow:     { display: "flex", alignItems: "center", gap: 8, fontSize: 12, marginBottom: 6, flexWrap: "wrap" },
   diffBefore:  { color: "#B91C1C", textDecoration: "line-through" },
