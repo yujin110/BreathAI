@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom";
+import { useAuth } from "../hooks/useAuth.js";
 
 const NAV = [
   { to: "/dashboard", icon: "📊", label: "대시보드" },
@@ -6,10 +7,16 @@ const NAV = [
   // end: true가 없으면 NavLink가 접두사로 매칭해 /faq/versions 에서도 "FAQ 관리"에 불이 들어온다
   { to: "/faq",       icon: "📋", label: "FAQ 관리", end: true },
   { to: "/faq/versions", icon: "🗂️", label: "FAQ 버전 관리" },
+  // 감사로그는 백엔드가 @PreAuthorize("hasRole('ADMIN')")로 막으므로 관리자에게만 보여 준다
+  { to: "/audit-logs", icon: "🧾", label: "감사로그", adminOnly: true },
   { to: "/account",   icon: "👤", label: "계정 관리" },
 ];
 
 export default function Sidebar() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
+  const items = NAV.filter((n) => !n.adminOnly || isAdmin);
+
   return (
     <div style={S.sidebar}>
       <div style={S.logo}>
@@ -22,7 +29,7 @@ export default function Sidebar() {
 
       <nav style={{ flex: 1 }}>
         <div style={S.section}>메뉴</div>
-        {NAV.map((n) => (
+        {items.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end}
             style={({ isActive }) => ({ ...S.navItem, ...(isActive ? S.navActive : {}) })}>
             <span>{n.icon}</span>

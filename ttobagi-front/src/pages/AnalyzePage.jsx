@@ -3,13 +3,25 @@ import { ScatterChart, Scatter, XAxis, YAxis, Tooltip, Cell, ResponsiveContainer
 import { dashApi } from "../api/dashboard.js";
 import { faqApi } from "../api/faq.js";
 import MatchedFaqBadge from "../components/MatchedFaqBadge.jsx";
-import { isAccepted } from "../utils/reviewStatus.js";
 import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 
 // Spring의 spring.servlet.multipart.max-file-size=50MB 와 동일하게 맞춘다
 const HISTORY_SIZE = 10;
+
+// 백엔드 ReviewStatus: PENDING / ACCEPTED / REJECTED / APPLIED
+function statusLabel(status) {
+  if (status === "REJECTED") return "❌ 반려됨";
+  if (status === "APPLIED")  return "✅ 반영됨";
+  if (status === "ACCEPTED") return "✅ 승인됨";
+  return "대기";
+}
+function statusChip(status) {
+  if (status === "REJECTED") return { background: "#FDECEA", color: "#B91C1C" };
+  if (status === "PENDING")  return { background: "#DBEAFE", color: "#1E40AF" };
+  return { background: "#D1FAE5", color: "#065F46" };
+}
 
 // 백엔드 AnalysisJob.Status 5종에 맞춘 색. 진행 중은 파랑, 완료 초록, 실패 빨강.
 function statusStyle(status) {
@@ -128,6 +140,7 @@ export default function AnalyzePage() {
   const [drag, setDrag]             = useState(false);
   const [uploading, setUploading]   = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
+  const [uploadErrors, setUploadErrors] = useState(null); // 업로드 400의 행별 오류
   const [running, setRunning]       = useState(false);
   const [step, setStep]             = useState(-1);
   const [done, setDone]             = useState(false);
@@ -142,7 +155,12 @@ export default function AnalyzePage() {
   const [deleting, setDeleting]           = useState(null);
   const [analyzeResult, setAnalyzeResult] = useState(null);
   const [analysisId, setAnalysisId] = useState(null);
-  const [reviewing, setReviewing]   = useState(null); // 반영 중인 candidateId
+  const [reviewing, setReviewing]   = useState(null); // 처리 중인 candidateId
+  const [rejectTarget, setRejectTarget] = useState(null); // 반려 사유 입력 대상 후보
+  const [editTarget, setEditTarget]     = useState(null); // 수정 중인 후보
+  const [rejectReason, setRejectReason] = useState("");
+  // 후보 수정의 카테고리 선택지. GET /faq/categories 가 없으면 빈 배열로 둔다.
+  const [categories, setCategories]     = useState([]);
   const [startedAt, setStartedAt]   = useState(null); // 분석 시작 시각
   const [elapsed, setElapsed]       = useState(0);    // 경과 초
   const [options, setOptions]       = useState({
@@ -344,6 +362,13 @@ export default function AnalyzePage() {
     let cancelled = false;
     (async () => {
       await loadHistory(0, "mine", false);
+      // 후보 수정 모달의 카테고리 선택지. 없으면 "선택 안 함"만 남는다.
+      try {
+        const cat = await faqApi.getCategories();
+        if (!cancelled) setCategories(cat.data?.categories || []);
+      } catch {
+        /* 카테고리 API가 없거나 실패해도 수정 자체는 가능하다 */
+      }
       // 완료된 내 분석 중 가장 최근 것을 불러온다. 맨 위가 실패·진행 중이어도 화면이 비지 않는다.
       try {
         const r = await dashApi.getAnalysisHistory({ page: 0, size: 1, scope: "mine", status: "COMPLETED" });
@@ -371,10 +396,12 @@ export default function AnalyzePage() {
       return;
     }
     setFile(f);
+    setUploadErrors(null);
   };
 
   const doUpload = async () => {
     if (!file) return;
+    setUploadErrors(null);
 
     // 백엔드가 같은 범위로 검사해 400을 내므로, 보내기 전에 걸러 분석이 헛돌지 않게 한다
     const cluster = Number(options.minClusterSize);
@@ -403,7 +430,8 @@ export default function AnalyzePage() {
         periodStartDate: options.periodStartDate,
         periodEndDate: options.periodEndDate,
         isMaskingEnabled: options.isMaskingEnabled,
-        isTranslationEnabled: options.isTranslationEnabled,
+        // 외국어 번역은 AI 점검 중이라 화면에서 막아 두었다. 항상 false로 보낸다.
+        isTranslationEnabled: false,
         clustering: {
           minClusterSize: options.minClusterSize,
           minSamples: options.minSamples,
@@ -429,63 +457,114 @@ export default function AnalyzePage() {
     } catch (err) {
       setUploading(false);
       setRunning(false);
-      toast.error(err.message || "업로드에 실패했습니다.");
+      // 파일 내용 오류는 400 + data { totalErrors, errors[{row, column, reason}] } 로 온다.
+      // errors 는 앞의 일부만 오고 totalErrors 가 전체 건수다.
+      const report = err?.status === 400 && Array.isArray(err?.data?.errors) ? err.data : null;
+      setUploadErrors(report);
+      if (!report) toast.error(err.message || "업로드에 실패했습니다.");
     }
   };
 
-  // 승인은 POST /api/v1/faq/apply로 실제 gold_faq에 반영해야 한다.
-  // (반려는 백엔드 엔드포인트가 없어 화면 상태로만 남고 새로고침하면 사라진다 —
-  //  docs/backend-api-requests.md 에 명세 제안)
-  const handleCandidate = async (candidateId, action) => {
+  // 후보 목록을 서버에서 다시 받는다. 승인·반려·수정 뒤에 화면 상태만 바꾸지 않고 항상 갱신한다.
+  const reloadCandidates = async (id) => {
+    if (!id) return;
+    try {
+      const r = await faqApi.getCandidates(id);
+      setCandidates(r.data?.recommendations || []);
+    } catch (err) {
+      toast.error(err.message || "FAQ 후보를 다시 불러오지 못했습니다.");
+    }
+  };
+
+  // 승인(POST /faq/apply) — 실제 gold_faq 에 반영된다
+  const handleAccept = async (candidateId) => {
     const c = candidates.find((x) => x.candidateId === candidateId);
     if (!c) return;
-
-    if (action === "ACCEPTED") {
-      if (!analysisId) {
-        toast.error("분석 ID를 확인할 수 없어 반영할 수 없습니다.");
-        return;
-      }
-      if (!c.standardQuestion || !c.answerDraft) {
-        toast.error("표준 질문 또는 답변 초안이 비어 있는 후보는 반영할 수 없습니다.");
-        return;
-      }
-      // 백엔드 FaqApplyRequest.keywords가 @NotEmpty라 빈 배열은 400이 된다
-      if (!c.representativeKeywords?.length) {
-        toast.error("대표 키워드가 없는 후보는 반영할 수 없습니다.");
-        return;
-      }
-
-      setReviewing(candidateId);
-      try {
-        const res = await faqApi.apply({
-          analysisId,
-          clusterId: c.clusterId,
-          // clusterLabel은 FaqApplyRequest 명세에 없어 보내지 않는다
-          // (백엔드 DTO에는 선택 필드로 있지만 명세 기준으로 맞춘다)
-          candidateId: c.candidateId,
-          qType: c.qType,
-          finalQuestion: c.standardQuestion,
-          finalAnswer: c.answerDraft,
-          keywords: c.representativeKeywords,
-          isManualPatchConfirmed: false,
-        });
-        // 백엔드가 EXPAND 후보면 기존 FAQ를 확장하고 editType으로 알려준다
-        toast.success(res.data?.editType === "EXPAND"
-          ? "기존 FAQ를 확장했습니다."
-          : "신규 FAQ로 반영되었습니다.");
-      } catch (err) {
-        toast.error(err.message || "FAQ 반영에 실패했습니다.");
-        return;
-      } finally {
-        setReviewing(null);
-      }
+    if (!analysisId) {
+      toast.error("분석 ID를 확인할 수 없어 반영할 수 없습니다.");
+      return;
+    }
+    if (!c.standardQuestion || !c.answerDraft) {
+      toast.error("표준 질문 또는 답변 초안이 비어 있는 후보는 반영할 수 없습니다.");
+      return;
+    }
+    // 백엔드 FaqApplyRequest.keywords가 @NotEmpty라 빈 배열은 400이 된다
+    if (!c.representativeKeywords?.length) {
+      toast.error("대표 키워드가 없는 후보는 반영할 수 없습니다.");
+      return;
     }
 
-    setCandidates((prev) =>
-      prev.map((x) => x.candidateId === candidateId
-        ? { ...x, reviewStatus: action === "ACCEPTED" ? "APPLIED" : action }
-        : x)
-    );
+    setReviewing(candidateId);
+    try {
+      const res = await faqApi.apply({
+        analysisId,
+        clusterId: c.clusterId,
+        candidateId: c.candidateId,
+        qType: c.qType,
+        finalQuestion: c.standardQuestion,
+        finalAnswer: c.answerDraft,
+        keywords: c.representativeKeywords,
+        isManualPatchConfirmed: false,
+      });
+      // 백엔드가 EXPAND 후보면 기존 FAQ를 확장하고 editType으로 알려준다
+      toast.success(res.data?.editType === "EXPAND"
+        ? "기존 FAQ를 확장했습니다."
+        : "신규 FAQ로 반영되었습니다.");
+      await reloadCandidates(analysisId);
+    } catch (err) {
+      toast.error(err.message || "FAQ 반영에 실패했습니다.");
+    } finally {
+      setReviewing(null);
+    }
+  };
+
+  // 반려(PATCH .../reject) — 사유는 선택이고, 서버 반영 후 목록을 다시 받는다
+  const handleReject = async (candidateId, reason) => {
+    setReviewing(candidateId);
+    try {
+      await faqApi.rejectCandidate(candidateId, reason?.trim() || undefined);
+      toast.success("후보를 반려했습니다.");
+      setRejectTarget(null);
+      await reloadCandidates(analysisId);
+    } catch (err) {
+      // 대기 상태가 아닌 후보는 409
+      toast.error(err?.status === 409
+        ? "이미 검토가 끝난 후보입니다."
+        : (err.message || "반려에 실패했습니다."));
+    } finally {
+      setReviewing(null);
+    }
+  };
+
+  // 후보 수정 저장(PATCH .../{candidateId}) — 승인이 아니라 저장만 한다
+  const handleSaveCandidate = async (candidateId, form) => {
+    if (!form.standardQuestion.trim() || !form.answerDraft.trim()) {
+      toast.error("질문과 답변 초안은 비워 둘 수 없습니다.");
+      return;
+    }
+    setReviewing(candidateId);
+    try {
+      const res = await faqApi.updateCandidate(candidateId, {
+        standardQuestion: form.standardQuestion.trim(),
+        answerDraft: form.answerDraft.trim(),
+        keywords: form.keywords,
+        qType: form.qType,
+      });
+      // 응답이 후보 항목 하나와 같은 형식이라 그 카드만 교체한다
+      if (res.data) {
+        setCandidates((prev) => prev.map((x) => x.candidateId === candidateId ? res.data : x));
+      } else {
+        await reloadCandidates(analysisId);
+      }
+      toast.success("후보를 저장했습니다.");
+      setEditTarget(null);
+    } catch (err) {
+      toast.error(err?.status === 409
+        ? "이미 검토가 끝난 후보는 수정할 수 없습니다."
+        : (err.message || "후보 저장에 실패했습니다."));
+    } finally {
+      setReviewing(null);
+    }
   };
 
   return (
@@ -567,13 +646,15 @@ export default function AnalyzePage() {
                           onChange={setOption("isMaskingEnabled")} />
                         개인정보 마스킹
                       </label>
-                      {/* AI preprocess.translate_to_ko 가 외국어 질의를 한국어로 번역한다.
-                          백엔드는 isTranslationEnabled 를 그대로 AI로 전달한다. */}
-                      <label style={S.checkLabel}
-                        title="외국어 질의를 한국어로 번역한 뒤 분석합니다.">
-                        <input type="checkbox" checked={options.isTranslationEnabled}
-                          onChange={setOption("isTranslationEnabled")} />
+                      {/* 2026-10-26 BE 확인: 켜도 AI가 번역하지 못한다(번역 API 호출 실패, 시환 님 보류 중).
+                          고쳐지면 disabled·checkLabelDisabled·"준비 중" 뱃지를 지우고
+                          전송값을 options.isTranslationEnabled 로 되돌린다. */}
+                      <label style={{ ...S.checkLabel, ...S.checkLabelDisabled }}
+                        title="AI 번역 기능 점검 중이라 현재 사용할 수 없습니다.">
+                        <input type="checkbox" disabled checked={false} readOnly
+                          style={{ cursor: "not-allowed" }} />
                         외국어 번역
+                        <span style={S.pendingTag}>준비 중</span>
                       </label>
                     </div>
                   </div>
@@ -610,6 +691,40 @@ export default function AnalyzePage() {
                 {uploadResult && (
                   <div style={S.successBox}>
                     📊 파일 업로드 완료! AI 분석을 시작합니다.
+                  </div>
+                )}
+
+                {/* 파일 내용 오류 — 400 응답의 data { totalErrors, errors[{row, column, reason}] }.
+                    errors 는 앞의 일부만 오므로 나머지는 "외 N건"으로 알린다. */}
+                {uploadErrors && (
+                  <div style={S.errorBox}>
+                    <div style={S.errorHead}>
+                      파일 내용에 오류가 {uploadErrors.totalErrors?.toLocaleString()}건 있습니다. 고쳐서 다시 올려주세요.
+                    </div>
+                    <table style={S.errorTable}>
+                      <thead>
+                        <tr>
+                          <th style={{ ...S.errorTh, width: 70 }}>행</th>
+                          <th style={{ ...S.errorTh, width: 90 }}>칸</th>
+                          <th style={S.errorTh}>사유</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {uploadErrors.errors.map((e, i) => (
+                          <tr key={i}>
+                            {/* 파일 전체에 대한 오류는 row·column 이 비어 온다 */}
+                            <td style={S.errorTd}>{e.row ?? "-"}</td>
+                            <td style={S.errorTd}>{e.column ?? "-"}</td>
+                            <td style={S.errorTd}>{e.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {uploadErrors.totalErrors > uploadErrors.errors.length && (
+                      <div style={S.errorMore}>
+                        외 {(uploadErrors.totalErrors - uploadErrors.errors.length).toLocaleString()}건
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -877,22 +992,24 @@ export default function AnalyzePage() {
                       <MatchedFaqBadge matches={c.matchedFaqs} candidateType={c.candidateType} />
                     </div>
                   </div>
+                  {/* reviewStatus: PENDING 이면 버튼, REJECTED "반려됨", APPLIED "반영됨" */}
                   {c.reviewStatus === "PENDING" && isAdmin ? (
                     <div style={{ display: "flex", gap: 6 }}>
                       <button style={S.btnAccept} disabled={reviewing === c.candidateId}
-                        onClick={() => handleCandidate(c.candidateId, "ACCEPTED")}>
-                        {reviewing === c.candidateId ? "반영 중..." : "✓ 승인"}
+                        onClick={() => handleAccept(c.candidateId)}>
+                        {reviewing === c.candidateId ? "처리 중..." : "✓ 승인"}
                       </button>
+                      <button style={S.btnSm} disabled={reviewing === c.candidateId}
+                        onClick={() => setEditTarget(c)}>수정</button>
                       <button style={S.btnReject} disabled={reviewing === c.candidateId}
-                        onClick={() => handleCandidate(c.candidateId, "REJECTED")}>✗ 반려</button>
+                        onClick={() => { setRejectReason(""); setRejectTarget(c); }}>✗ 반려</button>
                     </div>
                   ) : (
                     <span style={{
                       fontSize: 12, fontWeight: 500, padding: "4px 12px", borderRadius: 20,
-                      background: isAccepted(c.reviewStatus) ? "#D1FAE5" : "#FDECEA",
-                      color: isAccepted(c.reviewStatus) ? "#065F46" : "#B91C1C",
+                      ...statusChip(c.reviewStatus),
                     }}>
-                      {isAccepted(c.reviewStatus) ? "✅ 승인됨" : "❌ 반려됨"}
+                      {statusLabel(c.reviewStatus)}
                     </span>
                   )}
                 </div>
@@ -918,11 +1035,116 @@ export default function AnalyzePage() {
           )}
         </div>
       )}
+
+      {/* 반려 사유 입력 — 본문 { reason }은 선택이라 비워 두고 보내도 된다 */}
+      {rejectTarget && (
+        <div style={S.modalBg} onClick={() => setRejectTarget(null)}>
+          <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalTitle}>후보 반려</div>
+            <div style={{ fontSize: 13, color: "#374151", marginBottom: 14 }}>
+              {rejectTarget.standardQuestion}
+            </div>
+            <label style={S.modalLabel}>반려 사유 (선택)</label>
+            <textarea style={{ ...S.input, height: 80, resize: "vertical", paddingTop: 10 }}
+              placeholder="적어 두면 검토 이력에 남습니다"
+              value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} />
+            <div style={S.modalActions}>
+              <button style={S.btnSm} onClick={() => setRejectTarget(null)}>취소</button>
+              <button style={S.btnReject} disabled={reviewing === rejectTarget.candidateId}
+                onClick={() => handleReject(rejectTarget.candidateId, rejectReason)}>
+                {reviewing === rejectTarget.candidateId ? "처리 중..." : "반려"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 후보 수정 — 저장만 하고 승인은 하지 않는다 */}
+      {editTarget && (
+        <div style={S.modalBg} onClick={() => setEditTarget(null)}>
+          <div style={{ ...S.modal, maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalTitle}>후보 수정</div>
+            <EditCandidateForm
+              candidate={editTarget}
+              categories={categories}
+              saving={reviewing === editTarget.candidateId}
+              onSave={(form) => handleSaveCandidate(editTarget.candidateId, form)}
+              onClose={() => setEditTarget(null)}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 후보 수정 폼. 질문·답변 초안은 필수이고, 키워드·카테고리는 생략하면 기존 값이 유지된다.
+function EditCandidateForm({ candidate, categories, saving, onSave, onClose }) {
+  const [q, setQ]       = useState(candidate.standardQuestion || "");
+  const [a, setA]       = useState(candidate.answerDraft || "");
+  const [tags, setTags] = useState((candidate.representativeKeywords || []).join(", "));
+  const [qType, setQType] = useState(candidate.qType ?? "");
+
+  return (
+    <div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
+        <div>
+          <label style={S.modalLabel}>표준 질문</label>
+          <input style={S.input} value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div>
+          <label style={S.modalLabel}>답변 초안</label>
+          <textarea style={{ ...S.input, height: 140, resize: "vertical", paddingTop: 10 }}
+            value={a} onChange={(e) => setA(e.target.value)} />
+        </div>
+        <div>
+          <label style={S.modalLabel}>키워드 (쉼표로 구분)</label>
+          <input style={S.input} value={tags} onChange={(e) => setTags(e.target.value)} />
+        </div>
+        <div>
+          <label style={S.modalLabel}>카테고리</label>
+          <select style={{ ...S.input, cursor: "pointer" }} value={qType}
+            onChange={(e) => setQType(e.target.value)}>
+            <option value="">선택 안 함 (기존 값 유지)</option>
+            {(categories || []).map((c) => (
+              <option key={c.qType} value={c.qType}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div style={S.modalActions}>
+        <button style={S.btnSm} onClick={onClose}>취소</button>
+        <button style={{ ...S.btnAccept, padding: "8px 20px" }} disabled={saving}
+          onClick={() => onSave({
+            standardQuestion: q,
+            answerDraft: a,
+            keywords: tags.split(",").map((t) => t.trim()).filter(Boolean),
+            qType: qType === "" ? undefined : Number(qType),
+          })}>
+          {saving ? "저장 중..." : "저장"}
+        </button>
+      </div>
     </div>
   );
 }
 
 const S = {
+  errorBox:    { marginTop: 12, border: "1px solid #FECACA", background: "#FEF2F2", borderRadius: 10, padding: 14 },
+  errorHead:   { fontSize: 13, fontWeight: 600, color: "#B91C1C", marginBottom: 10 },
+  errorTable:  { width: "100%", borderCollapse: "collapse", fontSize: 12 },
+  errorTh:     { textAlign: "left", padding: "6px 8px", color: "#991B1B", borderBottom: "1px solid #FECACA", fontWeight: 600 },
+  errorTd:     { padding: "6px 8px", color: "#374151", borderBottom: "1px solid #FEE2E2", verticalAlign: "top" },
+  errorMore:   { marginTop: 8, fontSize: 11, color: "#991B1B" },
+
+  // 후보 반려·수정 모달. 내용이 길어 화면을 넘길 수 있으므로 세로 스크롤을 둔다.
+  modalBg:     { position: "fixed", inset: 0, background: "rgba(17,24,39,.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 200 },
+  modal:       { width: "100%", maxWidth: 480, maxHeight: "86vh", overflowY: "auto", background: "#fff", borderRadius: 14, padding: 24, boxShadow: "0 10px 40px rgba(0,0,0,.2)" },
+  modalTitle:  { fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 10 },
+  modalLabel:  { display: "block", fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 5 },
+  modalActions:{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 },
+  input:       { width: "100%", minHeight: 40, padding: "9px 12px", border: "1.5px solid #D1D5DB", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" },
+  btnSm:       { padding: "7px 14px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, background: "#fff", color: "#374151", cursor: "pointer", fontFamily: "inherit" },
+
   page:        { padding: 28 },
   pageTitle:   { fontSize: 20, fontWeight: 700, color: "#111827", marginBottom: 4 },
   pageSub:     { fontSize: 13, color: "#6B7280", marginBottom: 20 },
@@ -955,6 +1177,7 @@ const S = {
   optionRow:   { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid #F3F4F6" },
   optionLabel: { fontSize: 12, color: "#6B7280", display: "flex", alignItems: "center", gap: 6 },
   optionInput: { height: 32, padding: "0 10px", border: "1px solid #D1D5DB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", width: 132 },
+  checkLabelDisabled: { color: "#9CA3AF", cursor: "not-allowed" },
   checkLabel:  { fontSize: 12, color: "#374151", display: "flex", alignItems: "center", gap: 5, cursor: "pointer" },
   pendingTag:  { fontSize: 9, fontWeight: 600, padding: "1px 6px", borderRadius: 8, background: "#FEF3C7", color: "#92400E", border: "1px solid #FDE68A" },
   dropzoneDrag:{ borderColor: "#1565C0", background: "#EFF8FF" },

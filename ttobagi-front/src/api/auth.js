@@ -5,7 +5,15 @@ export const authApi = {
   login: (email, password) => request("POST", "/api/v1/auth/login", { body: { email, password }, skipAuthRetry: true }),
 
   // POST /api/v1/auth/signup — adminCode를 함께 보내면 즉시 ADMIN으로 가입됨 (SignupRequest엔 name 필드 없음)
-  signup: (email, password, adminCode) => request("POST", "/api/v1/auth/signup", { body: { email, password, adminCode }, skipAuthRetry: true }),
+  // POST /api/v1/auth/signup/code — 가입용 인증 코드 메일 발송.
+  // 이미 가입된 이메일이면 409, 60초 안에 다시 요청하면 429.
+  signupCode: (email) =>
+    request("POST", "/api/v1/auth/signup/code", { body: { email }, skipAuthRetry: true }),
+
+  // code는 백엔드 SignupRequest에서 @NotBlank 필수다.
+  // 코드 불일치·만료 400, 이미 가입된 이메일 409, 5회 초과 429.
+  signup: (email, password, code, adminCode) =>
+    request("POST", "/api/v1/auth/signup", { body: { email, password, code, adminCode }, skipAuthRetry: true }),
 
   // POST /api/v1/auth/logout
   logout: () => request("POST", "/api/v1/auth/logout", { skipAuthRetry: true }),
