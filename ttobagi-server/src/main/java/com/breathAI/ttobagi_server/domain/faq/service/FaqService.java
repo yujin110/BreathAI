@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -411,6 +412,134 @@ public class FaqService {
                 .historyId(history.getHistoryId())
                 .appliedAt(isExpand ? appliedFaq.getUpdatedAt() : appliedFaq.getCreatedAt())
                 .build();
+    }
+
+    // FAQ 후보 반려, 대기 중인 후보만 가능하고 사유를 검토 기록에 남긴다
+    @Transactional
+    public void rejectCandidate(Long candidateId, String reason, String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+        FaqCandidate candidate = findPendingCandidate(candidateId);
+
+        candidate.reject(user);
+        faqActionLogRepository.save(FaqActionLog.builder()
+                .candidate(candidate)
+                .actedBy(user)
+                .action(FaqActionLog.Action.REJECT)
+                .beforeStatus(ReviewStatus.PENDING)
+                .afterStatus(ReviewStatus.REJECTED)
+                .note(blankToNull(reason))
+                .build());
+        log.info("FAQ 후보 반려: candidateId={}", candidateId);
+    }
+
+    // FAQ 후보 초안 수정, 대기 중인 후보만 가능하고 바뀐 칸의 전후 값을 검토 기록에 남긴다
+    // 카테고리 코드가 바뀌면 카테고리 이름을 마스터 기준으로 맞춘다
+    @Transactional
+    public FaqCandidateListResponse.FaqCandidateItem updateCandidate(Long candidateId,
+                                                                     FaqCandidateUpdateRequest request, String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+        FaqCandidate candidate = findPendingCandidate(candidateId);
+
+        Map<String, Object> before = candidateFields(candidate);
+        // 카테고리 코드를 생략하면 기존 값을 유지한다 (FAQ 수정과 같은 규칙)
+        Integer qType = request.getQType() != null ? request.getQType() : candidate.getQType();
+        String category = Objects.equals(qType, candidate.getQType())
+                ? candidate.getCategory()
+                : faqRepository.findCategoryNameByQType(qType).orElse(null);
+        candidate.updateDraft(request.getStandardQuestion(), request.getAnswerDraft(),
+                request.getKeywords(), qType, category);
+        faqCandidateRepository.saveAndFlush(candidate);
+        Map<String, Object> after = candidateFields(candidate);
+
+        // 바뀐 칸만 기록한다
+        Map<String, Object> changedBefore = new LinkedHashMap<>();
+        Map<String, Object> changedAfter = new LinkedHashMap<>();
+        before.forEach((field, value) -> {
+            if (!Objects.equals(value, after.get(field))) {
+                changedBefore.put(field, value);
+                changedAfter.put(field, after.get(field));
+            }
+        });
+        if (!changedBefore.isEmpty()) {
+            faqActionLogRepository.save(FaqActionLog.builder()
+                    .candidate(candidate)
+                    .actedBy(user)
+                    .action(FaqActionLog.Action.EDIT)
+                    .beforeStatus(ReviewStatus.PENDING)
+                    .afterStatus(ReviewStatus.PENDING)
+                    .note(toJson(Map.of("before", changedBefore, "after", changedAfter)))
+                    .build());
+        }
+
+        List<FaqCandidateMatch> matches = faqCandidateMatchRepository
+                .findByCandidateCandidateIdOrderByMatchScoreDesc(candidateId);
+        List<Integer> seqNums = matches.stream().map(FaqCandidateMatch::getMatchedFaqSeqNum).distinct().toList();
+        Map<Integer, Faq> faqBySeqNum = seqNums.isEmpty()
+                ? Map.of()
+                : faqRepository.findBySourceSeqNumIn(seqNums).stream()
+                        .collect(Collectors.toMap(Faq::getSourceSeqNum, f -> f, (a, b) -> a));
+        return buildFaqCandidateItem(candidate, matches, faqBySeqNum);
+    }
+
+    // FAQ 직접 등록, 변경 이력에 등록(CREATE)으로 남긴다
+    @Transactional
+    public FaqDetailResponse createFaq(FaqCreateRequest request, String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+
+        Faq faq = faqRepository.saveAndFlush(Faq.builder()
+                .question(request.getStandardQuestion())
+                .answer(request.getAnswer())
+                .keywords(toKeywordsJson(request.getKeywords()))
+                .qType(request.getQType())
+                .category(request.getQType() != null
+                        ? faqRepository.findCategoryNameByQType(request.getQType()).orElse(null) : null)
+                .createdBy(user)
+                .build());
+
+        faqEditHistoryRepository.save(FaqEditHistory.builder()
+                .faq(faq)
+                .editedBy(user)
+                .editType(EditType.CREATE)
+                .afterQuestion(faq.getQuestion())
+                .afterAnswer(faq.getAnswer())
+                .afterKeywords(parseKeywords(faq.getKeywords()))
+                .build());
+        log.info("FAQ 직접 등록: faqId={}", faq.getFaqId());
+        return getFaqDetail(faq.getFaqId());
+    }
+
+    // 검토할 수 있는(대기 중인) 후보 조회, 없으면 404, 대기 상태가 아니면 409
+    private FaqCandidate findPendingCandidate(Long candidateId) {
+        FaqCandidate candidate = faqCandidateRepository.findById(candidateId)
+                .orElseThrow(() -> new CustomException(ErrorCode.FAQ_CANDIDATE_NOT_FOUND));
+        if (candidate.getReviewStatus() != ReviewStatus.PENDING) {
+            throw new CustomException(ErrorCode.FAQ_CANDIDATE_NOT_REVIEWABLE);
+        }
+        return candidate;
+    }
+
+    // 후보 수정 기록용 칸 값, 이름은 수정 요청의 필드 이름과 맞춘다
+    private Map<String, Object> candidateFields(FaqCandidate candidate) {
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("standardQuestion", candidate.getStandardQuestion());
+        fields.put("answerDraft", candidate.getAnswerDraft());
+        fields.put("keywords", candidate.getRepresentativeKeywords() != null
+                ? new ArrayList<>(candidate.getRepresentativeKeywords()) : null);
+        fields.put("qType", candidate.getQType());
+        fields.put("category", candidate.getCategory());
+        return fields;
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            log.warn("검토 기록 직렬화 실패");
+            return null;
+        }
     }
 
     // EXPAND 후보의 확장 대상 조회

@@ -38,6 +38,9 @@ public interface FaqVersionItemRepository extends JpaRepository<FaqVersionItem, 
 
     long countByVersion_VersionId(Long versionId);
 
+    // 버전 사본 전체, 복원과 버전 비교에 쓴다
+    List<FaqVersionItem> findByVersion_VersionId(Long versionId);
+
     // 다운로드 파일에 넣을 버전의 FAQ 전체
     // 카테고리는 마스터의 표시명으로 바꾸고, 마스터에 없는 코드면 사본에 남은 카테고리를 쓴다
     @Query(value = "SELECT i.faq_id AS faqId, "

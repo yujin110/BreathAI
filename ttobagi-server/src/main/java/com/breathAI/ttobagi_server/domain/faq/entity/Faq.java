@@ -124,4 +124,14 @@ public class Faq {
     public void deactivate() {
         this.isActive = false;
     }
+
+    // 버전 사본의 값으로 되돌린다, 빈 값도 그대로 쓰고 삭제된 FAQ는 다시 활성화한다
+    public void restoreFrom(String question, String answer, String keywords, Integer qType, String category) {
+        this.question = question;
+        this.answer = answer;
+        this.keywords = keywords;
+        this.qType = qType;
+        this.category = category;
+        this.isActive = true;
+    }
 }

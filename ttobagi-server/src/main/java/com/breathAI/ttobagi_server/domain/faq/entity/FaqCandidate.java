@@ -136,6 +136,22 @@ public class FaqCandidate {
         }
     }
 
+    // 승인 전 초안 수정, 호출 전에 대기 상태인지 확인한다
+    public void updateDraft(String standardQuestion, String answerDraft,
+                            List<String> representativeKeywords, Integer qType, String category) {
+        this.standardQuestion = standardQuestion;
+        this.answerDraft = answerDraft;
+        if (representativeKeywords != null) this.representativeKeywords = representativeKeywords;
+        this.qType = qType;
+        this.category = category;
+    }
+
+    // 버전 복원으로 반영이 취소되면 다시 검토할 수 있게 대기 상태로 돌린다
+    public void revertToPending() {
+        this.reviewStatus = ReviewStatus.PENDING;
+        this.reviewedBy = null;
+    }
+
     // 운영 FAQ 반영 처리, ACCEPTED 상태에서만 가능
     public void apply() {
         if (this.reviewStatus != ReviewStatus.ACCEPTED) {
