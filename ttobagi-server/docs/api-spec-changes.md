@@ -36,7 +36,7 @@ FE·AI 연동은 이 문서의 "실제 동작"을 기준으로 한다.
 | `POST /auth/logout` | — | 서버는 아무것도 저장하지 않고 성공만 응답한다. 토큰 삭제는 FE가 한다 | |
 | `POST /auth/password/reset` | 예시 이메일 `admin@dongguk.edu` | 이메일은 `@seoulmetro.co.kr`만 받는다 (예시는 오기). 메일로 **6자리 인증 코드**를 보내고, 코드는 30분 동안 유효하다 | 2026-10-10 |
 | `POST /auth/password/reset/confirm` | `{ token, newPassword }`, token은 긴 문자열 | **`{ email, token, newPassword }`**. `token`은 메일로 받은 영문 대소문자+숫자 6자리 (예: `aB3xY9`, 대소문자 구분). 코드 불일치·만료·형식 오류 400, 5회 틀리면 코드가 폐기되고 429 | 2026-10-10 |
-| `PATCH /auth/promote` | 응답 `ApiResponse<Void>` | 로그인 필요. 응답 `data`에 승격된 사용자 정보(`UserInfoResponse`)가 온다. 관리자 코드가 틀리면 403 | |
+| `PATCH /auth/promote` | 응답 `ApiResponse<Void>` | 로그인 필요. 응답 `data`에 승격된 사용자 정보(`userId`, `email`, `role`, `isActive`, `createdAt`)와 **ADMIN 권한이 담긴 새 토큰**(`accessToken`, `refreshToken`, `accessTokenExpiresAt`, `refreshTokenExpiresAt`, `tokenType`, `/auth/reissue`와 같은 형식)이 온다. 서버는 토큰의 권한으로 판단하므로 화면은 이 토큰으로 바꿔 써야 다시 로그인하지 않고 관리자 기능을 쓸 수 있다(이전 토큰은 만료될 때까지 USER 권한). 관리자 코드가 틀리면 403 | 2026-10-28 |
 | `GET /auth/me` | — | 같다. 토큰이 없으면 401 | 2026-10-18 |
 | `PATCH /auth/me` | — | 같다 (비밀번호만 변경). 토큰이 없으면 401 | |
 | `DELETE /auth/quit` | — | 로그인 필요 | |

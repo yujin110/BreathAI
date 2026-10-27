@@ -9,6 +9,7 @@ import com.breathAI.ttobagi_server.domain.auth.dto.PasswordResetResponse;
 import com.breathAI.ttobagi_server.domain.auth.dto.PasswordResetRequest;
 import com.breathAI.ttobagi_server.domain.auth.dto.PasswordResetConfirmRequest;
 import com.breathAI.ttobagi_server.domain.auth.dto.PromoteRequest;
+import com.breathAI.ttobagi_server.domain.auth.dto.PromoteResponse;
 import com.breathAI.ttobagi_server.domain.auth.dto.UserInfoResponse;
 import com.breathAI.ttobagi_server.domain.auth.dto.UserUpdateRequest;
 import com.breathAI.ttobagi_server.domain.auth.dto.TokenRequest;
@@ -107,7 +108,7 @@ public class AuthController {
 
     // 관리자 권한 승격, 관리자 코드 필요
     @PatchMapping("/promote")
-    public ResponseEntity<ApiResponse<UserInfoResponse>> promoteUser(
+    public ResponseEntity<ApiResponse<PromoteResponse>> promoteUser(
             @AuthenticationPrincipal String email,
             @RequestBody @Valid PromoteRequest request) {
         return ResponseEntity.ok(ApiResponse.success(authService.promoteUser(email, request)));
