@@ -422,7 +422,8 @@ export default function FaqPage() {
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
                     <EditTypeTag editType={h.editType} />
                     <span style={{ fontSize: 11, color: "#9CA3AF" }}>
-                      {h.editedBy} · {h.createdAt}
+                      {/* 탈퇴한 사용자가 남긴 이력은 editedBy가 null로 온다 (AuthService.deleteMyInfo) */}
+                      {h.editedBy || "-"} · {h.createdAt}
                     </span>
                   </div>
                   {h.editReason && (

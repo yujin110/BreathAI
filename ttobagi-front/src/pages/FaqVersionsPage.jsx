@@ -184,7 +184,7 @@ export default function FaqVersionsPage() {
     <div style={S.page}>
       <div style={S.pageTitle}>FAQ 버전 관리</div>
       <div style={S.pageSub}>
-        분석 반영과 다운로드 시점마다 FAQ 스냅샷이 버전으로 쌓입니다. 버전별로 CSV를 내려받을 수 있습니다.
+        버전 만들기나 CSV 다운로드로 그 시점의 FAQ 스냅샷이 쌓입니다. 버전별로 CSV를 내려받을 수 있습니다.
       </div>
 
       <div style={{ marginBottom: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -230,7 +230,7 @@ export default function FaqVersionsPage() {
         <div style={S.empty}>
           <div style={{ fontSize: 32, marginBottom: 8 }}>🗂️</div>
           <div>아직 버전이 없습니다.</div>
-          <div style={{ fontSize: 12, marginTop: 6 }}>분석 결과를 반영하거나 CSV를 내려받으면 생성됩니다.</div>
+          <div style={{ fontSize: 12, marginTop: 6 }}>CSV를 내려받거나 버전 만들기를 누르면 생성됩니다.</div>
         </div>
       ) : (
         versions.map((v) => (

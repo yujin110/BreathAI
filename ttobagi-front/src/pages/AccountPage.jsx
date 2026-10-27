@@ -184,7 +184,7 @@ export default function AccountPage() {
           {/* 회원 탈퇴 */}
           <div style={{ ...S.card, marginTop: 16, border: "1px solid #FECACA" }}>
             <div style={{ ...S.cardHeader, borderBottom: "1px solid #FECACA" }}>
-              <span style={{ ...S.cardTitle, color: "#E53935" }}>⚠️ 위험 구역</span>
+              <span style={{ ...S.cardTitle, color: "#E53935" }}>⚠️ 회원 탈퇴</span>
             </div>
             <div style={S.cardBody}>
               <p style={{ fontSize: 13, color: "#6B7280", marginBottom: 16 }}>
