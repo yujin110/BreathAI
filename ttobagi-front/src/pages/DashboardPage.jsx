@@ -152,9 +152,9 @@ export default function DashboardPage() {
         {[
           { label: "총 대화 수",      value: (system?.totalLogCount || 0).toLocaleString(),
             sub: period || "분석 대상 파일 기준", color: "#111827" },
-          { label: "정답 (≥75%)",     value: `${sampling ? ((sampling.correct / total) * 100).toFixed(1) : 0}%`,          sub: `${(sampling?.correct || 0).toLocaleString()}건`,    color: "#1565C0" },
-          { label: "오답변 (25~75%)", value: `${sampling ? ((sampling.lowQuality / total) * 100).toFixed(1) : 0}%`,       sub: `${(sampling?.lowQuality || 0).toLocaleString()}건`, color: "#7C3AED" },
-          { label: "미답변 (<25%)",   value: `${sampling ? ((sampling.unanswer / total) * 100).toFixed(1) : 0}%`,       sub: `${(sampling?.unanswer || 0).toLocaleString()}건`, color: "#EF9F27" },
+          { label: "정답",      value: `${sampling ? ((sampling.correct / total) * 100).toFixed(1) : 0}%`,          sub: `${(sampling?.correct || 0).toLocaleString()}건`,    color: "#1565C0" },
+          { label: "오답변",    value: `${sampling ? ((sampling.lowQuality / total) * 100).toFixed(1) : 0}%`,       sub: `${(sampling?.lowQuality || 0).toLocaleString()}건`, color: "#7C3AED" },
+          { label: "미답변",    value: `${sampling ? ((sampling.unanswer / total) * 100).toFixed(1) : 0}%`,       sub: `${(sampling?.unanswer || 0).toLocaleString()}건`, color: "#EF9F27" },
         ].map((s) => (
           <div key={s.label} style={S.statCard}>
             <div style={S.statLabel}>{s.label}</div>
