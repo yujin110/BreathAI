@@ -30,7 +30,8 @@ function statusStyle(status) {
   return { background: "#DBEAFE", color: "#1E40AF" };
 }
 
-// requestedAt은 LocalDateTime(타임존 없음)이라 Date가 로컬로 읽는다. 표시만 쓰므로 그대로 둔다.
+// requestedAt은 백엔드가 'Z'를 붙여 UTC로 보낸다(AnalyzeHistoryResponse @JsonFormat,
+// 서버 JVM도 TimeZone.setDefault(UTC)). Date가 UTC로 정확히 읽는다.
 function formatDateTime(value) {
   if (!value) return "";
   const d = new Date(value);
@@ -310,7 +311,11 @@ export default function AnalyzePage() {
       return;
     }
     if (item.status !== "COMPLETED") {
-      // 대기·전처리·분석 중이면 진행 상태를 이어서 보여 준다
+      // 대기·전처리·분석 중이면 진행 상태를 이어서 보여 준다.
+      // 시작 시각은 업로드한 화면에만 있으므로 이력의 requestedAt으로 되살린다.
+      // 없거나 미래 시각이면 지금부터 센다(경과가 음수로 보이지 않게).
+      const requested = item.requestedAt ? new Date(item.requestedAt).getTime() : NaN;
+      setStartedAt(Number.isFinite(requested) && requested <= Date.now() ? requested : Date.now());
       setDone(false); setRunning(true);
       watchAnalysis(id);
       toast.info("분석이 진행 중입니다.");
@@ -646,16 +651,14 @@ export default function AnalyzePage() {
                           onChange={setOption("isMaskingEnabled")} />
                         개인정보 마스킹
                       </label>
-                      {/* 2026-10-26 BE 확인: 켜도 AI가 번역하지 못한다(번역 API 호출 실패, 시환 님 보류 중).
-                          고쳐지면 disabled·checkLabelDisabled·"준비 중" 뱃지를 지우고
-                          전송값을 options.isTranslationEnabled 로 되돌린다. */}
-                      <label style={{ ...S.checkLabel, ...S.checkLabelDisabled }}
-                        title="AI 번역 기능 점검 중이라 현재 사용할 수 없습니다.">
-                        <input type="checkbox" disabled checked={false} readOnly
-                          style={{ cursor: "not-allowed" }} />
-                        외국어 번역
-                        <span style={S.pendingTag}>준비 중</span>
-                      </label>
+                      {/* 2026-10-26 확인: 켜도 번역되지 않는다(AI 쪽 번역 API 호출 실패로 보류 중).
+                          되살릴 때는 아래 체크박스를 다시 넣고 전송값(isTranslationEnabled)을
+                          options.isTranslationEnabled 로 되돌린다.
+                          <label style={S.checkLabel}>
+                            <input type="checkbox" checked={options.isTranslationEnabled}
+                              onChange={setOption("isTranslationEnabled")} />
+                            외국어 번역
+                          </label> */}
                     </div>
                   </div>
 
@@ -1177,9 +1180,7 @@ const S = {
   optionRow:   { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid #F3F4F6" },
   optionLabel: { fontSize: 12, color: "#6B7280", display: "flex", alignItems: "center", gap: 6 },
   optionInput: { height: 32, padding: "0 10px", border: "1px solid #D1D5DB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", width: 132 },
-  checkLabelDisabled: { color: "#9CA3AF", cursor: "not-allowed" },
   checkLabel:  { fontSize: 12, color: "#374151", display: "flex", alignItems: "center", gap: 5, cursor: "pointer" },
-  pendingTag:  { fontSize: 9, fontWeight: 600, padding: "1px 6px", borderRadius: 8, background: "#FEF3C7", color: "#92400E", border: "1px solid #FDE68A" },
   dropzoneDrag:{ borderColor: "#1565C0", background: "#EFF8FF" },
   dropzoneDisabled: { opacity: 0.5, cursor: "not-allowed", background: "#F9FAFB" },
   permissionNotice: { padding: "10px 12px", background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: 8, fontSize: 12, color: "#92400E", marginBottom: 10 },
