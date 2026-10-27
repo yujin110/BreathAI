@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 from datetime import date, datetime, timezone
+from services.keyword_policy import KeywordPolicy, DEFAULT_POLICY_PATH
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -99,6 +100,14 @@ def run_job(input_path, job_dir, *, templates=None, masking=True, translation=Fa
     try:
         data_dir.mkdir()
         log_dir.mkdir()
+        # Validate the app resource afresh for every job, then pin its bytes.
+        try:
+            policy = KeywordPolicy.load(DEFAULT_POLICY_PATH)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr, flush=True)
+            raise
+        snapshot = job_dir / 'keyword_policy.json'
+        snapshot.write_bytes(policy.source_bytes)
         _copy_input(input_path, data_dir / "tota24_unanswered_2026Q1.csv", period_start, period_end)
         shutil.copyfile(templates, data_dir / "answer_templates.json")
         env = dict(os.environ)
@@ -110,6 +119,7 @@ def run_job(input_path, job_dir, *, templates=None, masking=True, translation=Fa
             "PYTHONUNBUFFERED": "1",
             "TTOBAGI_MIN_CLUSTER_SIZE": str(min_cluster_size),
             "TTOBAGI_MIN_SAMPLES": str(min_samples),
+            "TTOBAGI_KEYWORD_POLICY_PATH": str(snapshot),
         })
         # Shared FAQ sources stay outside job output; their explicit settings win.
         for key, filename in (

@@ -1,0 +1,14 @@
+[
+  {"text": "THE WiFi password please", "english": ["wifi", "password"], "excluded": 2},
+  {"text": "a refund an airport", "english": ["refund", "airport"], "excluded": 2},
+  {"text": "There is no WiFi", "english": ["there", "no", "wifi"], "excluded": 1},
+  {"text": "WiFi is not working", "english": ["wifi", "not", "working"], "excluded": 1},
+  {"text": "I can't connect to WiFi", "english": ["cannot", "connect", "to", "wifi"], "excluded": 0},
+  {"text": "can’t don't isn’t wouldn't", "english": ["cannot", "do", "not", "not", "wouldn't"], "excluded": 1},
+  {"text": "Wi-Fi WIFI wi fi", "english": ["wifi", "wifi", "wifi"], "excluded": 0},
+  {"text": "ＴＨＥ ＷｉＦｉ WiFi가 wifi6 my_wifi", "english": ["wifi", "wifi"], "excluded": 1},
+  {"text": "T-money AREX KTX Seoul Station", "english": ["t-money", "arex", "ktx", "seoul station"], "excluded": 0},
+  {"text": "[TEL] [email] [RRN] [CARD] [URL] [METRO_TRAIN] [KORAIL_TRAIN]WiFi", "english": ["wifi"], "excluded": 0},
+  {"text": "theater training wi ... fi NewBrand", "english": ["theater", "training", "wi", "fi", "newbrand"], "excluded": 0},
+  {"text": "日本語 中文 시부터 심해서", "english": [], "excluded": 0}
+]

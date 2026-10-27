@@ -3,9 +3,11 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from services.callback_payload import build_callback
 from services.dashboard_metrics import build_dashboard, _burst_keywords
+from services.keyword_policy import KeywordPolicy, DEFAULT_POLICY_PATH
 
 
 def write_csv(path, names, rows):
@@ -104,16 +106,61 @@ class DashboardMetricsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Duplicate'):
             build_dashboard(self.data, {}, self.summaries)
 
-    def test_completed_payload_contains_dashboard_and_noise_cluster(self):
+    def write_callback_artifacts(self, keywords=None):
         (self.data / 'faq_candidates_final.json').write_text('{"faqCandidates": []}')
-        (self.data / 'cluster_keywords.json').write_text('{"0": ["문의"]}', encoding='utf-8')
+        (self.data / 'cluster_keywords.json').write_text(json.dumps(keywords or {'0': ['문의']}), encoding='utf-8')
         write_csv(self.data / 'cluster_summary.csv', ['clusterId', 'size'],
                   [{'clusterId': key, **value} for key, value in self.summaries.items()])
+
+    def test_completed_payload_contains_dashboard_and_noise_cluster(self):
+        self.write_callback_artifacts()
         payload = build_callback(self.job)
         self.assertEqual(payload['status'], 'COMPLETED')
         self.assertEqual(len(payload['clusteringView']['points']), 3)
         self.assertIn(-1, [r['clusterLabel'] for r in payload['clusteringView']['clusterNames']])
         json.dumps(payload, allow_nan=False)
+
+    def test_snapshot_policy_used_by_real_callback_and_audit_not_recounted(self):
+        import numpy as np
+        from services.clustering import extract_keywords
+        definition = json.loads(DEFAULT_POLICY_PATH.read_text(encoding='utf-8'))
+        definition['version'] = 'test-stop-there'
+        definition['stopwords'].append('there')
+        snapshot = self.job / 'keyword_policy.json'
+        snapshot.write_text(json.dumps(definition), encoding='utf-8')
+        policy = KeywordPolicy.load(snapshot)
+        for index, row in enumerate(self.rows):
+            row['날짜'] = '2026-10-01' if index == 0 else '2026-10-08'
+            self.prepared[index]['normalizedForClustering'] = 'theater' if index == 0 else 'there Wi-Fi WiFi'
+        self.clustered.append({'logId': 40, 'clusterId': -1, 'umap_x': 1, 'umap_y': 1, 'text': 'unused'})
+        self.summaries[-1]['size'] = '2'
+        self.save()
+        audit_path = self.data / 'keyword_policy_audit.json'
+        keywords, _ = extract_keywords([r['normalizedForClustering'] for r in self.prepared],
+                                      np.array([0, 0, -1, -1]), policy=policy, audit_path=audit_path)
+        self.write_callback_artifacts({**{str(k): v for k, v in keywords.items()}, 'injected': ['there', 'wi fi']})
+        audit_before = audit_path.read_bytes()
+        with patch('services.callback_payload.get_policy', side_effect=AssertionError('Must use snapshot')):
+            payload = build_callback(self.job)
+        self.assertEqual(payload['burstKeywords'], [{'keyword': 'wifi', 'increasedRate': None, 'count': 3}])
+        self.assertEqual(audit_path.read_bytes(), audit_before)
+        self.assertEqual(json.loads(audit_before)['excludedEnglishTokenOccurrences'], 3)
+        self.assertEqual(payload['clusteringView']['points'][1]['text'], 'there Wi-Fi WiFi')
+        self.assertNotIn('policyVersion', payload)
+
+    def test_mismatched_or_missing_snapshot_audit_never_publishes_success(self):
+        self.write_callback_artifacts()
+        snapshot = self.job / 'keyword_policy.json'
+        snapshot.write_bytes(DEFAULT_POLICY_PATH.read_bytes())
+        audit_path = self.data / 'keyword_policy_audit.json'
+        with self.assertRaises(FileNotFoundError):
+            build_callback(self.job)
+        audit_path.write_text(json.dumps({'policyVersion': 'en-v1', 'policySha256': 'wrong'}))
+        with self.assertRaisesRegex(ValueError, 'does not match'):
+            build_callback(self.job)
+        snapshot.unlink()
+        with self.assertRaisesRegex(ValueError, 'snapshot is missing'):
+            build_callback(self.job)
 
 
 if __name__ == '__main__':

@@ -3,10 +3,22 @@ import csv
 import json
 from pathlib import Path
 from services.dashboard_metrics import build_dashboard
+from services.keyword_policy import KeywordPolicy, get_policy
 
 
 def build_callback(job_dir):
     data = Path(job_dir) / "dataset"
+    snapshot = Path(job_dir) / 'keyword_policy.json'
+    if snapshot.exists():
+        policy = KeywordPolicy.load(snapshot)
+        audit = json.loads((data / 'keyword_policy_audit.json').read_text(encoding='utf-8'))
+        if (audit.get('policyVersion'), audit.get('policySha256')) != (policy.version, policy.sha256):
+            raise ValueError('Keyword policy audit does not match job snapshot')
+    else:
+        if (data / 'keyword_policy_audit.json').exists():
+            raise ValueError('Keyword policy snapshot is missing for audited job')
+        # Compatibility for artifacts produced before keyword policies existed.
+        policy = get_policy()
     source = json.loads((data / "faq_candidates_final.json").read_text(encoding="utf-8"))
     if not isinstance(source, dict) or not isinstance(source.get("faqCandidates"), list):
         raise ValueError("Invalid final result")
@@ -42,7 +54,7 @@ def build_callback(job_dir):
         if not all(isinstance(mapped[key], str) for key in ("standardQuestion", "answerDraft")):
             raise ValueError("Question and answer must be strings")
         candidates.append(mapped)
-    dashboard = build_dashboard(data, keywords, summaries)
+    dashboard = build_dashboard(data, keywords, summaries, policy=policy)
     points = dashboard.pop('points')
     return {"status": "COMPLETED", "faqCandidates": candidates, **dashboard,
             "clusteringView": {"clusterNames": clusters, "points": points}}

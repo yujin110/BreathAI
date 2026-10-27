@@ -10,6 +10,7 @@ COPY requirements-api.txt ./
 RUN python -m pip install --no-cache-dir -r requirements-api.txt && python -m pip check
 COPY services/ ./services/
 COPY dataset/answer_templates.json ./dataset/answer_templates.json
+COPY dataset/keyword_policy/ ./dataset/keyword_policy/
 EXPOSE 8000
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["python", "-m", "services.container_entrypoint"]
