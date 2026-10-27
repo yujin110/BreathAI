@@ -22,6 +22,7 @@ import unicodedata
 from pathlib import Path
 from services.runtime_config import runtime_path
 from services.keyword_policy import get_policy
+from services.synonym_validation import finalize_candidates
 
 import numpy as np
 import pandas as pd
@@ -292,6 +293,10 @@ def run_answer_pipeline() -> None:
     _log(f'  refine 발동     = {n_refined}건')
     _log(f'  oos_corp 채택   = {n_oos_corp_adopted}건')
 
+    audit = finalize_candidates(results, OUTPUT_JSON.parent)
+    review_count = sum(r['status'] == 'REVIEW_REQUIRED'
+                       for c in audit['candidates'] for r in c['records'])
+    _log(f'유사 표현 검토 보류: {review_count}건 (synonym_validation.json)')
     OUTPUT_JSON.write_text(
         json.dumps({'faqCandidates': results}, ensure_ascii=False, indent=2),
         encoding='utf-8',

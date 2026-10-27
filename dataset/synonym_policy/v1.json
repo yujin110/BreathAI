@@ -1,0 +1,16 @@
+{
+  "version": "synonym-v1",
+  "normalExpressions": {
+    "무료 와이파이는?": "SYNONYM",
+    "무료 와이파이 비밀번호는?": "SYNONYM",
+    "와이파이 비밀번호는?": "SYNONYM",
+    "와이파이는?": "SYNONYM",
+    "와이파이": "SYNONYM",
+    "WiFi": "SYNONYM",
+    "와이파이 비번": "ABBR"
+  },
+  "abbreviations": {"비번": "비밀번호"},
+  "observedTypos": {
+    "와이파이 비밀번허": {"correctedText": "와이파이 비밀번호", "errorSpan": [8, 9]}
+  }
+}

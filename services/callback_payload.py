@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from services.dashboard_metrics import build_dashboard
 from services.keyword_policy import KeywordPolicy, get_policy
+from services.synonym_validation import verify_audit
 
 
 def build_callback(job_dir):
@@ -22,6 +23,7 @@ def build_callback(job_dir):
     source = json.loads((data / "faq_candidates_final.json").read_text(encoding="utf-8"))
     if not isinstance(source, dict) or not isinstance(source.get("faqCandidates"), list):
         raise ValueError("Invalid final result")
+    verify_audit(source['faqCandidates'], data)
     keywords = json.loads((data / "cluster_keywords.json").read_text(encoding="utf-8"))
     with (data / "cluster_summary.csv").open(encoding="utf-8-sig", newline="") as file:
         summaries = {int(row["clusterId"]): row for row in csv.DictReader(file)}

@@ -145,6 +145,11 @@ class PipelineApiTest(unittest.TestCase):
             'logId,normalizedForClustering\n' + ''.join(f'{i},문의\n' for i in range(1, 6)), encoding='utf-8')
         (data / 'clusters.csv').write_text(
             'logId,clusterId,umap_x,umap_y,text\n' + ''.join(f'{i},3,{i},0,문의\n' for i in range(1, 6)), encoding='utf-8')
+        from services.synonym_validation import finalize_candidates
+        final = data / 'faq_candidates_final.json'
+        payload = json.loads(final.read_text(encoding='utf-8'))
+        finalize_candidates(payload['faqCandidates'], data)
+        final.write_text(json.dumps(payload), encoding='utf-8')
         return 0
 
     def test_full_request_to_callback_contract_without_gpu(self):

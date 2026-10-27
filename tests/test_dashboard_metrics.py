@@ -107,6 +107,8 @@ class DashboardMetricsTest(unittest.TestCase):
             build_dashboard(self.data, {}, self.summaries)
 
     def write_callback_artifacts(self, keywords=None):
+        from services.synonym_validation import finalize_candidates
+        finalize_candidates([], self.data)
         (self.data / 'faq_candidates_final.json').write_text('{"faqCandidates": []}')
         (self.data / 'cluster_keywords.json').write_text(json.dumps(keywords or {'0': ['문의']}), encoding='utf-8')
         write_csv(self.data / 'cluster_summary.csv', ['clusterId', 'size'],

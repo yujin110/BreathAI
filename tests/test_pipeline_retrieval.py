@@ -132,6 +132,7 @@ class PipelineRetrievalTest(unittest.TestCase):
                                                {'needs_review_v2': False, 'llm_mean': 4}])
         with tempfile.TemporaryDirectory() as directory:
             pipeline.OUTPUT_JSON = Path(directory) / 'final.json'
+            (Path(directory) / 'clusters.csv').write_text('logId,clusterId,text\n1,1,Question\n', encoding='utf-8')
             pipeline.run_answer_pipeline()
             result = json.loads(pipeline.OUTPUT_JSON.read_text(encoding='utf-8'))['faqCandidates'][0]
         self.assertEqual(result['answerDraft'], 'Final answer')

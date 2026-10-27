@@ -8,3 +8,5 @@
 !dataset/answer_templates.json
 !dataset/keyword_policy/
 !dataset/keyword_policy/*.json
+!dataset/synonym_policy/
+!dataset/synonym_policy/*.json

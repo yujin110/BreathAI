@@ -19,6 +19,7 @@ import time
 import unicodedata
 from pathlib import Path
 from services.runtime_config import runtime_path, llm_memory_options
+from services.synonym_validation import validate_synonyms
 
 import pandas as pd
 import torch
@@ -70,7 +71,11 @@ PROMPT_TEMPLATE = """당신은 서울교통공사 챗봇 '또타24'의 FAQ 작�
 ▶ FAQ 작성 시:
   - standardQuestion: 자연스러운 한국어 한 문장 (구체적이고 답변 가능한 형태)
   - answerDraft: 운영자 가이드 톤. 사실 기반(hallucination 금지). 모르면 "○○로 문의" 식으로 안내
-  - synonyms: 10개. 각각 type 분류 (TYPO=오타, ABBR=약어, SYNONYM=동의어/유사 표현)
+  - synonyms: 최대 10개. 개수를 채우려고 표현이나 오타를 만들지 마세요.
+  - TYPO: 샘플에서 관측된 실제 철자/자모 오류만. 문장 생략, 물음표, 어미 변화는 오타가 아닙니다.
+  - ABBR: 비번→비밀번호처럼 명확한 약어. SYNONYM: 정상 동의어/유사 질문/표기 변형.
+  - '와이파이 비밀번호는?'는 SYNONYM, '와이파이 비번'은 ABBR, WiFi는 SYNONYM입니다.
+  - 유사 표현은 표준질문과 같은 의도여야 합니다. '와이파이는?'처럼 의도가 모호한 표현은 피하세요.
   - 한글 등록 원칙: 모든 출력은 자연스러운 한국어로
 
 ▶ 출력은 반드시 아래 JSON 형식 하나만 (다른 텍스트 금지):
@@ -152,23 +157,19 @@ def parse_response(text: str) -> dict | None:
         return None
 
 
-def validate(obj: dict) -> dict:
+def validate(obj: dict, sources=()) -> dict:
     """필수 키 보장 + 기본값 보강."""
     tag = obj.get('tag', 'REJECT')
     if tag not in {'FAQ', 'OUT_OF_SCOPE', 'EMERGENCY', 'REJECT'}:
         tag = 'REJECT'
-    synonyms = []
-    for s in obj.get('synonyms') or []:
-        if isinstance(s, dict) and 'text' in s:
-            t = s.get('type', 'SYNONYM')
-            if t not in {'TYPO', 'ABBR', 'SYNONYM'}:
-                t = 'SYNONYM'
-            synonyms.append({'text': s['text'], 'type': t})
+    proposals = obj.get('synonyms') or []
+    synonyms, _ = validate_synonyms(proposals, sources)
     return {
         'tag': tag,
         'standardQuestion': obj.get('standardQuestion', '') if tag == 'FAQ' else '',
         'answerDraft': obj.get('answerDraft', '') if tag == 'FAQ' else '',
         'synonyms': synonyms if tag == 'FAQ' else [],
+        '_synonymProposals': proposals if tag == 'FAQ' else [],
         'reason': obj.get('reason', ''),
     }
 
@@ -193,6 +194,7 @@ def load_clusters() -> list[dict]:
             'size': int(row['size']),
             'keywords': keywords.get(str(cid), []),
             'samples': samples,
+            'sources': cdf[cdf['clusterId'] == cid][['logId', 'text']].to_dict('records'),
         })
     return out
 
@@ -209,6 +211,7 @@ def save(results: list[dict]) -> None:
                 'standardQuestion': r['standardQuestion'],
                 'answerDraft': r['answerDraft'],
                 'synonyms': r['synonyms'],
+                '_synonymProposals': r.get('_synonymProposals', r['synonyms']),
                 'matchedFaqs': [],                # EXPAND 후보일 때만 채움 (현재 NEW only)
                 'reason': r['reason'],
                 'topKeywords': r['topKeywords'],
@@ -242,7 +245,7 @@ def main() -> None:
             obj = {'tag': 'REJECT', 'reason': 'JSON parse failed'}
         else:
             obj = parsed
-        validated = validate(obj)
+        validated = validate(obj, c['sources'])
         validated['clusterId'] = c['clusterId']
         validated['size'] = c['size']
         validated['topKeywords'] = c['keywords'][:5]
