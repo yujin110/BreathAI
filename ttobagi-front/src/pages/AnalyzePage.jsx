@@ -914,9 +914,9 @@ export default function AnalyzePage() {
                   const s = analyzeResult.systemStatus?.samplingStatus;
                   const total = analyzeResult.systemStatus?.totalLogCount || 1;
                   const segments = [
-                    { label: "정답 (≥75%)",     count: s?.correct    || 0, color: "#1565C0" },
-                    { label: "오답변 (25~75%)", count: s?.lowQuality || 0, color: "#7C3AED" },
-                    { label: "미답변 (<25%)",   count: s?.unanswer   || 0, color: "#EF9F27" },
+                    { label: "정답",      count: s?.correct    || 0, color: "#1565C0" },
+                    { label: "오답변",    count: s?.lowQuality || 0, color: "#7C3AED" },
+                    { label: "미답변",    count: s?.unanswer   || 0, color: "#EF9F27" },
                   ].map((seg) => ({ ...seg, pct: (seg.count / total) * 100 }));
                   const answeredPct = segments[0].pct.toFixed(1);
                   return (
