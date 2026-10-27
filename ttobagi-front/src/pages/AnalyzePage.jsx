@@ -180,6 +180,14 @@ export default function AnalyzePage() {
   const streamRef = useRef(null);
   const pollRef = useRef(null);
 
+  // 이력 목록을 "마지막에 불러온 조건 그대로" 다시 부르는 함수.
+  // watchAnalysis가 loadHistory보다 먼저 선언돼 있어 직접 참조할 수 없고,
+  // 조건(페이지·범위·완료만 보기)도 최신 값이어야 해서 ref로 건넨다.
+  const refreshHistoryRef = useRef(null);
+  // 종료 처리를 이미 끝낸 analysisId. 같은 분석의 COMPLETED/FAIL을
+  // 두 번 처리해 알림이 겹치는 것을 막는다.
+  const terminalDoneRef = useRef(null);
+
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
       clearInterval(pollRef.current);
@@ -217,12 +225,25 @@ export default function AnalyzePage() {
       if (status === "PENDING")       setStep(-1);
       if (status === "PREPROCESSING") setStep(0);
       if (status === "ANALYZING")     setStep(2);
-      if (status === "COMPLETED")     loadResults();
-      if (status === "FAIL") {
+
+      if (status !== "COMPLETED" && status !== "FAIL") return false;
+
+      // 종료는 한 번만 처리한다. SSE가 같은 상태를 다시 보내거나
+      // 폴링과 겹쳐도 결과 조회·알림이 두 번 나가지 않게 한다.
+      if (terminalDoneRef.current === id) return true;
+      terminalDoneRef.current = id;
+
+      if (status === "COMPLETED") {
+        loadResults();
+      } else {
         setRunning(false);
         toast.error("분석에 실패했습니다.");
       }
-      return status === "COMPLETED" || status === "FAIL";
+
+      // 이력 목록의 status는 목록을 불러온 시점 값이라 업로드 직후면 PENDING에 머문다.
+      // 끝났을 때 다시 불러와야 뱃지가 실제 결과(COMPLETED·FAIL)로 바뀐다.
+      refreshHistoryRef.current?.();
+      return true;
     };
 
     // SSE가 끊기면 폴링으로 이어받는다. 중복 시작을 막아야 interval이 여러 개 돌지 않는다.
@@ -297,6 +318,12 @@ export default function AnalyzePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 분석이 끝났을 때 watchAnalysis가 쓸 수 있도록, 지금 보고 있는 조건을 담아 둔다.
+  // 보던 페이지·필터를 유지한 채로 다시 불러와야 화면이 튀지 않는다.
+  useEffect(() => {
+    refreshHistoryRef.current = () => loadHistory(historyPage, historyScope, onlyCompleted);
+  }, [loadHistory, historyPage, historyScope, onlyCompleted]);
+
   // 특정 분석을 화면으로 불러온다 (시각화 탭 + FAQ 추천 탭)
   const openAnalysis = useCallback(async (item) => {
     if (!item?.analysisId) return;
@@ -305,12 +332,30 @@ export default function AnalyzePage() {
     setAnalyzeResult(null);
     setCandidates([]);
 
-    if (item.status === "FAIL") {
+    // 목록의 status는 이력을 불러온 시점 값이라, 그 뒤에 끝난 분석도 진행 중으로 남아 있다.
+    // COMPLETED·FAIL은 되돌아가지 않으므로 그대로 믿고, 진행 중으로 적혀 있을 때만
+    // 서버에 현재 상태를 물어본다. 묻지 않고 "진행 중입니다"를 띄우면
+    // 곧이어 SSE가 FAIL을 전해 알림이 겹친다.
+    let status = item.status;
+    if (status !== "COMPLETED" && status !== "FAIL") {
+      try {
+        status = (await dashApi.getAnalysisStatus(id)).data?.status || status;
+      } catch {
+        // 확인하지 못했으면 단정적인 안내를 하지 않는다. 진행 화면만 띄우고
+        // 실제 상태는 이어지는 SSE·폴링이 알려 준다.
+        status = null;
+      }
+    }
+    // 목록이 낡아 있었으면(적힌 상태와 실제가 다르면) 목록도 맞춰 둔다.
+    const staleRow = status && status !== item.status;
+
+    if (status === "FAIL") {
       setDone(false); setRunning(false); setStep(-1);
       toast.error("실패한 분석입니다. 결과를 불러올 수 없습니다.");
+      if (staleRow) refreshHistoryRef.current?.();
       return;
     }
-    if (item.status !== "COMPLETED") {
+    if (status !== "COMPLETED") {
       // 대기·전처리·분석 중이면 진행 상태를 이어서 보여 준다.
       // 시작 시각은 업로드한 화면에만 있으므로 이력의 requestedAt으로 되살린다.
       // 없거나 미래 시각이면 지금부터 센다(경과가 음수로 보이지 않게).
@@ -318,10 +363,11 @@ export default function AnalyzePage() {
       setStartedAt(Number.isFinite(requested) && requested <= Date.now() ? requested : Date.now());
       setDone(false); setRunning(true);
       watchAnalysis(id);
-      toast.info("분석이 진행 중입니다.");
+      if (status) toast.info("분석이 진행 중입니다.");
       return;
     }
 
+    if (staleRow) refreshHistoryRef.current?.();
     setRunning(false); setDone(true); setStep(4);
     const [resultRes, candRes] = await Promise.allSettled([
       dashApi.getFileAnalyzeResult(id),
