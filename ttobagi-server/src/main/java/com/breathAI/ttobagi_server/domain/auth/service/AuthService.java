@@ -255,8 +255,9 @@ public class AuthService {
     }
 
     // 관리자 권한 승격, 관리자 코드 검증 필요
+    // 기존 토큰에는 USER 권한이 남아 있으므로 ADMIN 권한이 담긴 토큰을 새로 발급해 함께 준다
     @Transactional
-    public UserInfoResponse promoteUser(String email, PromoteRequest request) {
+    public PromoteResponse promoteUser(String email, PromoteRequest request) {
         // 유저 찾기
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
@@ -266,8 +267,20 @@ public class AuthService {
         }
 
         user.updateRole(Role.ADMIN);
-        
-        return getMyInfo(email);
+
+        TokenResponse tokens = issueTokens(user);
+        return PromoteResponse.builder()
+                .userId(user.getUserId())
+                .email(user.getEmail())
+                .role(user.getRole().name())
+                .isActive(user.isActive())
+                .createdAt(user.getCreatedAt())
+                .accessToken(tokens.getAccessToken())
+                .refreshToken(tokens.getRefreshToken())
+                .accessTokenExpiresAt(tokens.getAccessTokenExpiresAt())
+                .refreshTokenExpiresAt(tokens.getRefreshTokenExpiresAt())
+                .tokenType(tokens.getTokenType())
+                .build();
     }
     
     // 내 정보 조회
@@ -330,6 +343,11 @@ public class AuthService {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
 
+        return issueTokens(user);
+    }
+
+    // 사용자의 현재 권한으로 액세스·리프레시 토큰 발급
+    private TokenResponse issueTokens(User user) {
         String newAccessToken = jwtUtil.generateAccessToken(user);
         String newRefreshToken = jwtUtil.generateRefreshToken(user);
 

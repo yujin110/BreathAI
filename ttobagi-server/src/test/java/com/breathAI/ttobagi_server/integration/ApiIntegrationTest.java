@@ -124,6 +124,35 @@ class ApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("관리자 권한을 받으면 응답의 새 토큰으로 바로 관리자 기능을 쓸 수 있다")
+    void promoteReturnsAdminTokens() throws Exception {
+        String email = newEmail("promote");
+        signup(email, null);
+        String userAccess = JsonPath.read(login(email, PASSWORD), "$.data.accessToken");
+        mvc.perform(get("/api/v1/audit-logs").header(HttpHeaders.AUTHORIZATION, bearer(userAccess)))
+                .andExpect(status().isForbidden());
+
+        String promoteBody = "{\"email\":\"" + email + "\",\"adminCode\":\"" + ADMIN_CODE + "\"}";
+        MvcResult result = mvc.perform(withJson(patch("/api/v1/auth/promote"), promoteBody)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(userAccess)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.email").value(email))
+                .andExpect(jsonPath("$.data.role").value("ADMIN"))
+                .andExpect(jsonPath("$.data.isActive").value(true))
+                .andExpect(jsonPath("$.data.tokenType").value("Bearer"))
+                .andExpect(jsonPath("$.data.refreshToken").isNotEmpty())
+                .andExpect(jsonPath("$.data.accessTokenExpiresAt").isNotEmpty())
+                .andReturn();
+        String adminAccess = JsonPath.read(body(result), "$.data.accessToken");
+
+        mvc.perform(get("/api/v1/audit-logs").header(HttpHeaders.AUTHORIZATION, bearer(adminAccess)))
+                .andExpect(status().isOk());
+        // 이전 토큰에는 USER 권한이 남아 있다
+        mvc.perform(get("/api/v1/audit-logs").header(HttpHeaders.AUTHORIZATION, bearer(userAccess)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     @DisplayName("비밀번호 재설정: 메일 코드로만 바꿀 수 있고 같은 코드는 다시 못 쓴다")
     void passwordResetWithMailedCode() throws Exception {
         String email = newEmail("reset");
