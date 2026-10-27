@@ -1,10 +1,17 @@
 import { useState } from "react";
 import { authApi } from "../api/auth.js";
+import { reissueTokens, storeTokens } from "../api/client.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 
 // 참고: 백엔드 /promote는 @AuthenticationPrincipal(현재 로그인한 사용자)만 승격시키고
 // 요청 바디의 email은 사용하지 않는다 — 그래서 "내 계정 승격" UX로 구성한다.
+//
+// 승격은 DB의 role만 ADMIN으로 바꾸고, 들고 있던 액세스 토큰의 role 클레임은 USER 그대로다.
+// JwtAuthenticationFilter가 토큰의 role로 권한을 판단하므로 화면만 관리자가 되고
+// 업로드 같은 관리자 요청은 403으로 막힌다. 그래서 승격 직후 토큰을 새로 받는다.
+// /auth/reissue는 리프레시 토큰으로 DB의 사용자를 다시 읽어 토큰을 만들기 때문에
+// (AuthService.reissue → JwtUtil.generateToken) 새 토큰에는 ADMIN이 담긴다.
 export default function AdminPromotePage() {
   const { user, setUser } = useAuth();
   const [adminCode, setAdminCode] = useState("");
@@ -18,11 +25,24 @@ export default function AdminPromotePage() {
     setError("");
     try {
       const res = await authApi.promote(user?.email, adminCode);
-      setUser(res.data);
+      const data = res.data || {};
+
+      // 백엔드가 응답에 새 토큰을 담아 주면 그대로 쓰고(fix/auth/promote/BE),
+      // 아직 담기지 않는 동안에는 재발급으로 같은 결과를 만든다.
+      const tokens = data.accessToken ? data : data.tokens;
+      if (tokens?.accessToken) storeTokens(tokens);
+      else await reissueTokens();
+
+      // 새 토큰으로 내 정보를 다시 읽어, 화면의 권한과 토큰의 권한을 어긋나지 않게 맞춘다.
+      const me = await authApi.getMe();
+      setUser(me.data);
       setAdminCode("");
       toast.success("관리자 권한이 부여되었습니다.");
     } catch (err) {
-      setError(err.message || "권한 부여에 실패했습니다.");
+      // 승격 자체는 DB에 반영됐는데 토큰만 못 받은 경우가 있어, 다시 로그인하면 풀린다는 것을 알린다.
+      setError(err.message
+        ? `${err.message} (권한이 적용되지 않으면 로그아웃 후 다시 로그인해주세요.)`
+        : "권한 부여에 실패했습니다. 로그아웃 후 다시 로그인해주세요.");
     } finally {
       setLoading(false);
     }
