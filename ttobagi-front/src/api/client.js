@@ -16,7 +16,7 @@ export function getStoredTokens() {
   };
 }
 
-function storeTokens({ accessToken, refreshToken }) {
+export function storeTokens({ accessToken, refreshToken }) {
   if (accessToken) localStorage.setItem("token", accessToken);
   if (refreshToken) localStorage.setItem("refreshToken", refreshToken);
 }
@@ -105,7 +105,7 @@ function toApiError(res, json) {
 
 // 동시에 여러 401이 터져도 재발급 요청은 한 번만 나가도록 공유
 let refreshPromise = null;
-async function reissueTokens() {
+export async function reissueTokens() {
   const { refreshToken } = getStoredTokens();
   if (!refreshToken) throw new ApiError("로그인이 필요합니다.", 401, null);
 
