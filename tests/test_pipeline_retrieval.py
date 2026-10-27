@@ -1,5 +1,6 @@
 """Boundary tests use fake inference; no model downloads or database access."""
 import copy
+from contextlib import ExitStack
 import importlib.util
 import json
 from pathlib import Path
@@ -30,7 +31,13 @@ class PipelineRetrievalTest(unittest.TestCase):
             deps[f'services.{name}'].main = Mock()
         retriever = deps['services.retriever']
         retriever.load_kb = Mock(side_effect=RuntimeError('empty KB'))
-        with patch.dict(sys.modules, deps):
+        # Importing the real CPU keyword extractor in another test can populate
+        # attributes on the services package. Patch both import registries.
+        import services
+        with ExitStack() as stack:
+            stack.enter_context(patch.dict(sys.modules, deps))
+            for name in names:
+                stack.enter_context(patch.object(services, name, deps[f'services.{name}'], create=True))
             pipeline = load_source('_test_preflight', 'run_pipeline.py', deps)
             pipeline._ensure_logs = lambda: None
             pipeline._log = lambda message: None
