@@ -3,6 +3,7 @@ from collections import Counter, defaultdict
 import csv
 from datetime import datetime, timedelta
 import math
+from services.keyword_policy import get_policy, KOREAN_TOKEN
 
 
 LOG_TYPES = {'CORRECT': 'correct', 'LOW_QUALITY': 'lowQuality', 'UNANSWER': 'unanswer'}
@@ -45,7 +46,7 @@ def validate_source_rows(rows):
         log_type(row)
 
 
-def build_dashboard(data, keywords, summaries):
+def build_dashboard(data, keywords, summaries, *, policy=None):
     rows = read_csv(data / 'tota24_unanswered_2026Q1.csv')
     validate_source_rows(rows)
     preprocessed = read_csv(data / 'preprocessed_full.csv')
@@ -90,7 +91,7 @@ def build_dashboard(data, keywords, summaries):
     usage = [{'statDate': day.isoformat(), **{name: daily[day][name] for name in
               ('totalCnt', 'answerCnt', 'lowQualityCount', 'unanswerCnt')}} for day in sorted(daily)]
     total = len(rows)
-    burst, surge = _burst_keywords(points, dates, keywords, dates.values())
+    burst, surge = _burst_keywords(points, dates, keywords, dates.values(), policy=policy)
     return {
         'metricsScope': 'ANALYSIS_INPUT', 'sourceLogIdScope': 'UPLOAD_LOCAL',
         'systemStatus': {'totalLogCount': total,
@@ -109,12 +110,13 @@ def build_dashboard(data, keywords, summaries):
     }
 
 
-def _burst_keywords(points, dates, keywords, input_dates):
+def _burst_keywords(points, dates, keywords, input_dates, *, policy=None):
     """Last 7 vs preceding 7 calendar days within the upload (>=3, >=100% rise).
 
     Require an observed date in the previous window; no historical baseline is
     fabricated for single-day uploads. Count a keyword at most once per log.
     """
+    policy = policy or get_policy()
     days = list(input_dates)
     if not days:
         return [], []
@@ -122,15 +124,19 @@ def _burst_keywords(points, dates, keywords, input_dates):
     current_start, previous_start = end - timedelta(days=6), end - timedelta(days=13)
     if not any(previous_start <= day < current_start for day in days):
         return [], []
-    vocabulary = sorted({word for words in keywords.values() for word in words if word.strip()})
+    vocabulary = sorted({canonical for words in keywords.values() for word in words
+                         if (canonical := policy.candidate(word)) is not None})
     hits = {word: Counter() for word in vocabulary}
     related = {word: Counter() for word in vocabulary}
     for point in points:
         day = dates[point['sourceLogSeqNum']]
         if not previous_start <= day <= end:
             continue
+        english = set(policy.english_tokens(point['text'])[0])
         for word in vocabulary:
-            if word.casefold() in point['text'].casefold():
+            matched = (word.casefold() in point['text'].casefold()
+                       if KOREAN_TOKEN.search(word) else word in english)
+            if matched:
                 hits[word][day] += 1
                 related[word][point['clusterLabel']] += 1
     bursts, surges = [], []

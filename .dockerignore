@@ -6,3 +6,5 @@
 !services/*.py
 !dataset/
 !dataset/answer_templates.json
+!dataset/keyword_policy/
+!dataset/keyword_policy/*.json

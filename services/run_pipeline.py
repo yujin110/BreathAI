@@ -21,6 +21,7 @@ import time
 import unicodedata
 from pathlib import Path
 from services.runtime_config import runtime_path
+from services.keyword_policy import get_policy
 
 import numpy as np
 import pandas as pd
@@ -302,6 +303,7 @@ def run_answer_pipeline() -> None:
 # 전체 (preprocess부터)
 # ---------------------------------------------------------------------------
 def run_full_pipeline() -> None:
+    get_policy()  # Validate before any stage loads models, including batch CLI.
     _ensure_logs()
     import services.preprocess as PRE
     import services.clustering as CLU

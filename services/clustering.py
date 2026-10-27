@@ -16,23 +16,18 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import time
 import unicodedata
 from collections import defaultdict
 from pathlib import Path
 from services.runtime_config import runtime_path
+from services.keyword_policy import (
+    KOREAN_STOPWORDS, DOMAIN_STOPWORDS, STOPWORDS, get_policy, write_audit,
+)
 
 import numpy as np
 import pandas as pd
-import torch
-from transformers import AutoTokenizer, AutoModel
-import umap
-import hdbscan
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 
 
 def _nfd(p: Path) -> Path:
@@ -45,7 +40,6 @@ DATA_DIR = runtime_path('TTOBAGI_DATA_DIR', _nfd(Path(__file__).resolve().parent
 INPUT_CSV = DATA_DIR / 'preprocessed_full.csv'
 
 MODEL_NAME = 'BM-K/KoSimCSE-roberta'
-DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 BATCH_SIZE = 32
 MAX_LENGTH = 128
 
@@ -78,18 +72,26 @@ def load() -> pd.DataFrame:
 
 # 2. KoSimCSE 임베딩 — [CLS] pooling
 def load_model():
+    import torch
+    from transformers import AutoTokenizer, AutoModel
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    model = AutoModel.from_pretrained(MODEL_NAME).to(DEVICE).eval()
+    model = AutoModel.from_pretrained(MODEL_NAME).to(device).eval()
     return tokenizer, model
 
 
-@torch.no_grad()
 def encode(texts: list[str], tokenizer, model) -> np.ndarray:
+    import torch
+    with torch.no_grad():
+        return _encode(texts, tokenizer, model)
+
+
+def _encode(texts: list[str], tokenizer, model) -> np.ndarray:
     all_emb = []
     for i in range(0, len(texts), BATCH_SIZE):
         batch = texts[i:i+BATCH_SIZE]
         inp = tokenizer(batch, padding=True, truncation=True,
-                        max_length=MAX_LENGTH, return_tensors='pt').to(DEVICE)
+                        max_length=MAX_LENGTH, return_tensors='pt').to(model.device)
         out = model(**inp)
         emb = out.last_hidden_state[:, 0, :]
         all_emb.append(emb.cpu().numpy())
@@ -98,6 +100,7 @@ def encode(texts: list[str], tokenizer, model) -> np.ndarray:
 
 # 3. UMAP — 클러스터링용 10D + 시각화용 2D
 def reduce_dims(embeddings: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    import umap
     reducer_clu = umap.UMAP(n_components=UMAP_CLUSTER_DIM, n_neighbors=UMAP_NEIGHBORS,
                             min_dist=0.0, metric='cosine', random_state=RANDOM_STATE)
     emb_clu = reducer_clu.fit_transform(embeddings)
@@ -110,6 +113,7 @@ def reduce_dims(embeddings: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 # 4. HDBSCAN — 노이즈는 -1
 def cluster(emb_clu: np.ndarray) -> np.ndarray:
+    import hdbscan
     clusterer = hdbscan.HDBSCAN(
         min_cluster_size=HDBSCAN_MIN_CLUSTER_SIZE,
         min_samples=HDBSCAN_MIN_SAMPLES,
@@ -120,38 +124,34 @@ def cluster(emb_clu: np.ndarray) -> np.ndarray:
 
 
 # 5. c-TF-IDF — 클러스터별 키워드
-KOREAN_STOPWORDS = {
-    '은', '는', '이', '가', '을', '를', '에', '의', '도', '만', '와', '과',
-    '로', '으로', '부터', '까지', '에서', '하다', '이다', '있다', '없다',
-    '요', '네', '입니다', '해주세요', '주세요', '됩니다', '합니다',
-    '어떻게', '왜', '뭐', '무엇', '어디', '언제', '누가', '저', '그',
-    '좀', '제발', '진짜', '정말', '그냥', '너무', '한번', '그리고',
-    '하시', '하지', '있는', '있나', '있어요', '있습니다',
-}
-DOMAIN_STOPWORDS = {
-    '지하철', '열차', '역', '또타', '또타24', '챗봇', '민원', '고객',
-    '안녕하세요', '안녕', '수고', '감사합니다', '문의', '질문',
-}
-STOPWORDS = KOREAN_STOPWORDS | DOMAIN_STOPWORDS
-
-RE_TOKEN = re.compile(r'\[[A-Z_]+\]|[가-힣]{2,}|[a-zA-Z]{2,}')
-
-
 def korean_tokenizer(text: str) -> list[str]:
-    return [w for w in RE_TOKEN.findall(text) if w not in STOPWORDS]
+    return get_policy().tokenize(text)[0]
 
 
-def extract_keywords(texts: list[str], cluster_labels: np.ndarray
+def extract_keywords(texts: list[str], cluster_labels: np.ndarray, *, policy=None, audit_path=None
                      ) -> tuple[dict[int, list[str]], dict[int, list[str]]]:
+    policy = policy or get_policy()
+    if len(texts) != len(cluster_labels):
+        raise ValueError('Keyword texts and cluster labels must have equal length')
     cluster_docs: dict[int, list[str]] = defaultdict(list)
+    cluster_tokens = defaultdict(list)
+    excluded = 0
     for t, cid in zip(texts, cluster_labels):
         cluster_docs[int(cid)].append(t)
+        tokens, removed = policy.tokenize(t)
+        cluster_tokens[int(cid)].extend(tokens)
+        excluded += removed
 
     cluster_ids = sorted(cluster_docs.keys())
-    concat_docs = [' '.join(cluster_docs[cid]) for cid in cluster_ids]
+    token_docs = [cluster_tokens[cid] for cid in cluster_ids]
+    if not any(token_docs):
+        keywords = {cid: [] for cid in cluster_ids}
+        if audit_path is not None:
+            write_audit(audit_path, policy, excluded, keywords)
+        return keywords, dict(cluster_docs)
 
-    cv = CountVectorizer(tokenizer=korean_tokenizer, min_df=1, token_pattern=None)
-    counts = cv.fit_transform(concat_docs)
+    cv = CountVectorizer(analyzer=lambda tokens: tokens, min_df=1, lowercase=False)
+    counts = cv.fit_transform(token_docs)
     tfidf = TfidfTransformer(smooth_idf=True, sublinear_tf=True).fit_transform(counts)
 
     vocab = cv.get_feature_names_out()
@@ -160,11 +160,16 @@ def extract_keywords(texts: list[str], cluster_labels: np.ndarray
         row = tfidf[i].toarray().flatten()
         top_idx = row.argsort()[::-1][:TOP_N_KEYWORDS]
         keywords[cid] = [vocab[j] for j in top_idx if row[j] > 0]
+    if audit_path is not None:
+        write_audit(audit_path, policy, excluded, keywords)
     return keywords, dict(cluster_docs)
 
 
 # 6. 시각화
 def plot_2d(emb_viz: np.ndarray, cluster_labels: np.ndarray, n_clusters: int, out_path: Path):
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(11, 7))
     unique_cids = sorted(set(cluster_labels.tolist()))
     cmap = plt.cm.get_cmap('tab20', max(len(unique_cids) - 1, 1))
@@ -250,6 +255,8 @@ def report(cluster_labels: np.ndarray, keywords: dict[int, list[str]],
 
 
 def main() -> None:
+    policy = get_policy()  # Fail before importing/loading inference models.
+    import torch
     df = load()
     texts = df['normalizedForClustering'].astype(str).tolist()
     print(f'GPU: {torch.cuda.is_available()} '
@@ -273,7 +280,8 @@ def main() -> None:
     print(f'  {time.time()-t0:.1f}s')
 
     print('[4/4] c-TF-IDF 키워드')
-    keywords, cluster_docs = extract_keywords(texts, cluster_labels)
+    keywords, cluster_docs = extract_keywords(texts, cluster_labels, policy=policy,
+                                             audit_path=DATA_DIR / 'keyword_policy_audit.json')
 
     print()
     report(cluster_labels, keywords, cluster_docs)

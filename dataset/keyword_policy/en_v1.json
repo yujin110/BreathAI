@@ -1,0 +1,7 @@
+{
+  "version": "en-v1",
+  "stopwords": ["a", "an", "the", "am", "is", "are", "was", "were", "be", "been", "being", "please"],
+  "protected_tokens": ["no", "not", "never", "without", "from", "to", "before", "after", "can", "cannot", "wifi", "password", "refund", "delay", "lost", "phone", "airport", "arex", "ktx"],
+  "protected_phrases": {"T-money": "t-money", "Seoul Station": "seoul station"},
+  "aliases": {"WiFi": "wifi", "wifi": "wifi", "wi-fi": "wifi", "wi fi": "wifi"}
+}
