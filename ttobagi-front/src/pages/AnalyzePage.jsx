@@ -435,8 +435,7 @@ export default function AnalyzePage() {
         periodStartDate: options.periodStartDate,
         periodEndDate: options.periodEndDate,
         isMaskingEnabled: options.isMaskingEnabled,
-        // 외국어 번역은 AI 점검 중이라 화면에서 막아 두었다. 항상 false로 보낸다.
-        isTranslationEnabled: false,
+        isTranslationEnabled: options.isTranslationEnabled,
         clustering: {
           minClusterSize: options.minClusterSize,
           minSamples: options.minSamples,
@@ -651,14 +650,11 @@ export default function AnalyzePage() {
                           onChange={setOption("isMaskingEnabled")} />
                         개인정보 마스킹
                       </label>
-                      {/* 2026-10-26 확인: 켜도 번역되지 않는다(AI 쪽 번역 API 호출 실패로 보류 중).
-                          되살릴 때는 아래 체크박스를 다시 넣고 전송값(isTranslationEnabled)을
-                          options.isTranslationEnabled 로 되돌린다.
-                          <label style={S.checkLabel}>
-                            <input type="checkbox" checked={options.isTranslationEnabled}
-                              onChange={setOption("isTranslationEnabled")} />
-                            외국어 번역
-                          </label> */}
+                      <label style={S.checkLabel}>
+                        <input type="checkbox" checked={options.isTranslationEnabled}
+                          onChange={setOption("isTranslationEnabled")} />
+                        외국어 번역
+                      </label>
                     </div>
                   </div>
 
