@@ -146,6 +146,8 @@ public class AnalysisCallbackRequest {
     @Getter
     @NoArgsConstructor
     public static class MatchedFaqResult {
+        // gold_faq.faq_id, 운영 FAQ가 아닌 자료와 매칭되면 null (예전 형식은 보내지 않음)
+        private Long matchedFaqId;
         private Integer matchedFaqSeqNum;
         private Double matchScore;
     }

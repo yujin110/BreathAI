@@ -26,6 +26,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 // 운영 FAQ 관리 및 AI 생성 FAQ 후보 반영 처리
@@ -282,24 +283,16 @@ public class FaqService {
         List<FaqCandidate> candidates = faqCandidateRepository
                 .findByAnalysisJobAnalysisId(analysisId);
 
-        // 후보별 유사 FAQ 매칭과, 매칭된 순번에 해당하는 운영 FAQ를 한 번에 조회한다
-        Map<Long, List<FaqCandidateMatch>> matchesByCandidate = faqCandidateMatchRepository
-                .findByCandidate_AnalysisJob_AnalysisIdOrderByMatchScoreDesc(analysisId).stream()
+        // 후보별 유사 FAQ 매칭과, 매칭된 운영 FAQ를 한 번에 조회한다
+        List<FaqCandidateMatch> matches = faqCandidateMatchRepository
+                .findByCandidate_AnalysisJob_AnalysisIdOrderByMatchScoreDesc(analysisId);
+        Map<Long, List<FaqCandidateMatch>> matchesByCandidate = matches.stream()
                 .collect(Collectors.groupingBy(m -> m.getCandidate().getCandidateId()));
-
-        List<Integer> seqNums = matchesByCandidate.values().stream()
-                .flatMap(List::stream)
-                .map(FaqCandidateMatch::getMatchedFaqSeqNum)
-                .distinct()
-                .collect(Collectors.toList());
-        Map<Integer, Faq> faqBySeqNum = seqNums.isEmpty()
-                ? Map.of()
-                : faqRepository.findBySourceSeqNumIn(seqNums).stream()
-                        .collect(Collectors.toMap(Faq::getSourceSeqNum, f -> f, (a, b) -> a));
+        MatchedFaqLookup lookup = matchedFaqLookup(matches);
 
         List<FaqCandidateListResponse.FaqCandidateItem> items = candidates.stream()
                 .map(c -> buildFaqCandidateItem(c,
-                        matchesByCandidate.getOrDefault(c.getCandidateId(), List.of()), faqBySeqNum))
+                        matchesByCandidate.getOrDefault(c.getCandidateId(), List.of()), lookup))
                 .collect(Collectors.toList());
 
         return FaqCandidateListResponse.builder()
@@ -475,12 +468,7 @@ public class FaqService {
 
         List<FaqCandidateMatch> matches = faqCandidateMatchRepository
                 .findByCandidateCandidateIdOrderByMatchScoreDesc(candidateId);
-        List<Integer> seqNums = matches.stream().map(FaqCandidateMatch::getMatchedFaqSeqNum).distinct().toList();
-        Map<Integer, Faq> faqBySeqNum = seqNums.isEmpty()
-                ? Map.of()
-                : faqRepository.findBySourceSeqNumIn(seqNums).stream()
-                        .collect(Collectors.toMap(Faq::getSourceSeqNum, f -> f, (a, b) -> a));
-        return buildFaqCandidateItem(candidate, matches, faqBySeqNum);
+        return buildFaqCandidateItem(candidate, matches, matchedFaqLookup(matches));
     }
 
     // FAQ 직접 등록, 변경 이력에 등록(CREATE)으로 남긴다
@@ -543,19 +531,62 @@ public class FaqService {
     }
 
     // EXPAND 후보의 확장 대상 조회
-    // 후보의 유사 FAQ 중 점수가 가장 높은 것을 원본 순번으로 운영 FAQ에서 찾는다
+    // 후보의 유사 FAQ 중 점수가 가장 높은 것을 운영 FAQ ID로 찾는다
+    // ID가 있으면 ID만 믿고(없거나 삭제됐으면 409), ID가 없는 예전 분석만 원본 순번으로 찾는다
     private Faq findExpandTarget(FaqCandidate candidate) {
         return faqCandidateMatchRepository
                 .findByCandidateCandidateIdOrderByMatchScoreDesc(candidate.getCandidateId()).stream()
                 .findFirst()
-                .flatMap(m -> faqRepository
-                        .findFirstBySourceSeqNumAndIsActiveTrueOrderByFaqIdAsc(m.getMatchedFaqSeqNum()))
+                .flatMap(m -> {
+                    if (m.getMatchedFaqId() != null) {
+                        return faqRepository.findByFaqIdAndIsActiveTrue(m.getMatchedFaqId());
+                    }
+                    if (m.getMatchedFaqSeqNum() != null) {
+                        return faqRepository
+                                .findFirstBySourceSeqNumAndIsActiveTrueOrderByFaqIdAsc(m.getMatchedFaqSeqNum());
+                    }
+                    return Optional.empty();
+                })
                 .orElseThrow(() -> new CustomException(ErrorCode.FAQ_EXPAND_TARGET_NOT_FOUND));
+    }
+
+    // 매칭된 운영 FAQ를 ID와 원본 순번으로 한 번에 조회해 둔다
+    private MatchedFaqLookup matchedFaqLookup(List<FaqCandidateMatch> matches) {
+        List<Long> faqIds = matches.stream()
+                .map(FaqCandidateMatch::getMatchedFaqId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        List<Integer> seqNums = matches.stream()
+                .filter(m -> m.getMatchedFaqId() == null)
+                .map(FaqCandidateMatch::getMatchedFaqSeqNum)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, Faq> byId = faqIds.isEmpty()
+                ? Map.of()
+                : faqRepository.findAllById(faqIds).stream()
+                        .collect(Collectors.toMap(Faq::getFaqId, f -> f));
+        Map<Integer, Faq> bySeqNum = seqNums.isEmpty()
+                ? Map.of()
+                : faqRepository.findBySourceSeqNumIn(seqNums).stream()
+                        .collect(Collectors.toMap(Faq::getSourceSeqNum, f -> f, (a, b) -> a));
+        return new MatchedFaqLookup(byId, bySeqNum);
+    }
+
+    // 매칭 한 건의 운영 FAQ, 확장 대상 조회와 같은 기준(ID 우선, ID가 없을 때만 원본 순번)
+    private record MatchedFaqLookup(Map<Long, Faq> byId, Map<Integer, Faq> bySeqNum) {
+        Faq find(FaqCandidateMatch match) {
+            if (match.getMatchedFaqId() != null) {
+                return byId.get(match.getMatchedFaqId());
+            }
+            return match.getMatchedFaqSeqNum() != null ? bySeqNum.get(match.getMatchedFaqSeqNum()) : null;
+        }
     }
 
     // 후보 단건을 응답 DTO로 변환, 유사어와 유사 FAQ 목록 포함
     private FaqCandidateListResponse.FaqCandidateItem buildFaqCandidateItem(
-            FaqCandidate candidate, List<FaqCandidateMatch> matches, Map<Integer, Faq> faqBySeqNum) {
+            FaqCandidate candidate, List<FaqCandidateMatch> matches, MatchedFaqLookup lookup) {
         List<FaqCandidateListResponse.FaqCandidateItem.SynonymItem> synonyms =
                 synonymCandidateRepository
                         .findByCandidateCandidateId(candidate.getCandidateId())
@@ -566,10 +597,10 @@ public class FaqService {
                                 .build())
                         .collect(Collectors.toList());
 
-        // 매칭된 순번의 FAQ가 운영 FAQ에 없으면 ID와 질문은 비워 둔다
+        // 매칭된 FAQ가 운영 FAQ에 없으면 ID와 질문은 비워 둔다
         List<FaqCandidateListResponse.FaqCandidateItem.MatchedFaqItem> matchedFaqs = matches.stream()
                 .map(m -> {
-                    Faq matched = faqBySeqNum.get(m.getMatchedFaqSeqNum());
+                    Faq matched = lookup.find(m);
                     return FaqCandidateListResponse.FaqCandidateItem.MatchedFaqItem.builder()
                             .matchedFaqId(matched != null ? matched.getFaqId() : null)
                             .matchedFaqSeqNum(m.getMatchedFaqSeqNum())
