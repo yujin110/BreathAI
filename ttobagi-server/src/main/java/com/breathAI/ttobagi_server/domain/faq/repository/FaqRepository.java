@@ -50,17 +50,15 @@ public interface FaqRepository extends JpaRepository<Faq, Long> {
                      Pageable pageable);
 
     // 카테고리 표시명으로 카테고리 코드 조회, 이름 일부만 맞아도 찾는다 (예: 열차운영 → 열차운영관련)
-    // 카테고리 마스터는 AI 서버가 적재하는 Bronze 테이블이라 읽기만 한다
-    @Query(value = "SELECT DISTINCT q_type FROM bronze_cate_info WHERE q_disp_name LIKE CONCAT('%', :name, '%')",
+    // 카테고리 마스터는 AI 서버가 적재하는 Bronze 테이블(읽기만 함)과 BE에서 만든 카테고리를 합친 것이다
+    @Query(value = "SELECT DISTINCT m.q_type FROM " + FaqCategorySql.MASTER + " m "
+            + "WHERE m.q_disp_name LIKE CONCAT('%', :name, '%')",
             nativeQuery = true)
     List<Integer> findQTypesByCategoryName(@Param("name") String name);
 
     // 카테고리 코드별 표시명 전체, 같은 코드가 여러 번 적재되면 가장 최근 이름 하나만 쓴다
-    @Query(value = "SELECT q_type AS code, q_disp_name AS name FROM ("
-            + "  SELECT q_type, q_disp_name, ROW_NUMBER() OVER ("
-            + "    PARTITION BY q_type ORDER BY _ingested_at DESC, seq_num DESC) AS rn"
-            + "  FROM bronze_cate_info) c "
-            + "WHERE rn = 1 ORDER BY q_type",
+    @Query(value = "SELECT m.q_type AS code, m.q_disp_name AS name FROM " + FaqCategorySql.MASTER + " m "
+            + "ORDER BY m.q_type",
             nativeQuery = true)
     List<CategoryRow> findLatestCategories();
 
@@ -71,8 +69,7 @@ public interface FaqRepository extends JpaRepository<Faq, Long> {
     }
 
     // 카테고리 코드로 표시명 조회, 같은 코드가 여러 번 적재되면 가장 최근 이름을 쓴다 (CSV 다운로드와 같은 규칙)
-    @Query(value = "SELECT q_disp_name FROM bronze_cate_info WHERE q_type = :qType "
-            + "ORDER BY _ingested_at DESC LIMIT 1",
+    @Query(value = "SELECT m.q_disp_name FROM " + FaqCategorySql.MASTER + " m WHERE m.q_type = :qType LIMIT 1",
             nativeQuery = true)
     Optional<String> findCategoryNameByQType(@Param("qType") Integer qType);
 

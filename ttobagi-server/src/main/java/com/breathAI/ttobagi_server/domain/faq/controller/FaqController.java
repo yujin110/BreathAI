@@ -49,6 +49,15 @@ public class FaqController {
         return ResponseEntity.ok(ApiResponse.success(faqService.getCategories(), "카테고리 목록을 조회했습니다."));
     }
 
+    // 카테고리 생성, 같은 이름(공백 무시)이 있으면 409
+    @PostMapping("/categories")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<FaqCategoryListResponse.CategoryItem>> createCategory(
+            @RequestBody @Valid FaqCategoryCreateRequest request,
+            @AuthenticationPrincipal String email) {
+        return ResponseEntity.ok(ApiResponse.success(faqService.createCategory(request, email), "카테고리가 등록되었습니다."));
+    }
+
     // FAQ 단건 상세 조회
     @GetMapping("/{faqId}")
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")

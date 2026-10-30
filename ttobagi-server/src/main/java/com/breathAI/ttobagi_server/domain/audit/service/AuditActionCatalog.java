@@ -49,6 +49,7 @@ public final class AuditActionCatalog {
             // FAQ
             entry("POST", "/api/v1/faq", "FAQ 등록", FAQ),
             entry("POST", "/api/v1/faq/apply", "FAQ 후보 승인·반영", FAQ),
+            entry("POST", "/api/v1/faq/categories", "카테고리 생성", FAQ),
             entry("POST", "/api/v1/faq/versions", "FAQ 버전 만들기", FAQ),
             entry("POST", "/api/v1/faq/versions/{versionId}/restore", "FAQ 버전 복원", FAQ, "versionId", "버전"),
             entry("PATCH", "/api/v1/faq/recommendations/{candidateId}/reject", "FAQ 후보 반려", FAQ, "candidateId", "후보"),

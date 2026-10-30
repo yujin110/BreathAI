@@ -14,6 +14,7 @@ import com.breathAI.ttobagi_server.domain.dashboard.repository.AnalysisHistoryRe
 import com.breathAI.ttobagi_server.domain.dashboard.repository.UploadFileRepository;
 import com.breathAI.ttobagi_server.domain.faq.repository.FaqActionLogRepository;    
 import com.breathAI.ttobagi_server.domain.faq.repository.FaqCandidateRepository;
+import com.breathAI.ttobagi_server.domain.faq.repository.FaqCategoryRepository;
 import com.breathAI.ttobagi_server.domain.faq.repository.FaqEditHistoryRepository;
 import com.breathAI.ttobagi_server.domain.faq.repository.FaqRepository;
 import com.breathAI.ttobagi_server.domain.faq.repository.FaqVersionRepository;
@@ -56,6 +57,7 @@ public class AuthService {
     private final FaqEditHistoryRepository faqEditHistoryRepository;
     private final FaqRepository faqRepository;
     private final FaqVersionRepository faqVersionRepository;
+    private final FaqCategoryRepository faqCategoryRepository;
     private final RetrieveLogRepository retrieveLogRepository;
 
     // 비밀번호 재설정 인증 코드 규칙 (영문 대소문자 + 숫자, 서로 헷갈리는 0 O 1 l I 는 뺀다)
@@ -325,6 +327,7 @@ public class AuthService {
         faqEditHistoryRepository.clearEditedBy(user);
         faqRepository.clearCreatedBy(user);
         faqVersionRepository.clearCreatedBy(user);
+        faqCategoryRepository.clearCreatedBy(user);
         retrieveLogRepository.clearUser(user);
         userRepository.delete(user);
     }

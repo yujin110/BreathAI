@@ -43,11 +43,10 @@ public interface FaqVersionItemRepository extends JpaRepository<FaqVersionItem, 
 
     // 다운로드 파일에 넣을 버전의 FAQ 전체
     // 카테고리는 마스터의 표시명으로 바꾸고, 마스터에 없는 코드면 사본에 남은 카테고리를 쓴다
-    @Query(value = "SELECT i.faq_id AS faqId, "
-            + "COALESCE((SELECT c.q_disp_name FROM bronze_cate_info c WHERE c.q_type = i.q_type "
-            + "          ORDER BY c._ingested_at DESC LIMIT 1), i.category) AS categoryName, "
+    @Query(value = "SELECT i.faq_id AS faqId, COALESCE(m.q_disp_name, i.category) AS categoryName, "
             + "i.question AS question, i.answer AS answer, i.keywords AS keywords "
-            + "FROM gold_faq_version_item i WHERE i.version_id = :versionId ORDER BY i.faq_id",
+            + "FROM gold_faq_version_item i LEFT JOIN " + FaqCategorySql.MASTER + " m ON m.q_type = i.q_type "
+            + "WHERE i.version_id = :versionId ORDER BY i.faq_id",
             nativeQuery = true)
     List<ExportRow> findExportRows(@Param("versionId") Long versionId);
 
