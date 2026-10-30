@@ -49,6 +49,10 @@ public class FaqVersionItem {
     @Column(name = "keywords", columnDefinition = "JSON COMMENT '키워드 배열'")
     private String keywords;
 
+    // V12 이전에 만든 버전은 NULL (그때는 유사어가 없었다)
+    @Column(name = "synonyms", columnDefinition = "JSON COMMENT '유사어 배열'")
+    private String synonyms;
+
     @Column(name = "faq_created_at", nullable = false,
             columnDefinition = "DATETIME(6) NOT NULL COMMENT '원본 FAQ 등록 시각'")
     private LocalDateTime faqCreatedAt;

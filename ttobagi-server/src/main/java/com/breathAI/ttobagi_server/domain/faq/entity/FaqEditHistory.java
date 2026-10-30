@@ -62,6 +62,10 @@ public class FaqEditHistory {
     @Column(name = "before_keywords", columnDefinition = "json COMMENT '수정 전 키워드'")
     private List<String> beforeKeywords;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "before_synonyms", columnDefinition = "json COMMENT '수정 전 유사어'")
+    private List<String> beforeSynonyms;
+
     @Column(name = "after_question", columnDefinition = "TEXT COMMENT '수정 후 질문'")
     private String afterQuestion;
 
@@ -71,6 +75,10 @@ public class FaqEditHistory {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "after_keywords", columnDefinition = "json COMMENT '수정 후 키워드'")
     private List<String> afterKeywords;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "after_synonyms", columnDefinition = "json COMMENT '수정 후 유사어'")
+    private List<String> afterSynonyms;
 
     @Column(name = "edit_reason", columnDefinition = "TEXT COMMENT '수정 사유'")
     private String editReason;
@@ -91,7 +99,9 @@ public class FaqEditHistory {
     @Builder
     public FaqEditHistory(Faq faq, AnalysisJob analysisJob, User editedBy, EditType editType,
                         String beforeQuestion, String beforeAnswer, List<String> beforeKeywords,
+                        List<String> beforeSynonyms,
                         String afterQuestion, String afterAnswer, List<String> afterKeywords,
+                        List<String> afterSynonyms,
                         String editReason) {
         this.faq = faq;
         this.analysisJob = analysisJob;
@@ -100,9 +110,11 @@ public class FaqEditHistory {
         this.beforeQuestion = beforeQuestion;
         this.beforeAnswer = beforeAnswer;
         this.beforeKeywords = beforeKeywords;
+        this.beforeSynonyms = beforeSynonyms;
         this.afterQuestion = afterQuestion;
         this.afterAnswer = afterAnswer;
         this.afterKeywords = afterKeywords;
+        this.afterSynonyms = afterSynonyms;
         this.editReason = editReason;
     }
 

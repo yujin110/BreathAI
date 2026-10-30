@@ -43,7 +43,7 @@ public class FaqExportService {
     private static final byte[] UTF8_BOM = {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
 
     private static final CSVFormat CSV_FORMAT = CSVFormat.DEFAULT.builder()
-            .setHeader("ID", "카테고리", "질문", "답변", "키워드")
+            .setHeader("ID", "카테고리", "질문", "답변", "키워드", "유사어")
             .get();
 
     private final FaqVersionService faqVersionService;
@@ -88,7 +88,7 @@ public class FaqExportService {
         try (CSVPrinter printer = new CSVPrinter(new OutputStreamWriter(out, StandardCharsets.UTF_8), CSV_FORMAT)) {
             for (ExportRow row : rows) {
                 printer.printRecord(row.getFaqId(), row.getCategoryName(), row.getQuestion(),
-                        row.getAnswer(), joinKeywords(row.getKeywords()));
+                        row.getAnswer(), joinKeywords(row.getKeywords()), joinKeywords(row.getSynonyms()));
             }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -96,7 +96,7 @@ public class FaqExportService {
         return out.toByteArray();
     }
 
-    // JSON 배열로 저장된 키워드를 쉼표로 이어 쓴다, 실패 시 빈 칸
+    // JSON 배열로 저장된 키워드·유사어를 쉼표로 이어 쓴다, 실패 시 빈 칸
     private String joinKeywords(String json) {
         if (json == null) return "";
         try {

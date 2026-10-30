@@ -109,7 +109,7 @@ class FaqExportServiceTest {
         assertEquals((byte) 0xEF, content[0]);
         assertEquals((byte) 0xBB, content[1]);
         assertEquals((byte) 0xBF, content[2]);
-        assertTrue(text(file).startsWith("ID,카테고리,질문,답변,키워드\r\n"));
+        assertTrue(text(file).startsWith("ID,카테고리,질문,답변,키워드,유사어\r\n"));
 
         // 활성 FAQ 전체가 ID 순으로 들어간다
         List<CSVRecord> records = parse(file);
@@ -152,7 +152,7 @@ class FaqExportServiceTest {
         em.flush();
 
         // 버전 생성 뒤에 FAQ를 고치고 새로 등록한다
-        edited.update(MARK + "수정 후", null, null, null);
+        edited.update(MARK + "수정 후", null, null, null, null);
         Faq later = saveFaq("버전 이후 등록", 200, "답변", null);
         saveHistory(later, EditType.CREATE, null, later.getQuestion());
         em.flush();

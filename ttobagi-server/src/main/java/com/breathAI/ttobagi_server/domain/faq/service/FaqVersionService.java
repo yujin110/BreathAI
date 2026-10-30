@@ -132,7 +132,9 @@ public class FaqVersionService {
             String beforeQuestion = faq.getQuestion();
             String beforeAnswer = faq.getAnswer();
             List<String> beforeKeywords = parseKeywords(faq.getKeywords());
-            faq.restoreFrom(item.getQuestion(), item.getAnswer(), item.getKeywords(), item.getQType(), item.getCategory());
+            List<String> beforeSynonyms = parseKeywords(faq.getSynonyms());
+            faq.restoreFrom(item.getQuestion(), item.getAnswer(), item.getKeywords(), item.getSynonyms(),
+                    item.getQType(), item.getCategory());
 
             // 되살린 FAQ는 등록, 내용만 되돌린 FAQ는 수정으로 남긴다
             FaqEditHistory.FaqEditHistoryBuilder history = FaqEditHistory.builder()
@@ -142,9 +144,11 @@ public class FaqVersionService {
                     .afterQuestion(faq.getQuestion())
                     .afterAnswer(faq.getAnswer())
                     .afterKeywords(parseKeywords(faq.getKeywords()))
+                    .afterSynonyms(parseKeywords(faq.getSynonyms()))
                     .editReason(reason);
             if (wasActive) {
-                history.beforeQuestion(beforeQuestion).beforeAnswer(beforeAnswer).beforeKeywords(beforeKeywords);
+                history.beforeQuestion(beforeQuestion).beforeAnswer(beforeAnswer).beforeKeywords(beforeKeywords)
+                        .beforeSynonyms(beforeSynonyms);
                 updated++;
             } else {
                 reactivated++;
@@ -163,6 +167,7 @@ public class FaqVersionService {
                     .beforeQuestion(faq.getQuestion())
                     .beforeAnswer(faq.getAnswer())
                     .beforeKeywords(parseKeywords(faq.getKeywords()))
+                    .beforeSynonyms(parseKeywords(faq.getSynonyms()))
                     .editReason(reason)
                     .build());
             deleted++;
@@ -325,17 +330,17 @@ public class FaqVersionService {
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
     }
 
-    // 비교·복원에 쓰는 FAQ 내용, 버전 사본과 운영 FAQ를 같은 모양으로 맞춘다 (키워드는 저장된 JSON 문자열 그대로)
-    private record FaqContent(Long faqId, String question, String answer, String keywords,
+    // 비교·복원에 쓰는 FAQ 내용, 버전 사본과 운영 FAQ를 같은 모양으로 맞춘다 (키워드·유사어는 저장된 JSON 문자열 그대로)
+    private record FaqContent(Long faqId, String question, String answer, String keywords, String synonyms,
                               Integer qType, String category) {
         static FaqContent of(Faq faq) {
             return new FaqContent(faq.getFaqId(), faq.getQuestion(), faq.getAnswer(), faq.getKeywords(),
-                    faq.getQType(), faq.getCategory());
+                    faq.getSynonyms(), faq.getQType(), faq.getCategory());
         }
 
         static FaqContent of(FaqVersionItem item) {
             return new FaqContent(item.getFaqId(), item.getQuestion(), item.getAnswer(), item.getKeywords(),
-                    item.getQType(), item.getCategory());
+                    item.getSynonyms(), item.getQType(), item.getCategory());
         }
     }
 
@@ -344,10 +349,12 @@ public class FaqVersionService {
                 .collect(Collectors.toMap(FaqVersionItem::getFaqId, FaqContent::of, (a, b) -> a, TreeMap::new));
     }
 
-    private static boolean sameContent(FaqContent a, FaqContent b) {
+    // 유사어는 목록으로 비교한다, V12 이전 버전 사본의 NULL과 빈 목록([])을 같은 것으로 본다
+    private boolean sameContent(FaqContent a, FaqContent b) {
         return Objects.equals(a.question(), b.question())
                 && Objects.equals(a.answer(), b.answer())
                 && Objects.equals(a.keywords(), b.keywords())
+                && parseKeywords(a.synonyms()).equals(parseKeywords(b.synonyms()))
                 && Objects.equals(a.qType(), b.qType())
                 && Objects.equals(a.category(), b.category());
     }
@@ -358,6 +365,7 @@ public class FaqVersionService {
         fields.put("standardQuestion", new Object[]{before.question(), after.question()});
         fields.put("answer", new Object[]{before.answer(), after.answer()});
         fields.put("keywords", new Object[]{before.keywords(), after.keywords()});
+        fields.put("synonyms", new Object[]{parseKeywords(before.synonyms()), parseKeywords(after.synonyms())});
         fields.put("qType", new Object[]{before.qType(), after.qType()});
         fields.put("category", new Object[]{before.category(), after.category()});
 

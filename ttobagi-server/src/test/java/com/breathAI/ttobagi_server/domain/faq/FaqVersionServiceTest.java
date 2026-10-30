@@ -128,7 +128,7 @@ class FaqVersionServiceTest {
         em.flush();
 
         // 버전 생성 뒤에 FAQ를 고치고 새로 등록한다
-        edited.update(MARK + "버전 이후에 수정됨", null, null, null);
+        edited.update(MARK + "버전 이후에 수정됨", null, null, null, null);
         Faq later = saveFaq("버전 이후 등록", 200);
         saveHistory(later, EditType.CREATE, null, later.getQuestion());
         em.flush();
