@@ -31,14 +31,14 @@ FE·AI 연동은 이 문서의 "실제 동작"을 기준으로 한다.
 | API | 명세 | 실제 동작 | 결정일 |
 |---|---|---|---|
 | `POST /auth/signup/code` (새 API) | 없음 | 로그인 없이. 본문 `{ email }`(가입과 같은 이메일 규칙, 아니면 400). 메일로 6자리 인증 코드를 보낸다(비밀번호 재설정 코드와 같은 규칙: 영문 대소문자+숫자, 대소문자 구분, 30분 유효). 이미 가입된 이메일 409, **1분 안에 다시 요청하면 429**, 다시 받으면 이전 코드는 쓸 수 없다. 응답 `data` 없음 | 2026-10-26 |
-| `POST /auth/signup` | 성공 시 `status` 201, `data: null` | **`code`(메일로 받은 인증 코드) 필수**. 코드가 없거나 틀리면 400(대소문자 구분), 만료 400, 5번 틀리면 코드가 막혀 429(오류 코드·문구는 비밀번호 재설정과 같음), 성공하면 코드는 지워진다. HTTP 201, 본문 `status` 201, `data` 없음(2026-10-18 본문을 201로 맞춤). 이메일은 `@seoulmetro.co.kr`만, 비밀번호는 영문 소문자+숫자+특수문자(`@$!%*?&`) 6~20자이고 **대문자는 쓸 수 없다**. 이미 있는 이메일은 409. `adminCode`가 맞으면 ADMIN으로 가입 | 2026-10-26 |
+| `POST /auth/signup` | 성공 시 `status` 201, `data: null` | **`code`(메일로 받은 인증 코드) 필수**. 코드가 없거나 틀리면 400(대소문자 구분), 만료 400, 5번 틀리면 코드가 막혀 429(오류 코드·문구는 비밀번호 재설정과 같음), 성공하면 코드는 지워진다. HTTP 201, 본문 `status` 201, `data` 없음(2026-10-18 본문을 201로 맞춤). 이메일은 `@seoulmetro.co.kr`만. **비밀번호는 영문(대소문자 모두 가능)·숫자·특수문자를 각각 1개 이상 넣은 6~20자**이고, 공백을 뺀 키보드 문자(ASCII `!`~`~`, 특수문자 32개 모두)만 쓸 수 있다. 공백·한글·전각 문자는 400(`data.password`). 2026-10-30 이전 규칙(소문자+숫자+`@$!%*?&`)으로 만든 비밀번호도 그대로 맞는다. 이미 있는 이메일은 409. `adminCode`가 맞으면 ADMIN으로 가입 | 2026-10-30 |
 | `POST /auth/login` | — | 같다. 비밀번호가 틀리면 401 | |
 | `POST /auth/logout` | — | 서버는 아무것도 저장하지 않고 성공만 응답한다. 토큰 삭제는 FE가 한다 | |
 | `POST /auth/password/reset` | 예시 이메일 `admin@dongguk.edu` | 이메일은 `@seoulmetro.co.kr`만 받는다 (예시는 오기). 메일로 **6자리 인증 코드**를 보내고, 코드는 30분 동안 유효하다 | 2026-10-10 |
-| `POST /auth/password/reset/confirm` | `{ token, newPassword }`, token은 긴 문자열 | **`{ email, token, newPassword }`**. `token`은 메일로 받은 영문 대소문자+숫자 6자리 (예: `aB3xY9`, 대소문자 구분). 코드 불일치·만료·형식 오류 400, 5회 틀리면 코드가 폐기되고 429 | 2026-10-10 |
+| `POST /auth/password/reset/confirm` | `{ token, newPassword }`, token은 긴 문자열 | **`{ email, token, newPassword }`**. `token`은 메일로 받은 영문 대소문자+숫자 6자리 (예: `aB3xY9`, 대소문자 구분). 코드 불일치·만료·형식 오류 400, 5회 틀리면 코드가 폐기되고 429. `newPassword` 규칙은 가입과 같다(2026-10-30) | 2026-10-30 |
 | `PATCH /auth/promote` | 응답 `ApiResponse<Void>` | 로그인 필요. 응답 `data`에 승격된 사용자 정보(`userId`, `email`, `role`, `isActive`, `createdAt`)와 **ADMIN 권한이 담긴 새 토큰**(`accessToken`, `refreshToken`, `accessTokenExpiresAt`, `refreshTokenExpiresAt`, `tokenType`, `/auth/reissue`와 같은 형식)이 온다. 서버는 토큰의 권한으로 판단하므로 화면은 이 토큰으로 바꿔 써야 다시 로그인하지 않고 관리자 기능을 쓸 수 있다(이전 토큰은 만료될 때까지 USER 권한). 관리자 코드가 틀리면 403 | 2026-10-28 |
 | `GET /auth/me` | — | 같다. 토큰이 없으면 401 | 2026-10-18 |
-| `PATCH /auth/me` | — | 같다 (비밀번호만 변경). 토큰이 없으면 401 | |
+| `PATCH /auth/me` | — | 같다 (비밀번호만 변경). 토큰이 없으면 401. `newPassword` 규칙은 가입과 같다 | 2026-10-30 |
 | `DELETE /auth/quit` | — | 로그인 필요 | |
 | `POST /auth/reissue` | 응답 `accessToken`, `refreshToken`, `tokenType` | 같은 필드에 `accessTokenExpiresAt`, `refreshTokenExpiresAt`가 더 온다. 리프레시 토큰이 유효하지 않으면 401 | |
 
