@@ -69,7 +69,8 @@ FE·AI 연동은 이 문서의 "실제 동작"을 기준으로 한다.
 |---|---|---|---|
 | `GET /faq` | — | `category`는 카테고리 이름이며 **이름 일부만 맞아도 찾는다**(예: `열차운영` → `열차운영관련`, 2026-10-26). 일부가 겹치는 다른 카테고리도 함께 걸린다. 마스터에 없는 이름이면 결과 0건. `keyword`는 질문·답변·키워드 검색. `versionId`를 생략하면 현재 운영 FAQ를 보여 주고 `versionId`·`versionName`은 `null`. 항목마다 `category`가 더 온다. **저장된 카테고리 이름이 비어 있으면 카테고리 코드(`qType`)로 마스터에서 찾은 이름을 보여 준다**(버전별 목록도 같음, 2026-10-26) | 2026-10-04 |
 | `GET /faq/{faqId}` | — | `category`가 더 온다(비어 있으면 목록과 같이 마스터 이름). 없는 FAQ는 404 | 2026-10-26 |
-| `GET /faq/categories` (새 API) | 없음 | 카테고리 필터 선택지. 로그인한 사용자 누구나. `{ categories: [{ qType, name }] }`, 카테고리 마스터(`bronze_cate_info`)에서 코드마다 가장 최근에 적재된 이름 하나씩, `qType` 순. 사용 상태(`state`)로는 거르지 않는다 | 2026-10-26 |
+| `GET /faq/categories` (새 API) | 없음 | 카테고리 필터 선택지. 로그인한 사용자 누구나. `{ categories: [{ qType, name }] }`, `qType` 순. **카테고리 마스터는 기존 카테고리(`bronze_cate_info`, 코드마다 가장 최근에 적재된 이름 하나)와 BE에서 만든 카테고리(`gold_faq_category`)를 합친 것**이다(2026-10-31). 사용 상태(`state`)로는 거르지 않는다. 이 마스터는 FAQ 목록 필터, FAQ·후보의 카테고리 이름, CSV 다운로드에도 똑같이 쓴다. 그래서 `GET /faq`의 `category` 필터는 기존 카테고리의 최신 이름으로만 찾는다(예전에 적재됐던 옛 이름으로는 찾지 않음) | 2026-10-31 |
+| `POST /faq/categories` (새 API) | 없음 | 관리자만. 본문 `{ name }`(필수, 100자 이하, 아니면 400). 앞뒤 공백을 지우고 연속 공백은 하나로 줄여 저장한다. **공백을 모두 뺀 이름이 기존·새 카테고리와 같으면 409**(`F-007`, 예: `열차 운영관련` = `열차운영관련`). 새 코드는 100000부터 1씩 늘린다(기존 코드가 그보다 크면 그 다음). 응답 `data`는 `{ qType, name }`. 만든 사람을 남기고 탈퇴하면 비운다(카테고리는 남음). 감사로그 작업 이름 "카테고리 생성"(`FAQ`) | 2026-10-31 |
 | `PATCH /faq/{faqId}` | — | 관리자만. `standardQuestion`, `answer`는 필수(없으면 400). 응답은 명세대로 `question` 이름을 쓴다. `qType`을 바꾸면 `category`도 카테고리 마스터의 이름으로 바뀐다(마스터에 없는 코드면 `null`). 같은 `qType`으로 다시 보내면 `category`는 그대로 | 2026-10-18 |
 | `DELETE /faq/{faqId}` | — | 관리자만. 실제로 지우지 않고 비활성 처리하며, 이력에 `DELETE`로 남는다 | |
 | `GET /faq/history` | — | `editType`은 `CREATE`, `EXPAND`, `MANUAL`, `DELETE` 중 하나. **`faqId`(새 파라미터, 선택)**를 주면 그 FAQ의 이력만 보여 준다(삭제된 FAQ 포함, 없는 FAQ면 빈 목록). 둘 다 줄 수 있다 | 2026-10-26 |
@@ -112,6 +113,8 @@ Flyway V6(2026-10-18)·V7·V8(2026-10-26)·V9(2026-10-27)에서 바뀌었다. �
 - V8 `gold_signup_verification` 새 테이블: 이메일(고유)별 가입 인증 코드, 실패 횟수, 만료·보낸 시각. 계정과 연결하지 않으며 가입에 성공하면 지운다
 - V8 `gold_audit_log` 새 테이블: API 호출 감사로그(1장 참고). 계정과 연결하지 않는다(외래키 없음)
 - V9 `gold_audit_log`: `action`(작업 이름), `category`(분류), `target`(대상) 추가, `category` 색인
+- V10 `gold_faq_candidate_match`: `matched_faq_id`(운영 FAQ ID, 빈 값 허용) 추가, `matched_faq_seq_num` 빈 값 허용(2026-10-31). `gold_faq` 외래키는 걸지 않는다
+- V11 `gold_faq_category` 새 테이블: BE에서 만든 카테고리. `q_type`(기본키, 100000부터), `name`, `name_key`(공백 제거, 고유), `created_by`(탈퇴 시 NULL), `created_at`. 기존 카테고리는 복사하지 않고 조회할 때 `bronze_cate_info`와 합친다. 합칠 때 정렬 규칙이 같아야 해서 문자셋을 지정하지 않고 DB 기본값을 따른다(2026-10-31)
 
 ## 7. 결정 대기
 

@@ -42,6 +42,7 @@ public enum ErrorCode {
     FAQ_EXPAND_TARGET_NOT_FOUND(409, "F-004", "확장할 기존 FAQ를 찾을 수 없습니다."),
     FAQ_VERSION_NOT_FOUND(404, "F-005", "FAQ 버전을 찾을 수 없습니다."),
     FAQ_CANDIDATE_NOT_REVIEWABLE(409, "F-006", "검토할 수 없는 상태의 FAQ 후보입니다."),
+    FAQ_CATEGORY_DUPLICATED(409, "F-007", "이미 있는 카테고리입니다."),
 
     // 409 CONFLICT: 중복된 리소스
     EMAIL_DUPLICATED(409, "U-002", "이미 등록된 이메일입니다."),

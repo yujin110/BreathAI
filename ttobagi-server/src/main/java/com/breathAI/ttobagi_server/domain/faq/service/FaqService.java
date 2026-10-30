@@ -14,6 +14,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -43,6 +44,7 @@ public class FaqService {
     private final FaqEditHistoryRepository faqEditHistoryRepository;
     private final FaqVersionRepository faqVersionRepository;
     private final FaqVersionItemRepository faqVersionItemRepository;
+    private final FaqCategoryRepository faqCategoryRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
 
@@ -143,6 +145,42 @@ public class FaqService {
                                 .name(c.getName())
                                 .build())
                         .collect(Collectors.toList()))
+                .build();
+    }
+
+    // 카테고리 생성, 앞뒤 공백을 지우고 연속 공백은 하나로 줄여 저장한다
+    // 공백을 모두 뺀 이름이 기존·새 카테고리와 같으면 409 (예: "열차 운영관련" = "열차운영관련")
+    @Transactional
+    public FaqCategoryListResponse.CategoryItem createCategory(FaqCategoryCreateRequest request, String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+
+        // 전각 공백 등 유니코드 공백도 공백으로 본다
+        String name = request.getName().strip().replaceAll("(?U)\\s+", " ");
+        String nameKey = name.replaceAll("(?U)\\s+", "");
+        if (nameKey.isEmpty()) {
+            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
+        }
+        if (faqCategoryRepository.countByNameKeyInMaster(nameKey) > 0) {
+            throw new CustomException(ErrorCode.FAQ_CATEGORY_DUPLICATED);
+        }
+
+        FaqCategory category;
+        try {
+            category = faqCategoryRepository.saveAndFlush(FaqCategory.builder()
+                    .qType(faqCategoryRepository.nextCode())
+                    .name(name)
+                    .nameKey(nameKey)
+                    .createdBy(user)
+                    .build());
+        } catch (DataIntegrityViolationException e) {
+            // 같은 이름이나 코드로 동시에 만들어진 경우
+            throw new CustomException(ErrorCode.FAQ_CATEGORY_DUPLICATED);
+        }
+        log.info("카테고리 생성: qType={}, name={}", category.getQType(), category.getName());
+        return FaqCategoryListResponse.CategoryItem.builder()
+                .qType(category.getQType())
+                .name(category.getName())
                 .build();
     }
 
