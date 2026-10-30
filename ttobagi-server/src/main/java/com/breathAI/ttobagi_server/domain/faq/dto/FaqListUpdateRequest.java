@@ -22,6 +22,8 @@ public class FaqListUpdateRequest {
 
     private List<String> keywords;
 
+    private List<String> synonyms;
+
     private String editReason;
 
 }

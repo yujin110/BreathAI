@@ -16,6 +16,7 @@ public class FaqListUpdateResponse {
     private String question;
     private String answer;
     private List<String> keywords;
+    private List<String> synonyms;
     private Long historyId;
 
     @JsonFormat(

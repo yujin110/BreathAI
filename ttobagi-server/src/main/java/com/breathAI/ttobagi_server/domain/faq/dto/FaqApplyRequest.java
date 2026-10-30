@@ -36,6 +36,9 @@ public class FaqApplyRequest {
    @NotEmpty(message = "최종 키워드 목록은 필수입니다.")
    private List<String> keywords;
 
+   // 최종 유사어, 생략하면 후보의 유사어를 쓴다 (확장이면 기존 FAQ의 유사어에 합친다)
+   private List<String> synonyms;
+
    @NotNull(message = "수동 반영 확인 플래그는 필수입니다.")
    private Boolean isManualPatchConfirmed;
    
