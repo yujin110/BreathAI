@@ -781,8 +781,13 @@ public class DashboardService {
 
                 if (candidateResult.getMatchedFaqs() != null) {
                     for (AnalysisCallbackRequest.MatchedFaqResult matchedFaq : candidateResult.getMatchedFaqs()) {
+                        // FAQ ID도 원본 순번도 없으면 어떤 FAQ인지 알 수 없어 저장하지 않는다
+                        if (matchedFaq.getMatchedFaqId() == null && matchedFaq.getMatchedFaqSeqNum() == null) {
+                            continue;
+                        }
                         FaqCandidateMatch match = FaqCandidateMatch.builder()
                                 .candidate(candidate)
+                                .matchedFaqId(matchedFaq.getMatchedFaqId())
                                 .matchedFaqSeqNum(matchedFaq.getMatchedFaqSeqNum())
                                 .matchScore(BigDecimal.valueOf(matchedFaq.getMatchScore()))
                                 .build();
@@ -903,6 +908,7 @@ public class DashboardService {
                         .findByCandidateCandidateIdOrderByMatchScoreDesc(candidate.getCandidateId())
                         .stream()
                         .map(m -> AnalyzeResultResponse.FaqCandidate.MatchedFaq.builder()
+                                .matchedFaqId(m.getMatchedFaqId())
                                 .matchedFaqSeqNum(m.getMatchedFaqSeqNum())
                                 .matchScore(m.getMatchScore().doubleValue())
                                 .build())
