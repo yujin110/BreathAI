@@ -1,10 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { faqApi } from "../api/faq.js";
+import { saveBlob } from "../api/client.js";
 import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 
 const PAGE_SIZE = 10;
+// 백엔드 spring.servlet.multipart.max-file-size=50MB 와 같게 맞춘다
+const IMPORT_MAX_MB = 50;
+const IMPORT_MAX_BYTES = IMPORT_MAX_MB * 1024 * 1024;
 
 // 백엔드 FaqEditHistory.EditType
 const EDIT_TYPES = [
@@ -86,6 +90,17 @@ export default function FaqPage() {
   // 특정 FAQ의 수정 이력 (GET /faq/history?faqId=)
   const [faqHistory, setFaqHistory] = useState(null);
   const [creating, setCreating]     = useState(false);
+
+  // 키워드 다운로드 기준 버전 선택지. 빈 값이면 "현재 전체"다.
+  const [versions, setVersions]           = useState([]);
+  const [sinceVersionId, setSinceVersionId] = useState("");
+  const [downloadingKeywords, setDownloadingKeywords] = useState(false);
+
+  // FAQ 파일 일괄 업로드
+  const [importing, setImporting]       = useState(false);
+  const [importResult, setImportResult] = useState(null); // 성공 결과
+  const [importErrors, setImportErrors] = useState(null); // 400의 행별 오류
+
   const { user } = useAuth();
   const toast = useToast();
 
@@ -131,6 +146,16 @@ export default function FaqPage() {
     });
   }, []);
 
+  // 키워드 다운로드 기준 선택지. 실패해도 "현재 전체"로는 받을 수 있어 조용히 비운다.
+  const loadVersions = useCallback(async () => {
+    try {
+      const res = await faqApi.getVersions(0, 100);
+      setVersions(res.data?.versions || []);
+    } catch {
+      setVersions([]);
+    }
+  }, []);
+
   const loadHistories = useCallback(async (targetPage, type) => {
     const res = await faqApi.getHistory({ page: targetPage, size: PAGE_SIZE, editType: type });
     setHistories(res.data?.histories || []);
@@ -149,6 +174,7 @@ export default function FaqPage() {
         await loadFaqs(0, { keyword: "", category: "" });
         // 목록을 띄운 뒤 선택지를 뒤따라 받는다 (없으면 입력창 유지)
         if (!cancelled) loadCategories();
+        if (!cancelled) loadVersions();
       } catch (err) {
         if (!cancelled) toast.error(err.message || "FAQ 목록을 불러오지 못했습니다.");
       } finally {
@@ -259,6 +285,56 @@ export default function FaqPage() {
   };
 
 
+  // 키워드만 CSV로 받는다. 기준 버전을 고르면 그 버전 이후 새로 생긴 키워드만 나온다.
+  const handleKeywordDownload = async () => {
+    setDownloadingKeywords(true);
+    try {
+      const { blob, fileName } = await faqApi.downloadKeywords(sinceVersionId || undefined);
+      saveBlob(blob, fileName);
+      toast.success(`${fileName} 다운로드를 시작했습니다.`);
+      // FAQ 다운로드와 같은 규칙이라 새 버전(DOWNLOAD)이 생겼을 수 있다
+      await loadVersions();
+    } catch (err) {
+      toast.error(err.message || "키워드 다운로드에 실패했습니다.");
+    } finally {
+      setDownloadingKeywords(false);
+    }
+  };
+
+  // FAQ 파일 일괄 업로드. 오류가 1건이라도 있으면 서버가 아무것도 저장하지 않는다.
+  const handleImport = async (file) => {
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    if (!name.endsWith(".csv") && !name.endsWith(".xlsx")) {
+      toast.error("CSV 또는 엑셀(.xlsx) 파일만 올릴 수 있습니다.");
+      return;
+    }
+    if (file.size > IMPORT_MAX_BYTES) {
+      toast.error(`파일이 너무 큽니다. 최대 ${IMPORT_MAX_MB}MB까지 올릴 수 있습니다.`);
+      return;
+    }
+    setImporting(true);
+    setImportErrors(null);
+    setImportResult(null);
+    try {
+      const res = await faqApi.importFaq(file);
+      // 건너뛴 행이 있으면 서버 안내 문구에 그 건수가 들어 있다
+      setImportResult({ ...res.data, message: res.message });
+      setModal({ type: "importResult" });
+      await runSearch(0, query);
+      await loadCategories();
+      await loadVersions();
+      if (historyLoaded) runHistory(0, editType);
+    } catch (err) {
+      const report = err?.status === 400 && Array.isArray(err?.data?.errors) ? err.data : null;
+      setImportErrors(report);
+      if (report) setModal({ type: "importErrors" });
+      else toast.error(err.message || "FAQ 파일 업로드에 실패했습니다.");
+    } finally {
+      setImporting(false);
+    }
+  };
+
   if (loading) return <div style={{ padding: 40, color: "#6B7280" }}>불러오는 중...</div>;
 
   return (
@@ -325,6 +401,39 @@ export default function FaqPage() {
               총 {pageInfo.totalCount.toLocaleString()}개
               {pageInfo.totalPages > 1 && ` · ${page + 1}/${pageInfo.totalPages} 페이지`}
             </span>
+          </div>
+
+          {/* 키워드만 내려받기 · FAQ 파일 일괄 업로드 */}
+          <div style={S.toolRow}>
+            <span style={S.toolLabel}>키워드 다운로드</span>
+            <select style={{ ...S.searchInput, width: 220, cursor: "pointer" }}
+              value={sinceVersionId} onChange={(e) => setSinceVersionId(e.target.value)}>
+              <option value="">현재 전체</option>
+              {versions.map((v) => (
+                <option key={v.versionId} value={v.versionId}>
+                  {v.versionName || `버전 #${v.versionId}`} 이후 새 키워드
+                </option>
+              ))}
+            </select>
+            <button style={S.btnSm} disabled={downloadingKeywords} onClick={handleKeywordDownload}>
+              {downloadingKeywords ? "내려받는 중..." : "CSV 받기"}
+            </button>
+
+            {isAdmin && (
+              <>
+                <span style={{ ...S.toolLabel, marginLeft: 12 }}>FAQ 파일 업로드</span>
+                <input type="file" accept=".csv,.xlsx" id="faqImportInput"
+                  style={{ display: "none" }} disabled={importing}
+                  onChange={(e) => { handleImport(e.target.files[0]); e.target.value = ""; }} />
+                <button style={S.btnCreate} disabled={importing}
+                  onClick={() => document.getElementById("faqImportInput").click()}>
+                  {importing ? "반영 중..." : "엑셀 업로드"}
+                </button>
+                <span style={{ fontSize: 11, color: "#9CA3AF" }}>
+                  다운로드와 같은 양식(.csv·.xlsx, 최대 {IMPORT_MAX_MB}MB)
+                </span>
+              </>
+            )}
           </div>
 
           {faqs.length === 0 ? (
@@ -490,6 +599,122 @@ export default function FaqPage() {
               ))}
             </div>
 
+            <div style={S.modalActions}>
+              <button style={S.btnSm} onClick={() => setModal(null)}>닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 일괄 업로드 결과 */}
+      {modal?.type === "importResult" && importResult && (
+        <div style={S.modalBg} onClick={() => setModal(null)}>
+          <div style={{ ...S.modal, maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalTitle}>FAQ 파일 반영 결과</div>
+            {importResult.message && (
+              <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 14 }}>{importResult.message}</div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+              {[
+                { label: "추가", value: importResult.addedCount ?? 0, color: "#1565C0" },
+                { label: "수정", value: importResult.updatedCount ?? 0, color: "#92400E" },
+                { label: "변경 없음", value: importResult.unchangedCount ?? 0, color: "#6B7280" },
+                { label: "건너뜀", value: importResult.skippedCount ?? 0, color: "#B91C1C" },
+              ].map((x) => (
+                <div key={x.label} style={S.statBox}>
+                  <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 4 }}>{x.label}</div>
+                  <strong style={{ fontSize: 16, color: x.color }}>{x.value.toLocaleString()}</strong>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ maxHeight: 360, overflowY: "auto" }}>
+              {importResult.versionId ? (
+                <div style={S.resultLine}>
+                  새 버전 <strong>{importResult.versionName || `#${importResult.versionId}`}</strong>이 만들어졌습니다.
+                </div>
+              ) : (
+                <div style={S.resultLine}>바뀐 내용이 없어 버전을 만들지 않았습니다.</div>
+              )}
+
+              {importResult.newCategories?.length > 0 && (
+                <div style={S.resultLine}>
+                  새 카테고리: {importResult.newCategories.join(", ")}
+                </div>
+              )}
+
+              {importResult.mergedDuplicates?.length > 0 && (
+                <div style={S.resultBlock}>
+                  <div style={S.resultHead}>같은 내용이라 한 건으로 합친 질문</div>
+                  {importResult.mergedDuplicates.map((d, i) => (
+                    <div key={i} style={S.resultItem}>
+                      <span style={S.rowNo}>{(d.rows || []).join(", ")}행</span> {d.standardQuestion}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 같은 질문의 FAQ가 여러 개라 어느 쪽을 고칠지 서버가 정하지 못한 행 */}
+              {importResult.skipped?.length > 0 && (
+                <div style={S.resultBlock}>
+                  <div style={{ ...S.resultHead, color: "#B91C1C" }}>
+                    반영하지 못한 행 — 담당자가 직접 정해야 합니다
+                  </div>
+                  {importResult.skipped.map((x, i) => (
+                    <div key={i} style={S.resultItem}>
+                      <span style={S.rowNo}>{x.row}행</span> {x.standardQuestion}
+                      <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>
+                        {x.reason}
+                        {x.candidateFaqIds?.length > 0 && ` (후보 FAQ #${x.candidateFaqIds.join(", #")})`}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={S.modalActions}>
+              <button style={S.btnSm} onClick={() => setModal(null)}>닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 일괄 업로드 오류 — 1건이라도 있으면 아무것도 저장되지 않았다 */}
+      {modal?.type === "importErrors" && importErrors && (
+        <div style={S.modalBg} onClick={() => setModal(null)}>
+          <div style={{ ...S.modal, maxWidth: 680 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ ...S.modalTitle, color: "#B91C1C" }}>파일 내용에 오류가 있습니다</div>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 14 }}>
+              오류가 {importErrors.totalErrors?.toLocaleString()}건 있어 아무것도 반영하지 않았습니다.
+              파일을 고쳐서 다시 올려주세요.
+            </div>
+            <div style={{ maxHeight: 360, overflowY: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr>
+                    {["행", "칸", "사유"].map((h) => (
+                      <th key={h} style={S.errTh}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {importErrors.errors.map((e, i) => (
+                    <tr key={i}>
+                      <td style={S.errTd}>{e.row}</td>
+                      <td style={S.errTd}>{e.column}</td>
+                      <td style={S.errTd}>{e.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {importErrors.totalErrors > importErrors.errors.length && (
+                <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>
+                  외 {(importErrors.totalErrors - importErrors.errors.length).toLocaleString()}건
+                </div>
+              )}
+            </div>
             <div style={S.modalActions}>
               <button style={S.btnSm} onClick={() => setModal(null)}>닫기</button>
             </div>
@@ -702,6 +927,16 @@ function EditFaqForm({ faq, categories, isAdmin, onCategoryCreated, onSave, onCl
 }
 
 const S = {
+  toolRow:     { marginBottom: 14, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", paddingTop: 12, borderTop: "1px solid #F3F4F6" },
+  toolLabel:   { fontSize: 12, fontWeight: 600, color: "#374151" },
+  statBox:     { flex: 1, minWidth: 96, background: "#F9FAFB", borderRadius: 8, padding: "10px 12px", textAlign: "center" },
+  resultLine:  { fontSize: 12, color: "#374151", marginBottom: 6 },
+  resultBlock: { marginTop: 12, paddingTop: 12, borderTop: "1px solid #F3F4F6" },
+  resultHead:  { fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 },
+  resultItem:  { fontSize: 12, color: "#374151", padding: "6px 0", borderBottom: "1px solid #F9FAFB" },
+  rowNo:       { fontFamily: "monospace", color: "#9CA3AF", marginRight: 6 },
+  errTh:       { textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600, whiteSpace: "nowrap" },
+  errTd:       { padding: "6px 8px", borderBottom: "1px solid #F3F4F6", color: "#374151", verticalAlign: "top" },
   tagLabel:    { fontSize: 10, color: "#9CA3AF", marginRight: 2 },
   synTag:      { fontSize: 11, padding: "2px 8px", borderRadius: 12, background: "#F5F3FF", color: "#5B21B6", border: "1px solid #DDD6FE" },
   btnCreate:   { padding: "8px 14px", fontSize: 12, fontWeight: 600, border: "1.5px solid #1565C0", borderRadius: 8, background: "#fff", color: "#1565C0", cursor: "pointer", fontFamily: "inherit" },
