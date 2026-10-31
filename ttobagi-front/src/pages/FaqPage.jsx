@@ -42,7 +42,9 @@ function ListDiff({ label, before, after }) {
     <div style={{ fontSize: 11, color: "#6B7280", marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
       <span style={{ color: "#9CA3AF" }}>{label}</span>
       {a && <span style={S.diffBefore}>{a}</span>}
-      {a && b && <span style={{ color: "#9CA3AF" }}>→</span>}
+      {/* 뒤쪽은 비었어도 "(없음)"으로 항상 그리므로, 앞쪽이 있으면 화살표도 always 그린다.
+          없으면 "검증용, AAA (없음)"처럼 한 덩어리로 읽힌다. */}
+      {a && <span style={{ color: "#9CA3AF" }}>→</span>}
       {b ? <span style={S.diffAfter}>{b}</span> : <span style={{ color: "#9CA3AF" }}>(없음)</span>}
     </div>
   );
