@@ -11,13 +11,15 @@ from unittest.mock import patch
 from services.run_job import run_job
 from services.runtime_config import runtime_bool, runtime_path
 
+INPUT_CSV = '번호,질문,날짜\n1,문의,2026-10-17\n'
+
 
 class RuntimeJobsTest(unittest.TestCase):
     def test_two_jobs_have_separate_inputs_outputs_and_preserve_faq_settings(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source, templates = root / "input.csv", root / "templates.json"
-            source.write_text("input", encoding="utf-8")
+            source.write_text(INPUT_CSV, encoding="utf-8")
             templates.write_text("{}", encoding="utf-8")
             environments = []
 
@@ -25,7 +27,7 @@ class RuntimeJobsTest(unittest.TestCase):
                 env = kwargs["env"]
                 environments.append(env)
                 data = Path(env["TTOBAGI_DATA_DIR"])
-                self.assertEqual((data / "tota24_unanswered_2026Q1.csv").read_text(), "input")
+                self.assertEqual((data / "tota24_unanswered_2026Q1.csv").read_text(encoding='utf-8-sig'), INPUT_CSV)
                 (data / "faq_candidates_final.json").write_text('{"faqCandidates": []}')
                 return types.SimpleNamespace(returncode=0)
 
@@ -58,7 +60,7 @@ class RuntimeJobsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "source.csv"
-            source.write_text("input")
+            source.write_text(INPUT_CSV, encoding='utf-8')
             with patch("services.run_job.subprocess.run", return_value=types.SimpleNamespace(returncode=7)):
                 self.assertEqual(run_job(source, root / "failed", templates=source), 7)
             self.assertEqual(json.loads((root / "failed/status.json").read_text())["status"], "FAILED")

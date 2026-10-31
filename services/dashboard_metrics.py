@@ -4,9 +4,7 @@ import csv
 from datetime import datetime, timedelta
 import math
 from services.keyword_policy import get_policy, KOREAN_TOKEN
-
-
-LOG_TYPES = {'CORRECT': 'correct', 'LOW_QUALITY': 'lowQuality', 'UNANSWER': 'unanswer'}
+from services.log_classification import LOG_TYPES, log_type
 
 
 def read_csv(path):
@@ -22,15 +20,6 @@ def source_id(value):
     if not -(2 ** 31) <= number < 2 ** 31:
         raise ValueError('Source log ID exceeds BE INT range')
     return number
-
-
-def log_type(row):
-    # This endpoint ingests unanswered-learning files. Validity/answer probability
-    # are training labels, not an observed chatbot response outcome.
-    value = (row.get('logType') or 'UNANSWER').strip()
-    if value not in LOG_TYPES:
-        raise ValueError('logType must be CORRECT, LOW_QUALITY or UNANSWER')
-    return value
 
 
 def validate_source_rows(rows):

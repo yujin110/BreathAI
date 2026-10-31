@@ -70,6 +70,19 @@ class DashboardMetricsTest(unittest.TestCase):
         self.assertEqual(result['systemStatus']['samplingStatus']['unanswer'], 4)
         self.assertEqual(result['performanceMetrics']['currentUnanswerRate'], 100)
 
+    def test_percent_drives_counts_daily_trend_and_points_without_log_type(self):
+        for row, score in zip(self.rows, ('75', '25', '24.99', '74.99')):
+            row.pop('logType')
+            row['keywordMatchPercent'] = score
+        self.save()
+        result = build_dashboard(self.data, {}, self.summaries)
+        self.assertEqual(result['systemStatus']['samplingStatus'],
+                         {'correct': 1, 'lowQuality': 2, 'unanswer': 1})
+        self.assertEqual(result['performanceMetrics']['currentUnanswerRate'], 25)
+        self.assertEqual([p['logType'] for p in result['points']], ['CORRECT', 'LOW_QUALITY', 'UNANSWER'])
+        self.assertEqual(result['usageStats'][1]['lowQualityCount'], 2)
+        self.assertEqual(result['trend'][1]['unanswerCount'], 1)
+
     def test_missing_baseline_does_not_fabricate_bursts(self):
         result = build_dashboard(self.data, {'0': ['문의']}, self.summaries)
         self.assertEqual(result['burstKeywords'], [])
