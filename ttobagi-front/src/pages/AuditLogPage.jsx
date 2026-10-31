@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { auditApi } from "../api/audit.js";
+import { formatKst } from "../utils/datetime.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 
@@ -23,17 +24,6 @@ const CATEGORY_STYLE = {
   READ:     { background: "#F3F4F6", color: "#6B7280" },
 };
 const CATEGORY_LABEL = Object.fromEntries(CATEGORIES.filter((c) => c.value).map((c) => [c.value, c.label]));
-
-// createdAt 은 UTC(Z)로 온다. 운영자가 보는 값이라 한국 시간으로 바꿔 표시한다.
-function formatKst(value) {
-  if (!value) return "-";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return String(value);
-  return new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-  }).format(d).replace(/\. /g, "-").replace(/\.$/, "");
-}
 
 const EMPTY_FILTER = { from: "", to: "", email: "", category: "", result: "", includeReads: false };
 
@@ -158,7 +148,7 @@ export default function AuditLogPage() {
                 const ok = l.success !== false;
                 return [
                   <tr key={l.logId} style={S.row} onClick={() => setOpenId(open ? null : l.logId)}>
-                    <td style={{ ...S.td, whiteSpace: "nowrap" }}>{formatKst(l.createdAt)}</td>
+                    <td style={{ ...S.td, whiteSpace: "nowrap" }}>{formatKst(l.createdAt, { withSeconds: true })}</td>
                     <td style={S.td}>{l.email || "-"}</td>
                     <td style={S.td}>
                       {/* action·category 는 BE V9 이후에 온다. 없으면 메서드·경로로 보여 준다. */}

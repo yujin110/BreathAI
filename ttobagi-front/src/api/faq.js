@@ -82,6 +82,30 @@ export const faqApi = {
   // 호출부(FaqPage)는 실패하면 문자열 입력으로 떨어진다.
   getCategories: () => request("GET", "/api/v1/faq/categories"),
 
+  // POST /api/v1/faq/categories — 관리자 전용.
+  // 본문 { name }(필수, 100자 이하). 앞뒤 공백을 지우고 연속 공백은 하나로 줄여 저장한다.
+  // 공백을 모두 뺀 이름이 기존 카테고리와 같으면 409(예: "열차 운영관련" = "열차운영관련").
+  // 응답 data는 { qType, name }.
+  createCategory: (name) => request("POST", "/api/v1/faq/categories", { body: { name } }),
+
+  // POST /api/v1/faq/import — 관리자 전용. multipart 필드 이름은 file.
+  // 양식은 FAQ 다운로드 CSV와 같다(ID·카테고리·질문·답변·키워드·유사어, 질문·답변 필수).
+  // 오류가 1건이라도 있으면 아무것도 저장하지 않고 400이며, 본문 형식은 분석 업로드와 같다
+  // ({ totalErrors, errors: [{ row, column, reason }] }).
+  importFaq: (file) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return request("POST", "/api/v1/faq/import", { body: formData, isFormData: true });
+  },
+
+  // GET /api/v1/faq/keywords/download?sinceVersionId= — 로그인한 사용자 누구나.
+  // sinceVersionId를 생략하면 지금 FAQ의 키워드 전체(열: ID, 카테고리, 질문, 키워드),
+  // 주면 그 버전 이후 새로 생긴 키워드만(열: ID, 카테고리, 질문, 새 키워드).
+  // FAQ 다운로드와 같은 규칙으로 버전을 만들 수 있으므로 호출 뒤 버전 목록을 다시 받아야 한다.
+  downloadKeywords: (sinceVersionId) =>
+    requestFile("GET", `/api/v1/faq/keywords/download${toQueryString({ sinceVersionId })}`,
+      "faq_keywords.csv"),
+
   // GET /api/v1/faq/download?versionId=
   // ApiResponse JSON이 아니라 text/csv 본문으로 내려오므로 requestFile을 쓴다.
   // versionId를 생략하면 서버가 최신 내용으로 새 버전(VersionType.DOWNLOAD)을 만들고 그걸 내려준다.
