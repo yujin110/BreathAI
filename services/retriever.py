@@ -280,7 +280,7 @@ def run_for_faqs() -> None:
     1. 네 원천을 통합한 KB 로드 및 임베딩
     2. standardQuestion으로 코사인 유사도 상위 20개 검색
     3. reranker로 상위 5개 재정렬
-    4. FAQ 원천의 최고 점수가 임계값 이상이면 EXPAND, 아니면 NEW
+    4. 최고 점수 결과가 운영 FAQ ID를 가지고 임계값 이상이면 EXPAND, 아니면 NEW
     5. qType/category/matchedFaqs/similarQuestions를 후보에 기록
     """
 
@@ -359,11 +359,12 @@ def run_for_faqs() -> None:
             ],
         }
 
-        # 일반 문서가 아니라 실제 FAQ 원천이 임계값 이상일 때만 EXPAND로 판정한다.
+        # 최고 점수 FAQ를 운영 DB에서 찾을 수 있을 때만 EXPAND로 판정한다.
         best_match = (
             top[0]
             if top
             and top[0].get('source_type') in FAQ_SOURCE_TYPES
+            and top[0].get('faq_id') is not None
             and top[0].get('rerank_score', 0.0) >= FAQ_MATCH_THRESHOLD
             else None
         )
@@ -379,11 +380,11 @@ def run_for_faqs() -> None:
             'similarQuestions': c.get('similarQuestions') or similar_by_cluster.get(c['clusterLabel'], []),
             'matchedFaqs': [
                 {
+                    'matchedFaqId': item.get('faq_id'),
                     'matchedFaqSeqNum': item.get('source_seq_num'),
                     'matchScore': round(item.get('rerank_score', 0.0), 4),
                 }
                 for item in matched
-                if item.get('source_seq_num') is not None
             ],
         })
         # 후속 답변 생성·백엔드 payload 단계가 같은 파일을 읽을 수 있도록
