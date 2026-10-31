@@ -35,7 +35,13 @@ public class FaqCandidateMatch {
     @JoinColumn(name = "candidate_id", nullable = false, foreignKey = @ForeignKey(name = "fk_match_candidate_id"))
     private FaqCandidate candidate;
 
-    @Column(name = "matched_faq_seq_num", nullable = false, 
+    // 확장 대상 FAQ, 운영 FAQ가 아닌 자료와 매칭됐거나 예전 분석이면 null
+    @Column(name = "matched_faq_id",
+            columnDefinition = "BIGINT COMMENT 'gold_faq.faq_id (확장 대상 FAQ)'")
+    private Long matchedFaqId;
+
+    // 원본 FAQ가 없는 FAQ(직접 등록·승인으로 생긴 FAQ 등)와 매칭되면 null
+    @Column(name = "matched_faq_seq_num",
             columnDefinition = "INT COMMENT 'counselling_info.seq_num (Bronze 참조)'")
     private Integer matchedFaqSeqNum;
 
@@ -53,8 +59,10 @@ public class FaqCandidateMatch {
     }
 
     @Builder
-    public FaqCandidateMatch(FaqCandidate candidate, Integer matchedFaqSeqNum, BigDecimal matchScore) {
+    public FaqCandidateMatch(FaqCandidate candidate, Long matchedFaqId, Integer matchedFaqSeqNum,
+                             BigDecimal matchScore) {
         this.candidate = candidate;
+        this.matchedFaqId = matchedFaqId;
         this.matchedFaqSeqNum = matchedFaqSeqNum;
         this.matchScore = matchScore;
     }

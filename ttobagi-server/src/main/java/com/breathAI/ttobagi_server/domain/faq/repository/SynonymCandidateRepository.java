@@ -14,6 +14,9 @@ public interface SynonymCandidateRepository extends JpaRepository<SynonymCandida
     List<SynonymCandidate> findByCandidate(FaqCandidate candidate);
     List<SynonymCandidate> findByCandidateCandidateId(Long candidateId);
 
+    // 저장한 순서대로, 정렬이 없으면 유니크 인덱스(글자순)대로 나온다
+    List<SynonymCandidate> findByCandidateCandidateIdOrderBySynonymIdAsc(Long candidateId);
+
     // 유형별 필터링
     List<SynonymCandidate> findBySynonymType(SynonymType synonymType);
 

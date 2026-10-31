@@ -144,6 +144,7 @@ public class AnalyzeResultResponse {
         @Getter
         @Builder
         public static class MatchedFaq {
+            private Long matchedFaqId;
             private Integer matchedFaqSeqNum;
             private double matchScore;
         }

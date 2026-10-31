@@ -24,7 +24,7 @@ public class UserUpdateRequest {
 
     @NotBlank(message = "새 비밀번호를 입력해주세요.")
     @Pattern(
-        regexp = "^(?=.*[a-z])(?=.*\\d)(?=.*[@$!%*?&])[a-z\\d@$!%*?&]{6,20}$",
+        regexp = "^(?=.*[A-Za-z])(?=.*\\d)(?=.*[^A-Za-z0-9])[\\x21-\\x7E]{6,20}$",
         message = "비밀번호 형식이 올바르지 않습니다."
     )
     private String newPassword;

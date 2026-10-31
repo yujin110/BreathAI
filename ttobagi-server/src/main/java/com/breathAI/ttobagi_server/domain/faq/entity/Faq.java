@@ -51,6 +51,9 @@ public class Faq {
     @Column(name = "keywords", columnDefinition = "JSON COMMENT '[\"유실물\", \"분실물\"]'")
     private String keywords;
 
+    @Column(name = "synonyms", columnDefinition = "JSON COMMENT '[\"분실물센터\", \"유실물센타\"]'")
+    private String synonyms;
+
     @Column(name = "q_type", columnDefinition = "INT COMMENT '카테고리 코드'")
     private Integer qType;
 
@@ -93,12 +96,13 @@ public class Faq {
 
     @Builder
     public Faq(Integer sourceSeqNum, FaqCandidate candidate, String question, String answer,
-               String keywords, Integer qType, String category, User createdBy) {
+               String keywords, String synonyms, Integer qType, String category, User createdBy) {
         this.sourceSeqNum = sourceSeqNum;
         this.candidate = candidate;
         this.question = question;
         this.answer = answer;
         this.keywords = keywords;
+        this.synonyms = synonyms;
         this.qType = qType;
         this.category = category;
         this.createdBy = createdBy;
@@ -106,12 +110,13 @@ public class Faq {
         this.qaCnt = 0;
     }
 
-    // 질문, 답변, 키워드, 카테고리 코드 수정
+    // 질문, 답변, 키워드, 유사어, 카테고리 코드 수정
     // PATCH 요청 특성상 전달되지 않은 필드는 기존 값을 유지한다
-    public void update(String question, String answer, String keywords, Integer qType) {
+    public void update(String question, String answer, String keywords, String synonyms, Integer qType) {
         if (question != null) this.question = question;
         if (answer != null) this.answer = answer;
         if (keywords != null) this.keywords = keywords;
+        if (synonyms != null) this.synonyms = synonyms;
         if (qType != null) this.qType = qType;
     }
 
@@ -126,10 +131,12 @@ public class Faq {
     }
 
     // 버전 사본의 값으로 되돌린다, 빈 값도 그대로 쓰고 삭제된 FAQ는 다시 활성화한다
-    public void restoreFrom(String question, String answer, String keywords, Integer qType, String category) {
+    public void restoreFrom(String question, String answer, String keywords, String synonyms,
+                            Integer qType, String category) {
         this.question = question;
         this.answer = answer;
         this.keywords = keywords;
+        this.synonyms = synonyms;
         this.qType = qType;
         this.category = category;
         this.isActive = true;

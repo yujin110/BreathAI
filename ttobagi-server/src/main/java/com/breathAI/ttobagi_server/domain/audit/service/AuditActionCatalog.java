@@ -49,6 +49,8 @@ public final class AuditActionCatalog {
             // FAQ
             entry("POST", "/api/v1/faq", "FAQ 등록", FAQ),
             entry("POST", "/api/v1/faq/apply", "FAQ 후보 승인·반영", FAQ),
+            entry("POST", "/api/v1/faq/categories", "카테고리 생성", FAQ),
+            entry("POST", "/api/v1/faq/import", "FAQ 일괄 업로드", FAQ),
             entry("POST", "/api/v1/faq/versions", "FAQ 버전 만들기", FAQ),
             entry("POST", "/api/v1/faq/versions/{versionId}/restore", "FAQ 버전 복원", FAQ, "versionId", "버전"),
             entry("PATCH", "/api/v1/faq/recommendations/{candidateId}/reject", "FAQ 후보 반려", FAQ, "candidateId", "후보"),
@@ -65,6 +67,7 @@ public final class AuditActionCatalog {
 
             // 데이터 반출 (/faq/download는 아래 /faq/{faqId}보다 먼저 맞춰야 한다)
             entry("GET", "/api/v1/faq/download", "FAQ 다운로드", EXPORT),
+            entry("GET", "/api/v1/faq/keywords/download", "키워드 다운로드", EXPORT),
             entry("GET", "/api/v1/audit-logs", "감사로그 조회", EXPORT),
 
             entry("GET", "/api/v1/faq/{faqId}", "FAQ 상세 조회", READ, "faqId", "FAQ")

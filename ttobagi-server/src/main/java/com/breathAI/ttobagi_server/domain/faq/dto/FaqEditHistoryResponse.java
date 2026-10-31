@@ -35,9 +35,11 @@ public class FaqEditHistoryResponse {
         private String beforeQuestion;
         private String beforeAnswer;
         private List<String> beforeKeywords;
+        private List<String> beforeSynonyms;
         private String afterQuestion;
         private String afterAnswer;
         private List<String> afterKeywords;
+        private List<String> afterSynonyms;
         private String editReason;
         private String editedBy;
 

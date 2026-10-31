@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { faqApi } from "../api/faq.js";
 import { saveBlob } from "../api/client.js";
+import { formatKst } from "../utils/datetime.js";
 import { useToast } from "../hooks/useToast.js";
 import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
@@ -17,17 +18,17 @@ const CHANGE_LABEL = {
 
 // 백엔드 FaqVersion.VersionType
 const VERSION_TYPE_LABEL = {
-  UPLOAD: "분석 반영", DOWNLOAD: "다운로드 시점",
+  UPLOAD: "파일 업로드", DOWNLOAD: "다운로드 시점",
   MANUAL: "직접 만듦", RESTORE: "복원",
 };
 
 // 버전 비교 응답의 changes[].field
 const FIELD_LABEL = {
   standardQuestion: "질문", answer: "답변", keywords: "키워드",
-  qType: "카테고리 코드", category: "카테고리",
+  synonyms: "유사어", qType: "카테고리 코드", category: "카테고리",
 };
 
-// keywords 는 배열로 오고 나머지는 문자열이다.
+// keywords·synonyms 는 배열로 오고 나머지는 문자열이다.
 // answer 에는 HTML·이미지가 들어 있을 수 있어 FAQ 목록·이력과 같게 태그를 걷어낸다.
 function fieldText(field, value) {
   if (value == null) return "(없음)";
@@ -184,7 +185,7 @@ export default function FaqVersionsPage() {
     <div style={S.page}>
       <div style={S.pageTitle}>FAQ 버전 관리</div>
       <div style={S.pageSub}>
-        버전 만들기나 CSV 다운로드로 그 시점의 FAQ 스냅샷이 쌓입니다. 버전별로 CSV를 내려받을 수 있습니다.
+        버전 만들기, CSV 다운로드, FAQ 파일 일괄 업로드로 그 시점의 FAQ 스냅샷이 쌓입니다. 버전별로 CSV를 내려받을 수 있습니다.
       </div>
 
       <div style={{ marginBottom: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -230,7 +231,7 @@ export default function FaqVersionsPage() {
         <div style={S.empty}>
           <div style={{ fontSize: 32, marginBottom: 8 }}>🗂️</div>
           <div>아직 버전이 없습니다.</div>
-          <div style={{ fontSize: 12, marginTop: 6 }}>CSV를 내려받거나 버전 만들기를 누르면 생성됩니다.</div>
+          <div style={{ fontSize: 12, marginTop: 6 }}>CSV를 내려받거나 버전 만들기를 누르면 생성됩니다. FAQ 파일을 일괄 업로드해도 생깁니다.</div>
         </div>
       ) : (
         versions.map((v) => (
@@ -248,7 +249,7 @@ export default function FaqVersionsPage() {
                   <span>확장 <strong style={{ color: "#5B21B6" }}>{v.expandedCount ?? 0}</strong></span>
                 </div>
                 <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 6 }}>
-                  {v.createdAt} · {v.createdBy || "-"}
+                  {formatKst(v.createdAt)} · {v.createdBy || "-"}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
@@ -307,7 +308,7 @@ export default function FaqVersionsPage() {
                 </div>
 
                 <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 14 }}>
-                  {detail.data?.createdAt} · {detail.data?.createdBy || "-"}
+                  {formatKst(detail.data?.createdAt)} · {detail.data?.createdBy || "-"}
                   {detail.data?.previousVersionId && ` · 이전 버전 #${detail.data.previousVersionId}`}
                 </div>
 

@@ -14,6 +14,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -24,8 +25,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 // 운영 FAQ 관리 및 AI 생성 FAQ 후보 반영 처리
@@ -42,6 +45,7 @@ public class FaqService {
     private final FaqEditHistoryRepository faqEditHistoryRepository;
     private final FaqVersionRepository faqVersionRepository;
     private final FaqVersionItemRepository faqVersionItemRepository;
+    private final FaqCategoryRepository faqCategoryRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
 
@@ -96,6 +100,7 @@ public class FaqService {
                                     .standardQuestion(i.getQuestion())
                                     .answer(i.getAnswer())
                                     .keywords(parseKeywords(i.getKeywords()))
+                                    .synonyms(parseSynonyms(i.getSynonyms()))
                                     .qType(i.getQType())
                                     .category(displayCategory(i.getCategory(), i.getQType(), masterNames))
                                     .createdAt(i.getFaqCreatedAt().toLocalDate())
@@ -117,6 +122,7 @@ public class FaqService {
                         .standardQuestion(f.getQuestion())
                         .answer(f.getAnswer())
                         .keywords(parseKeywords(f.getKeywords()))
+                        .synonyms(parseSynonyms(f.getSynonyms()))
                         .qType(f.getQType())
                         .category(displayCategory(f.getCategory(), f.getQType(), masterNames))
                         .createdAt(f.getCreatedAt().toLocalDate())
@@ -145,6 +151,69 @@ public class FaqService {
                 .build();
     }
 
+    // 카테고리 생성, 앞뒤 공백을 지우고 연속 공백은 하나로 줄여 저장한다
+    // 공백을 모두 뺀 이름이 기존·새 카테고리와 같으면 409 (예: "열차 운영관련" = "열차운영관련")
+    @Transactional
+    public FaqCategoryListResponse.CategoryItem createCategory(FaqCategoryCreateRequest request, String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+
+        String name = normalizeCategoryName(request.getName());
+        String nameKey = categoryNameKey(name);
+        if (nameKey.isEmpty()) {
+            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
+        }
+        if (faqCategoryRepository.countByNameKeyInMaster(nameKey) > 0) {
+            throw new CustomException(ErrorCode.FAQ_CATEGORY_DUPLICATED);
+        }
+
+        FaqCategory category = saveCategory(name, nameKey, user);
+        return FaqCategoryListResponse.CategoryItem.builder()
+                .qType(category.getQType())
+                .name(category.getName())
+                .build();
+    }
+
+    // 공백을 뺀 이름이 같은 카테고리가 있으면 그것을, 없으면 새로 만든다 (FAQ 일괄 업로드)
+    CategoryRef findOrCreateCategory(String rawName, User user) {
+        String name = normalizeCategoryName(rawName);
+        String nameKey = categoryNameKey(name);
+        List<FaqRepository.CategoryRow> found = faqCategoryRepository.findByNameKeyInMaster(nameKey);
+        if (!found.isEmpty()) {
+            return new CategoryRef(found.get(0).getCode(), found.get(0).getName(), false);
+        }
+        FaqCategory category = saveCategory(name, nameKey, user);
+        return new CategoryRef(category.getQType(), category.getName(), true);
+    }
+
+    record CategoryRef(Integer qType, String name, boolean created) {}
+
+    // 전각 공백 등 유니코드 공백도 공백으로 본다
+    static String normalizeCategoryName(String rawName) {
+        return rawName.strip().replaceAll("(?U)\\s+", " ");
+    }
+
+    static String categoryNameKey(String name) {
+        return name.replaceAll("(?U)\\s+", "");
+    }
+
+    private FaqCategory saveCategory(String name, String nameKey, User user) {
+        FaqCategory category;
+        try {
+            category = faqCategoryRepository.saveAndFlush(FaqCategory.builder()
+                    .qType(faqCategoryRepository.nextCode())
+                    .name(name)
+                    .nameKey(nameKey)
+                    .createdBy(user)
+                    .build());
+        } catch (DataIntegrityViolationException e) {
+            // 같은 이름이나 코드로 동시에 만들어진 경우
+            throw new CustomException(ErrorCode.FAQ_CATEGORY_DUPLICATED);
+        }
+        log.info("카테고리 생성: qType={}, name={}", category.getQType(), category.getName());
+        return category;
+    }
+
     // FAQ 단건 상세 조회
     @Transactional(readOnly = true)
     public FaqDetailResponse getFaqDetail(Long faqId) {
@@ -156,6 +225,7 @@ public class FaqService {
                 .standardQuestion(faq.getQuestion())
                 .answer(faq.getAnswer())
                 .keywords(parseKeywords(faq.getKeywords()))
+                .synonyms(parseSynonyms(faq.getSynonyms()))
                 .qType(faq.getQType())
                 .category(faq.getCategory() != null || faq.getQType() == null
                         ? faq.getCategory()
@@ -178,16 +248,18 @@ public class FaqService {
         String beforeQuestion = faq.getQuestion();
         String beforeAnswer = faq.getAnswer();
         List<String> beforeKeywords = parseKeywords(faq.getKeywords());
+        List<String> beforeSynonyms = parseSynonyms(faq.getSynonyms());
         Integer beforeQType = faq.getQType();
 
         faq.update(request.getStandardQuestion(), request.getAnswer(),
-                toKeywordsJson(request.getKeywords()), request.getQType());
+                toKeywordsJson(request.getKeywords()), toSynonymsJson(request.getSynonyms()), request.getQType());
         syncCategory(faq, beforeQType);
         // 수정 시각이 응답에 반영되도록 즉시 반영한다
         faqRepository.saveAndFlush(faq);
 
         // 요청값이 아닌 반영 결과를 기록해야 일부 필드만 수정한 경우에도 이력이 정확하다
         List<String> afterKeywords = parseKeywords(faq.getKeywords());
+        List<String> afterSynonyms = parseSynonyms(faq.getSynonyms());
         FaqEditHistory history = FaqEditHistory.builder()
                 .faq(faq)
                 .editedBy(user)
@@ -195,9 +267,11 @@ public class FaqService {
                 .beforeQuestion(beforeQuestion)
                 .beforeAnswer(beforeAnswer)
                 .beforeKeywords(beforeKeywords)
+                .beforeSynonyms(beforeSynonyms)
                 .afterQuestion(faq.getQuestion())
                 .afterAnswer(faq.getAnswer())
                 .afterKeywords(afterKeywords)
+                .afterSynonyms(afterSynonyms)
                 .editReason(request.getEditReason())
                 .build();
         faqEditHistoryRepository.save(history);
@@ -208,6 +282,7 @@ public class FaqService {
                 .question(faq.getQuestion())
                 .answer(faq.getAnswer())
                 .keywords(afterKeywords)
+                .synonyms(afterSynonyms)
                 .historyId(history.getHistoryId())
                 .updatedAt(faq.getUpdatedAt())
                 .build();
@@ -231,6 +306,7 @@ public class FaqService {
                 .beforeQuestion(faq.getQuestion())
                 .beforeAnswer(faq.getAnswer())
                 .beforeKeywords(parseKeywords(faq.getKeywords()))
+                .beforeSynonyms(parseSynonyms(faq.getSynonyms()))
                 .build());
         log.info("FAQ 삭제 완료: faqId={}", faqId);
     }
@@ -256,9 +332,11 @@ public class FaqService {
                                 .beforeQuestion(h.getBeforeQuestion())
                                 .beforeAnswer(h.getBeforeAnswer())
                                 .beforeKeywords(h.getBeforeKeywords())
+                                .beforeSynonyms(h.getBeforeSynonyms())
                                 .afterQuestion(h.getAfterQuestion())
                                 .afterAnswer(h.getAfterAnswer())
                                 .afterKeywords(h.getAfterKeywords())
+                                .afterSynonyms(h.getAfterSynonyms())
                                 .editReason(h.getEditReason())
                                 // 탈퇴한 사용자의 이력은 수정자 정보 없이 반환
                                 .editedBy(h.getEditedBy() != null
@@ -282,24 +360,16 @@ public class FaqService {
         List<FaqCandidate> candidates = faqCandidateRepository
                 .findByAnalysisJobAnalysisId(analysisId);
 
-        // 후보별 유사 FAQ 매칭과, 매칭된 순번에 해당하는 운영 FAQ를 한 번에 조회한다
-        Map<Long, List<FaqCandidateMatch>> matchesByCandidate = faqCandidateMatchRepository
-                .findByCandidate_AnalysisJob_AnalysisIdOrderByMatchScoreDesc(analysisId).stream()
+        // 후보별 유사 FAQ 매칭과, 매칭된 운영 FAQ를 한 번에 조회한다
+        List<FaqCandidateMatch> matches = faqCandidateMatchRepository
+                .findByCandidate_AnalysisJob_AnalysisIdOrderByMatchScoreDesc(analysisId);
+        Map<Long, List<FaqCandidateMatch>> matchesByCandidate = matches.stream()
                 .collect(Collectors.groupingBy(m -> m.getCandidate().getCandidateId()));
-
-        List<Integer> seqNums = matchesByCandidate.values().stream()
-                .flatMap(List::stream)
-                .map(FaqCandidateMatch::getMatchedFaqSeqNum)
-                .distinct()
-                .collect(Collectors.toList());
-        Map<Integer, Faq> faqBySeqNum = seqNums.isEmpty()
-                ? Map.of()
-                : faqRepository.findBySourceSeqNumIn(seqNums).stream()
-                        .collect(Collectors.toMap(Faq::getSourceSeqNum, f -> f, (a, b) -> a));
+        MatchedFaqLookup lookup = matchedFaqLookup(matches);
 
         List<FaqCandidateListResponse.FaqCandidateItem> items = candidates.stream()
                 .map(c -> buildFaqCandidateItem(c,
-                        matchesByCandidate.getOrDefault(c.getCandidateId(), List.of()), faqBySeqNum))
+                        matchesByCandidate.getOrDefault(c.getCandidateId(), List.of()), lookup))
                 .collect(Collectors.toList());
 
         return FaqCandidateListResponse.builder()
@@ -337,24 +407,33 @@ public class FaqService {
         }
         candidate.apply();
 
+        // 유사어를 보내지 않으면 후보의 유사어를 쓴다 (유사어를 보내지 않는 화면에서도 사라지지 않게)
+        List<String> synonyms = request.getSynonyms() != null
+                ? request.getSynonyms() : candidateSynonymTexts(candidate.getCandidateId());
+
         Faq appliedFaq;
         String beforeQuestion = null;
         String beforeAnswer = null;
         List<String> beforeKeywords = null;
+        List<String> beforeSynonyms = null;
 
         if (isExpand) {
             beforeQuestion = targetFaq.getQuestion();
             beforeAnswer = targetFaq.getAnswer();
             beforeKeywords = parseKeywords(targetFaq.getKeywords());
+            beforeSynonyms = parseSynonyms(targetFaq.getSynonyms());
 
-            // 키워드는 기존 것에 합치고, 질문과 답변은 운영자가 확정한 값으로 바꾼다
+            // 키워드·유사어는 기존 것에 합치고, 질문과 답변은 운영자가 확정한 값으로 바꾼다
             LinkedHashSet<String> mergedKeywords = new LinkedHashSet<>(beforeKeywords);
             if (request.getKeywords() != null) {
                 mergedKeywords.addAll(request.getKeywords());
             }
+            List<String> mergedSynonyms = new ArrayList<>(beforeSynonyms);
+            mergedSynonyms.addAll(synonyms);
             Integer beforeQType = targetFaq.getQType();
             targetFaq.update(request.getFinalQuestion(), request.getFinalAnswer(),
-                    toKeywordsJson(new ArrayList<>(mergedKeywords)), request.getQType());
+                    toKeywordsJson(new ArrayList<>(mergedKeywords)), toSynonymsJson(mergedSynonyms),
+                    request.getQType());
             syncCategory(targetFaq, beforeQType);
             // 수정 시각이 응답에 반영되도록 즉시 반영한다
             appliedFaq = faqRepository.saveAndFlush(targetFaq);
@@ -369,6 +448,7 @@ public class FaqService {
                     .question(request.getFinalQuestion())
                     .answer(request.getFinalAnswer())
                     .keywords(toKeywordsJson(request.getKeywords()))
+                    .synonyms(toSynonymsJson(synonyms))
                     .qType(qType)
                     .category(category)
                     .createdBy(user)
@@ -396,9 +476,11 @@ public class FaqService {
                 .beforeQuestion(beforeQuestion)
                 .beforeAnswer(beforeAnswer)
                 .beforeKeywords(beforeKeywords)
+                .beforeSynonyms(beforeSynonyms)
                 .afterQuestion(appliedFaq.getQuestion())
                 .afterAnswer(appliedFaq.getAnswer())
                 .afterKeywords(parseKeywords(appliedFaq.getKeywords()))
+                .afterSynonyms(parseSynonyms(appliedFaq.getSynonyms()))
                 .build();
         faqEditHistoryRepository.save(history);
 
@@ -451,6 +533,9 @@ public class FaqService {
         candidate.updateDraft(request.getStandardQuestion(), request.getAnswerDraft(),
                 request.getKeywords(), qType, category);
         faqCandidateRepository.saveAndFlush(candidate);
+        if (request.getSynonyms() != null) {
+            replaceCandidateSynonyms(candidate, request.getSynonyms());
+        }
         Map<String, Object> after = candidateFields(candidate);
 
         // 바뀐 칸만 기록한다
@@ -475,12 +560,7 @@ public class FaqService {
 
         List<FaqCandidateMatch> matches = faqCandidateMatchRepository
                 .findByCandidateCandidateIdOrderByMatchScoreDesc(candidateId);
-        List<Integer> seqNums = matches.stream().map(FaqCandidateMatch::getMatchedFaqSeqNum).distinct().toList();
-        Map<Integer, Faq> faqBySeqNum = seqNums.isEmpty()
-                ? Map.of()
-                : faqRepository.findBySourceSeqNumIn(seqNums).stream()
-                        .collect(Collectors.toMap(Faq::getSourceSeqNum, f -> f, (a, b) -> a));
-        return buildFaqCandidateItem(candidate, matches, faqBySeqNum);
+        return buildFaqCandidateItem(candidate, matches, matchedFaqLookup(matches));
     }
 
     // FAQ 직접 등록, 변경 이력에 등록(CREATE)으로 남긴다
@@ -493,6 +573,7 @@ public class FaqService {
                 .question(request.getStandardQuestion())
                 .answer(request.getAnswer())
                 .keywords(toKeywordsJson(request.getKeywords()))
+                .synonyms(toSynonymsJson(request.getSynonyms()))
                 .qType(request.getQType())
                 .category(request.getQType() != null
                         ? faqRepository.findCategoryNameByQType(request.getQType()).orElse(null) : null)
@@ -506,6 +587,7 @@ public class FaqService {
                 .afterQuestion(faq.getQuestion())
                 .afterAnswer(faq.getAnswer())
                 .afterKeywords(parseKeywords(faq.getKeywords()))
+                .afterSynonyms(parseSynonyms(faq.getSynonyms()))
                 .build());
         log.info("FAQ 직접 등록: faqId={}", faq.getFaqId());
         return getFaqDetail(faq.getFaqId());
@@ -528,9 +610,39 @@ public class FaqService {
         fields.put("answerDraft", candidate.getAnswerDraft());
         fields.put("keywords", candidate.getRepresentativeKeywords() != null
                 ? new ArrayList<>(candidate.getRepresentativeKeywords()) : null);
+        fields.put("synonyms", candidateSynonymTexts(candidate.getCandidateId()));
         fields.put("qType", candidate.getQType());
         fields.put("category", candidate.getCategory());
         return fields;
+    }
+
+    private List<String> candidateSynonymTexts(Long candidateId) {
+        return synonymCandidateRepository.findByCandidateCandidateIdOrderBySynonymIdAsc(candidateId).stream()
+                .map(SynonymCandidate::getSynonymText)
+                .toList();
+    }
+
+    // 후보 유사어를 요청 목록으로 바꾼다, 이미 있던 글자는 기존 종류(오타·약어 등)를 유지하고 새 글자는 종류 없음
+    private void replaceCandidateSynonyms(FaqCandidate candidate, List<String> synonyms) {
+        List<SynonymCandidate> existing = synonymCandidateRepository.findByCandidateCandidateId(candidate.getCandidateId());
+        Map<String, SynonymCandidate.SynonymType> typeByText = new LinkedHashMap<>();
+        existing.forEach(s -> typeByText.putIfAbsent(s.getSynonymText(), s.getSynonymType()));
+
+        // 삭제를 먼저 반영해야 같은 글자를 다시 넣을 때 유니크 제약에 걸리지 않는다
+        synonymCandidateRepository.deleteAll(existing);
+        synonymCandidateRepository.flush();
+        try {
+            synonymCandidateRepository.saveAllAndFlush(normalizeSynonyms(synonyms).stream()
+                    .map(text -> SynonymCandidate.builder()
+                            .candidate(candidate)
+                            .synonymText(text)
+                            .synonymType(typeByText.get(text))
+                            .build())
+                    .toList());
+        } catch (DataIntegrityViolationException e) {
+            // DB 정렬 규칙상 같은 글자로 보는 유사어(대소문자·악센트만 다름)가 함께 온 경우
+            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
+        }
     }
 
     private String toJson(Object value) {
@@ -543,22 +655,65 @@ public class FaqService {
     }
 
     // EXPAND 후보의 확장 대상 조회
-    // 후보의 유사 FAQ 중 점수가 가장 높은 것을 원본 순번으로 운영 FAQ에서 찾는다
+    // 후보의 유사 FAQ 중 점수가 가장 높은 것을 운영 FAQ ID로 찾는다
+    // ID가 있으면 ID만 믿고(없거나 삭제됐으면 409), ID가 없는 예전 분석만 원본 순번으로 찾는다
     private Faq findExpandTarget(FaqCandidate candidate) {
         return faqCandidateMatchRepository
                 .findByCandidateCandidateIdOrderByMatchScoreDesc(candidate.getCandidateId()).stream()
                 .findFirst()
-                .flatMap(m -> faqRepository
-                        .findFirstBySourceSeqNumAndIsActiveTrueOrderByFaqIdAsc(m.getMatchedFaqSeqNum()))
+                .flatMap(m -> {
+                    if (m.getMatchedFaqId() != null) {
+                        return faqRepository.findByFaqIdAndIsActiveTrue(m.getMatchedFaqId());
+                    }
+                    if (m.getMatchedFaqSeqNum() != null) {
+                        return faqRepository
+                                .findFirstBySourceSeqNumAndIsActiveTrueOrderByFaqIdAsc(m.getMatchedFaqSeqNum());
+                    }
+                    return Optional.empty();
+                })
                 .orElseThrow(() -> new CustomException(ErrorCode.FAQ_EXPAND_TARGET_NOT_FOUND));
+    }
+
+    // 매칭된 운영 FAQ를 ID와 원본 순번으로 한 번에 조회해 둔다
+    private MatchedFaqLookup matchedFaqLookup(List<FaqCandidateMatch> matches) {
+        List<Long> faqIds = matches.stream()
+                .map(FaqCandidateMatch::getMatchedFaqId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        List<Integer> seqNums = matches.stream()
+                .filter(m -> m.getMatchedFaqId() == null)
+                .map(FaqCandidateMatch::getMatchedFaqSeqNum)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, Faq> byId = faqIds.isEmpty()
+                ? Map.of()
+                : faqRepository.findAllById(faqIds).stream()
+                        .collect(Collectors.toMap(Faq::getFaqId, f -> f));
+        Map<Integer, Faq> bySeqNum = seqNums.isEmpty()
+                ? Map.of()
+                : faqRepository.findBySourceSeqNumIn(seqNums).stream()
+                        .collect(Collectors.toMap(Faq::getSourceSeqNum, f -> f, (a, b) -> a));
+        return new MatchedFaqLookup(byId, bySeqNum);
+    }
+
+    // 매칭 한 건의 운영 FAQ, 확장 대상 조회와 같은 기준(ID 우선, ID가 없을 때만 원본 순번)
+    private record MatchedFaqLookup(Map<Long, Faq> byId, Map<Integer, Faq> bySeqNum) {
+        Faq find(FaqCandidateMatch match) {
+            if (match.getMatchedFaqId() != null) {
+                return byId.get(match.getMatchedFaqId());
+            }
+            return match.getMatchedFaqSeqNum() != null ? bySeqNum.get(match.getMatchedFaqSeqNum()) : null;
+        }
     }
 
     // 후보 단건을 응답 DTO로 변환, 유사어와 유사 FAQ 목록 포함
     private FaqCandidateListResponse.FaqCandidateItem buildFaqCandidateItem(
-            FaqCandidate candidate, List<FaqCandidateMatch> matches, Map<Integer, Faq> faqBySeqNum) {
+            FaqCandidate candidate, List<FaqCandidateMatch> matches, MatchedFaqLookup lookup) {
         List<FaqCandidateListResponse.FaqCandidateItem.SynonymItem> synonyms =
                 synonymCandidateRepository
-                        .findByCandidateCandidateId(candidate.getCandidateId())
+                        .findByCandidateCandidateIdOrderBySynonymIdAsc(candidate.getCandidateId())
                         .stream()
                         .map(s -> FaqCandidateListResponse.FaqCandidateItem.SynonymItem.builder()
                                 .text(s.getSynonymText())
@@ -566,10 +721,10 @@ public class FaqService {
                                 .build())
                         .collect(Collectors.toList());
 
-        // 매칭된 순번의 FAQ가 운영 FAQ에 없으면 ID와 질문은 비워 둔다
+        // 매칭된 FAQ가 운영 FAQ에 없으면 ID와 질문은 비워 둔다
         List<FaqCandidateListResponse.FaqCandidateItem.MatchedFaqItem> matchedFaqs = matches.stream()
                 .map(m -> {
-                    Faq matched = faqBySeqNum.get(m.getMatchedFaqSeqNum());
+                    Faq matched = lookup.find(m);
                     return FaqCandidateListResponse.FaqCandidateItem.MatchedFaqItem.builder()
                             .matchedFaqId(matched != null ? matched.getFaqId() : null)
                             .matchedFaqSeqNum(m.getMatchedFaqSeqNum())
@@ -618,6 +773,28 @@ public class FaqService {
             log.warn("키워드 직렬화 실패");
             return null;
         }
+    }
+
+    // 유사어 리스트를 저장용 JSON 문자열로 변환, null이면 null(수정 시 기존 값 유지)
+    private String toSynonymsJson(List<String> synonyms) {
+        return toKeywordsJson(normalizeSynonyms(synonyms));
+    }
+
+    // 유사어 정리: 앞뒤 공백 제거, 빈 값 제외, 대소문자만 다른 중복은 처음 것만 남긴다 (순서 유지)
+    static List<String> normalizeSynonyms(List<String> synonyms) {
+        if (synonyms == null) return null;
+        Map<String, String> byKey = new LinkedHashMap<>();
+        for (String synonym : synonyms) {
+            if (synonym == null || synonym.isBlank()) continue;
+            String text = synonym.strip();
+            byKey.putIfAbsent(text.toLowerCase(Locale.ROOT), text);
+        }
+        return new ArrayList<>(byKey.values());
+    }
+
+    // JSON 문자열로 저장된 유사어를 리스트로 변환, 없으면 빈 리스트
+    private List<String> parseSynonyms(String json) {
+        return parseKeywords(json);
     }
 
     // 빈 검색 조건은 미지정으로 취급

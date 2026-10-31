@@ -21,4 +21,6 @@ public class FaqCreateRequest {
     private String answer;
 
     private List<String> keywords;
+
+    private List<String> synonyms;
 }

@@ -11,7 +11,8 @@ function withFields(err, fallback) {
 }
 import { useToast } from "../hooks/useToast.js";
 
-const PW_PATTERN = /^(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[a-z\d@$!%*?&]{6,20}$/;
+// 백엔드 SignupRequest.password의 @Pattern과 같은 식이다. 한쪽만 바꾸면 통과·거부가 어긋난다.
+const PW_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9])[\x21-\x7E]{6,20}$/;
 
 // 가입 코드 규칙은 비밀번호 찾기와 같다: 영문 대소문자+숫자 6자리, 대소문자 구분.
 const CODE_LENGTH = 6;
@@ -69,7 +70,7 @@ export default function SignupPage() {
     if (!pw) { setError("비밀번호를 입력해주세요."); return; }
     if (pw !== confirm) { setError("비밀번호가 일치하지 않습니다."); return; }
     if (!PW_PATTERN.test(pw)) {
-      setError("비밀번호는 영문 소문자·숫자·특수문자(@$!%*?&)를 포함한 6~20자여야 합니다.");
+      setError("비밀번호는 영문·숫자·특수문자를 각각 1개 이상 포함한 6~20자여야 합니다(공백·한글 불가).");
       return;
     }
     setLoading(true);
@@ -142,7 +143,7 @@ export default function SignupPage() {
               </div>
 
               {[
-                { label: "비밀번호 (영문 소문자·숫자·특수문자 포함 6~20자)", type: "password", ph: "예: abc123!@", val: pw, set: setPw },
+                { label: "비밀번호 (영문·숫자·특수문자 각각 1개 이상, 6~20자)", type: "password", ph: "예: Abc123!@", val: pw, set: setPw },
                 { label: "비밀번호 확인", type: "password", ph: "비밀번호 재입력", val: confirm, set: setConfirm },
               ].map((f) => (
                 <div key={f.label} style={{ marginBottom: 14 }}>

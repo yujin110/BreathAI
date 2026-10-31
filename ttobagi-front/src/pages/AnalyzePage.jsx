@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { ScatterChart, Scatter, XAxis, YAxis, Tooltip, Cell, ResponsiveContainer } from "recharts";
 import { dashApi } from "../api/dashboard.js";
+import { fieldErrors } from "../api/client.js";
 import { faqApi } from "../api/faq.js";
 import MatchedFaqBadge from "../components/MatchedFaqBadge.jsx";
 import { toPlainText } from "../utils/text.js";
@@ -160,6 +161,8 @@ export default function AnalyzePage() {
   const [rejectTarget, setRejectTarget] = useState(null); // 반려 사유 입력 대상 후보
   const [editTarget, setEditTarget]     = useState(null); // 수정 중인 후보
   const [rejectReason, setRejectReason] = useState("");
+  // 후보 카드에서 "묶인 질문"을 펼쳐 둔 candidateId 집합
+  const [openQuestions, setOpenQuestions] = useState(() => new Set());
   // 후보 수정의 카테고리 선택지. GET /faq/categories 가 없으면 빈 배열로 둔다.
   const [categories, setCategories]     = useState([]);
   const [startedAt, setStartedAt]   = useState(null); // 분석 시작 시각
@@ -287,6 +290,28 @@ export default function AnalyzePage() {
 
   // 반영(/faq/apply)은 백엔드가 @PreAuthorize("hasRole('ADMIN')")로 막는다
   const isAdmin = user?.role === "ADMIN";
+
+  // 후보가 속한 군집의 질문 목록. 후보의 clusterLabel과 같은 점을 clusteringView.points에서 고른다.
+  //
+  // 주의: 이 개수가 occurrenceCount와 같지 않을 수 있다. 한 군집에서 후보가 여러 개 나오면
+  // (예: 분석 #3의 cluster 3에서 후보 2개) 후보마다 occurrenceCount는 자기 몫이지만
+  // points는 군집 전체라 더 많다. 후보별로 어떤 로그가 묶였는지는 응답에 없어서
+  // 군집 단위까지만 보여 줄 수 있다.
+  //
+  // text는 마스킹·정규화를 거친 문장이다(예: 열차번호가 [METRO_TRAIN]).
+  const clusterPoints = analyzeResult?.clusteringView?.points;
+  const questionsOf = (clusterLabel) =>
+    (clusterPoints || [])
+      .filter((pt) => pt.clusterLabel === clusterLabel)
+      .sort((a, b) => (a.sourceLogSeqNum ?? 0) - (b.sourceLogSeqNum ?? 0));
+
+  const toggleQuestions = (candidateId) =>
+    setOpenQuestions((prev) => {
+      const next = new Set(prev);
+      if (next.has(candidateId)) next.delete(candidateId);
+      else next.add(candidateId);
+      return next;
+    });
 
   const setOption = (key) => (e) =>
     setOptions((prev) => ({
@@ -481,8 +506,7 @@ export default function AnalyzePage() {
         periodStartDate: options.periodStartDate,
         periodEndDate: options.periodEndDate,
         isMaskingEnabled: options.isMaskingEnabled,
-        // 외국어 번역은 AI 점검 중이라 화면에서 막아 두었다. 항상 false로 보낸다.
-        isTranslationEnabled: false,
+        isTranslationEnabled: options.isTranslationEnabled,
         clustering: {
           minClusterSize: options.minClusterSize,
           minSamples: options.minSamples,
@@ -555,6 +579,10 @@ export default function AnalyzePage() {
         finalQuestion: c.standardQuestion,
         finalAnswer: c.answerDraft,
         keywords: c.representativeKeywords,
+        // 후보의 유사어를 그대로 보낸다. 생략해도 서버가 후보 유사어를 쓰지만(FaqService),
+        // 보낸 값이 그대로 저장되는 편이 화면에서 본 것과 어긋나지 않는다.
+        // 신규는 그대로 저장되고 확장은 기존 FAQ의 유사어에 합쳐진다.
+        synonyms: (c.synonyms || []).map((x) => x.text).filter(Boolean),
         isManualPatchConfirmed: false,
       });
       // 백엔드가 EXPAND 후보면 기존 FAQ를 확장하고 editType으로 알려준다
@@ -563,7 +591,7 @@ export default function AnalyzePage() {
         : "신규 FAQ로 반영되었습니다.");
       await reloadCandidates(analysisId);
     } catch (err) {
-      toast.error(err.message || "FAQ 반영에 실패했습니다.");
+      toast.error(fieldErrors(err) || err.message || "FAQ 반영에 실패했습니다.");
     } finally {
       setReviewing(null);
     }
@@ -599,6 +627,9 @@ export default function AnalyzePage() {
         standardQuestion: form.standardQuestion.trim(),
         answerDraft: form.answerDraft.trim(),
         keywords: form.keywords,
+        // 생략하면 서버가 기존 유사어를 유지하므로, 지웠다는 뜻이 전해지도록 항상 보낸다.
+        // 이미 있던 글자는 종류(오타·약어)가 유지되고 새 글자는 종류 없이 저장된다.
+        synonyms: form.synonyms,
         qType: form.qType,
       });
       // 응답이 후보 항목 하나와 같은 형식이라 그 카드만 교체한다
@@ -610,9 +641,11 @@ export default function AnalyzePage() {
       toast.success("후보를 저장했습니다.");
       setEditTarget(null);
     } catch (err) {
+      // 400이면 칸별 사유가 data에 온다 (예: synonyms[0] "유사어는 100자 이하여야 합니다.")
+      const fields = fieldErrors(err);
       toast.error(err?.status === 409
         ? "이미 검토가 끝난 후보는 수정할 수 없습니다."
-        : (err.message || "후보 저장에 실패했습니다."));
+        : (fields || err.message || "후보 저장에 실패했습니다."));
     } finally {
       setReviewing(null);
     }
@@ -697,14 +730,11 @@ export default function AnalyzePage() {
                           onChange={setOption("isMaskingEnabled")} />
                         개인정보 마스킹
                       </label>
-                      {/* 2026-10-26 확인: 켜도 번역되지 않는다(AI 쪽 번역 API 호출 실패로 보류 중).
-                          되살릴 때는 아래 체크박스를 다시 넣고 전송값(isTranslationEnabled)을
-                          options.isTranslationEnabled 로 되돌린다.
-                          <label style={S.checkLabel}>
-                            <input type="checkbox" checked={options.isTranslationEnabled}
-                              onChange={setOption("isTranslationEnabled")} />
-                            외국어 번역
-                          </label> */}
+                      <label style={S.checkLabel}>
+                        <input type="checkbox" checked={options.isTranslationEnabled}
+                          onChange={setOption("isTranslationEnabled")} />
+                        외국어 번역
+                      </label>
                     </div>
                   </div>
 
@@ -726,7 +756,7 @@ export default function AnalyzePage() {
                     클러스터 개수는 HDBSCAN 특성상 직접 지정할 수 없어 최소 크기로 조절합니다.
                     값을 키우면 클러스터가 적고 커집니다. 비워 두면 기본값(5 / 2)을 씁니다.
                     <br />
-                    같은 파일이라도 기간·마스킹·군집화 값을 바꾸면 새로 분석합니다.
+                    같은 파일이라도 기간·마스킹·군집화·번역 값을 바꾸면 새로 분석합니다.
                   </div>
 
                 </div>
@@ -1031,13 +1061,29 @@ export default function AnalyzePage() {
               <div>분석을 먼저 실행해주세요.</div>
             </div>
           ) : (
-            candidates.map((c) => (
+            candidates.map((c) => {
+              const isOpen = openQuestions.has(c.candidateId);
+              // 시각화 결과를 아직 못 받았거나 후보에 군집 번호가 없으면 펼칠 수 없다.
+              const canExpand = Boolean(clusterPoints?.length) && typeof c.clusterLabel === "number";
+              const questions = isOpen ? questionsOf(c.clusterLabel) : [];
+              return (
               <div key={c.candidateId} style={{ ...S.card, marginBottom: 12, padding: 18 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginBottom: 4 }}>{c.standardQuestion}</div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
-                      <span style={{ color: "#9CA3AF" }}>매칭 {c.occurrenceCount}건</span>
+                      {canExpand ? (
+                        <>
+                          <span style={{ color: "#9CA3AF" }}>매칭 {c.occurrenceCount}건</span>
+                          <button type="button" style={S.matchToggle}
+                            aria-expanded={isOpen}
+                            onClick={() => toggleQuestions(c.candidateId)}>
+                            질문 보기 {isOpen ? "▴" : "▾"}
+                          </button>
+                        </>
+                      ) : (
+                        <span style={{ color: "#9CA3AF" }}>매칭 {c.occurrenceCount}건</span>
+                      )}
                       <MatchedFaqBadge matches={c.matchedFaqs} candidateType={c.candidateType} />
                     </div>
                   </div>
@@ -1079,8 +1125,35 @@ export default function AnalyzePage() {
                     </span>
                   ))}
                 </div>
+
+                {/* 이 후보로 묶인 실제 질문들. 목록이 길어도 카드가 늘어나지 않게 안에서 스크롤한다. */}
+                {isOpen && (
+                  <div style={S.questionBox}>
+                    {questions.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "#9CA3AF" }}>묶인 질문을 찾지 못했습니다.</div>
+                    ) : (
+                      <>
+                        <div style={S.questionNote}>
+                          이 후보가 속한 군집의 질문 {questions.length.toLocaleString()}건입니다.
+                          {questions.length !== c.occurrenceCount
+                            && " 한 군집에서 후보가 여러 개 나와 매칭 건수와 다릅니다."}
+                          {" "}개인정보를 가린 문장이고, 번호는 업로드한 파일의 번호입니다.
+                        </div>
+                        <div style={S.questionList}>
+                          {questions.map((pt) => (
+                            <div key={pt.sourceLogSeqNum} style={S.questionRow}>
+                              <span style={S.questionNo}>#{pt.sourceLogSeqNum}</span>
+                              <span>{pt.text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
-            ))
+              );
+            })
           )}
         </div>
       )}
@@ -1127,11 +1200,13 @@ export default function AnalyzePage() {
   );
 }
 
-// 후보 수정 폼. 질문·답변 초안은 필수이고, 키워드·카테고리는 생략하면 기존 값이 유지된다.
+// 후보 수정 폼. 질문·답변 초안은 필수이고, 카테고리는 생략하면 기존 값이 유지된다.
 function EditCandidateForm({ candidate, categories, saving, onSave, onClose }) {
   const [q, setQ]       = useState(candidate.standardQuestion || "");
   const [a, setA]       = useState(candidate.answerDraft || "");
   const [tags, setTags] = useState((candidate.representativeKeywords || []).join(", "));
+  // 후보의 synonyms는 [{ text, type }]이고 저장 요청은 글자 목록이라 text만 쓴다
+  const [syns, setSyns] = useState((candidate.synonyms || []).map((x) => x.text).join(", "));
   const [qType, setQType] = useState(candidate.qType ?? "");
 
   return (
@@ -1151,6 +1226,11 @@ function EditCandidateForm({ candidate, categories, saving, onSave, onClose }) {
           <input style={S.input} value={tags} onChange={(e) => setTags(e.target.value)} />
         </div>
         <div>
+          <label style={S.modalLabel}>유사어 (쉼표로 구분)</label>
+          <input style={S.input} placeholder="비우면 유사어가 모두 지워집니다"
+            value={syns} onChange={(e) => setSyns(e.target.value)} />
+        </div>
+        <div>
           <label style={S.modalLabel}>카테고리</label>
           <select style={{ ...S.input, cursor: "pointer" }} value={qType}
             onChange={(e) => setQType(e.target.value)}>
@@ -1168,6 +1248,7 @@ function EditCandidateForm({ candidate, categories, saving, onSave, onClose }) {
             standardQuestion: q,
             answerDraft: a,
             keywords: tags.split(",").map((t) => t.trim()).filter(Boolean),
+            synonyms: syns.split(",").map((t) => t.trim()).filter(Boolean),
             qType: qType === "" ? undefined : Number(qType),
           })}>
           {saving ? "저장 중..." : "저장"}
@@ -1226,6 +1307,12 @@ const S = {
   optionRow:   { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid #F3F4F6" },
   optionLabel: { fontSize: 12, color: "#6B7280", display: "flex", alignItems: "center", gap: 6 },
   optionInput: { height: 32, padding: "0 10px", border: "1px solid #D1D5DB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", width: 132 },
+  matchToggle: { background: "none", border: "none", padding: 0, fontSize: 12, color: "#1565C0", fontWeight: 500, cursor: "pointer", fontFamily: "inherit" },
+  questionBox: { marginTop: 12, paddingTop: 12, borderTop: "1px solid #F3F4F6" },
+  questionNote:{ fontSize: 11, color: "#9CA3AF", marginBottom: 8 },
+  questionList:{ maxHeight: 260, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 },
+  questionRow: { display: "flex", gap: 8, fontSize: 12, color: "#374151", lineHeight: 1.5 },
+  questionNo:  { flexShrink: 0, fontFamily: "monospace", color: "#9CA3AF" },
   checkLabel:  { fontSize: 12, color: "#374151", display: "flex", alignItems: "center", gap: 5, cursor: "pointer" },
   dropzoneDrag:{ borderColor: "#1565C0", background: "#EFF8FF" },
   dropzoneDisabled: { opacity: 0.5, cursor: "not-allowed", background: "#F9FAFB" },

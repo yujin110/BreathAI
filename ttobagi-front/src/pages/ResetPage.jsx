@@ -11,9 +11,11 @@ function withFields(err, fallback) {
 }
 import { useToast } from "../hooks/useToast.js";
 
-// 새 비밀번호 규칙: 영문 소문자 + 숫자 + 특수문자(@$!%*?&) 포함 6~20자.
+// 새 비밀번호 규칙: 영문(대소문자)·숫자·특수문자를 각각 1개 이상 포함한 6~20자.
+// 특수문자는 키보드의 32개 모두 되고 공백·한글은 안 된다.
 // 문자 클래스에 A-Z가 없으므로 대문자가 들어가면 통과하지 못한다 (백엔드 정규식과 동일).
-const PW_PATTERN = /^(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[a-z\d@$!%*?&]{6,20}$/;
+// 백엔드 PasswordResetConfirmRequest.newPassword의 @Pattern과 같은 식이다.
+const PW_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9])[\x21-\x7E]{6,20}$/;
 
 const CODE_LENGTH = 6;
 
@@ -70,7 +72,7 @@ export default function ResetPage() {
       return;
     }
     if (!PW_PATTERN.test(pw)) {
-      setError("비밀번호는 영문 소문자·숫자·특수문자(@$!%*?&)를 포함한 6~20자여야 합니다. 대문자는 사용할 수 없습니다.");
+      setError("비밀번호는 영문·숫자·특수문자를 각각 1개 이상 포함한 6~20자여야 합니다(공백·한글 불가).");
       return;
     }
 
@@ -144,7 +146,7 @@ export default function ResetPage() {
 
               <label style={S.label}>새 비밀번호</label>
               <input style={{ ...S.input, marginBottom: 14 }} type="password"
-                placeholder="영문 소문자·숫자·특수문자 포함 6~20자"
+                placeholder="영문·숫자·특수문자 각각 1개 이상, 6~20자"
                 value={pw} onChange={(e) => setPw(e.target.value)} />
 
               <label style={S.label}>새 비밀번호 확인</label>
