@@ -22,6 +22,28 @@ const EDIT_TYPE_STYLE = {
   DELETE: { background: "#FDECEA", color: "#B91C1C", border: "#FECACA" },
 };
 
+// 쉼표로 적은 목록을 배열로. 앞뒤 공백과 빈 값을 뺀다.
+// 서버도 저장할 때 같은 정리를 하지만(유사어는 대소문자 중복까지 제거),
+// 화면에서 먼저 정리해야 보낸 값과 저장된 값이 덜 어긋난다.
+function toList(text) {
+  return (text || "").split(",").map((t) => t.trim()).filter(Boolean);
+}
+
+// 이력의 키워드·유사어 변화. 달라졌을 때만 전후를 나란히 보여 준다.
+function ListDiff({ label, before, after }) {
+  const a = (before || []).join(", ");
+  const b = (after || []).join(", ");
+  if (a === b) return null;
+  return (
+    <div style={{ fontSize: 11, color: "#6B7280", marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <span style={{ color: "#9CA3AF" }}>{label}</span>
+      {a && <span style={S.diffBefore}>{a}</span>}
+      {a && b && <span style={{ color: "#9CA3AF" }}>→</span>}
+      {b ? <span style={S.diffAfter}>{b}</span> : <span style={{ color: "#9CA3AF" }}>(없음)</span>}
+    </div>
+  );
+}
+
 function EditTypeTag({ editType }) {
   if (!editType) return null;
   const s = EDIT_TYPE_STYLE[editType] || EDIT_TYPE_STYLE.MANUAL;
@@ -159,6 +181,8 @@ export default function FaqPage() {
         standardQuestion: faq.standardQuestion,
         answer: faq.answer,
         keywords: faq.keywords,
+        // 생략하면 서버가 기존 값을 유지하므로, 비웠다는 뜻이 전해지도록 항상 보낸다
+        synonyms: faq.synonyms || [],
         qType: faq.qType,
         editReason: editReason || undefined,
       });
@@ -196,6 +220,7 @@ export default function FaqPage() {
         standardQuestion: form.standardQuestion.trim(),
         answer: form.answer.trim(),
         keywords: form.keywords,
+        synonyms: form.synonyms,
         qType: form.qType,
       });
       toast.success(`FAQ #${res.data?.faqId}를 등록했습니다.`);
@@ -311,6 +336,13 @@ export default function FaqPage() {
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8 }}>
                       {f.keywords?.map((k) => <span key={k} style={S.tag}>{k}</span>)}
                     </div>
+                    {/* 유사어는 키워드와 쓰임이 달라 구분해 보여 준다 (2026-10-31 추가) */}
+                    {f.synonyms?.length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6, alignItems: "center" }}>
+                        <span style={S.tagLabel}>유사어</span>
+                        {f.synonyms.map((sy) => <span key={sy} style={S.synTag}>{sy}</span>)}
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, marginLeft: 16 }}>
                     {f.createdAt && <span style={S.meta}>{f.createdAt} 등록</span>}
@@ -385,6 +417,9 @@ export default function FaqPage() {
                 )}
                 {h.afterAnswer && <div style={S.faqA}>{toPlainText(h.afterAnswer)}</div>}
 
+                <ListDiff label="키워드" before={h.beforeKeywords} after={h.afterKeywords} />
+                <ListDiff label="유사어" before={h.beforeSynonyms} after={h.afterSynonyms} />
+
                 {h.editReason && (
                   <div style={{ fontSize: 11, color: "#6B7280", marginTop: 6 }}>사유: {h.editReason}</div>
                 )}
@@ -439,6 +474,8 @@ export default function FaqPage() {
                   <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.6 }}>
                     {toPlainText(h.afterAnswer)}
                   </div>
+                  <ListDiff label="키워드" before={h.beforeKeywords} after={h.afterKeywords} />
+                  <ListDiff label="유사어" before={h.beforeSynonyms} after={h.afterSynonyms} />
                 </div>
               ))}
             </div>
@@ -481,6 +518,7 @@ function CreateFaqForm({ categories, saving, onSave, onClose }) {
   const [q, setQ]       = useState("");
   const [a, setA]       = useState("");
   const [tags, setTags] = useState("");
+  const [syns, setSyns] = useState("");
   const [qType, setQType] = useState("");
 
   return (
@@ -502,6 +540,11 @@ function CreateFaqForm({ categories, saving, onSave, onClose }) {
             value={tags} onChange={(e) => setTags(e.target.value)} />
         </div>
         <div>
+          <label style={S.modalLabel}>유사어 (쉼표로 구분)</label>
+          <input style={S.input} placeholder="막차시간, 마지막 열차"
+            value={syns} onChange={(e) => setSyns(e.target.value)} />
+        </div>
+        <div>
           <label style={S.modalLabel}>카테고리</label>
           <select style={{ ...S.input, cursor: "pointer" }} value={qType}
             onChange={(e) => setQType(e.target.value)}>
@@ -519,6 +562,7 @@ function CreateFaqForm({ categories, saving, onSave, onClose }) {
             standardQuestion: q,
             answer: a,
             keywords: tags.split(",").map((t) => t.trim()).filter(Boolean),
+            synonyms: toList(syns),
             qType: qType === "" ? undefined : Number(qType),
           })}>
           {saving ? "등록 중..." : "등록"}
@@ -532,6 +576,7 @@ function EditFaqForm({ faq, onSave, onClose }) {
   const [q, setQ]       = useState(faq.standardQuestion || "");
   const [a, setA]       = useState(faq.answer || "");
   const [tags, setTags] = useState(faq.keywords?.join(", ") || "");
+  const [syns, setSyns] = useState(faq.synonyms?.join(", ") || "");
   const [reason, setReason] = useState("");
 
   return (
@@ -551,6 +596,11 @@ function EditFaqForm({ faq, onSave, onClose }) {
           <input style={S.input} value={tags} onChange={(e) => setTags(e.target.value)} />
         </div>
         <div>
+          <label style={S.modalLabel}>유사어 (쉼표로 구분)</label>
+          <input style={S.input} placeholder="비우면 유사어가 모두 지워집니다"
+            value={syns} onChange={(e) => setSyns(e.target.value)} />
+        </div>
+        <div>
           <label style={S.modalLabel}>수정 사유 (선택)</label>
           <input style={S.input} placeholder="변경 이력에 함께 기록됩니다"
             value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -565,6 +615,7 @@ function EditFaqForm({ faq, onSave, onClose }) {
               standardQuestion: q,
               answer: a,
               keywords: tags.split(",").map((t) => t.trim()).filter(Boolean),
+              synonyms: toList(syns),
             },
             reason.trim()
           )
@@ -575,6 +626,8 @@ function EditFaqForm({ faq, onSave, onClose }) {
 }
 
 const S = {
+  tagLabel:    { fontSize: 10, color: "#9CA3AF", marginRight: 2 },
+  synTag:      { fontSize: 11, padding: "2px 8px", borderRadius: 12, background: "#F5F3FF", color: "#5B21B6", border: "1px solid #DDD6FE" },
   btnCreate:   { padding: "8px 14px", fontSize: 12, fontWeight: 600, border: "1.5px solid #1565C0", borderRadius: 8, background: "#fff", color: "#1565C0", cursor: "pointer", fontFamily: "inherit" },
 
   historyItem: { padding: "12px 0", borderBottom: "1px solid #F3F4F6" },

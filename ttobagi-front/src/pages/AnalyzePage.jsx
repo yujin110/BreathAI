@@ -575,6 +575,8 @@ export default function AnalyzePage() {
         finalQuestion: c.standardQuestion,
         finalAnswer: c.answerDraft,
         keywords: c.representativeKeywords,
+        // synonyms를 생략하면 FaqService가 후보에 저장된 유사어를 그대로 쓴다.
+        // (신규는 그대로 저장, 확장은 기존 FAQ의 유사어에 합친다)
         isManualPatchConfirmed: false,
       });
       // 백엔드가 EXPAND 후보면 기존 FAQ를 확장하고 editType으로 알려준다
@@ -619,6 +621,9 @@ export default function AnalyzePage() {
         standardQuestion: form.standardQuestion.trim(),
         answerDraft: form.answerDraft.trim(),
         keywords: form.keywords,
+        // 생략하면 서버가 기존 유사어를 유지하므로, 지웠다는 뜻이 전해지도록 항상 보낸다.
+        // 이미 있던 글자는 종류(오타·약어)가 유지되고 새 글자는 종류 없이 저장된다.
+        synonyms: form.synonyms,
         qType: form.qType,
       });
       // 응답이 후보 항목 하나와 같은 형식이라 그 카드만 교체한다
@@ -1184,11 +1189,13 @@ export default function AnalyzePage() {
   );
 }
 
-// 후보 수정 폼. 질문·답변 초안은 필수이고, 키워드·카테고리는 생략하면 기존 값이 유지된다.
+// 후보 수정 폼. 질문·답변 초안은 필수이고, 카테고리는 생략하면 기존 값이 유지된다.
 function EditCandidateForm({ candidate, categories, saving, onSave, onClose }) {
   const [q, setQ]       = useState(candidate.standardQuestion || "");
   const [a, setA]       = useState(candidate.answerDraft || "");
   const [tags, setTags] = useState((candidate.representativeKeywords || []).join(", "));
+  // 후보의 synonyms는 [{ text, type }]이고 저장 요청은 글자 목록이라 text만 쓴다
+  const [syns, setSyns] = useState((candidate.synonyms || []).map((x) => x.text).join(", "));
   const [qType, setQType] = useState(candidate.qType ?? "");
 
   return (
@@ -1208,6 +1215,11 @@ function EditCandidateForm({ candidate, categories, saving, onSave, onClose }) {
           <input style={S.input} value={tags} onChange={(e) => setTags(e.target.value)} />
         </div>
         <div>
+          <label style={S.modalLabel}>유사어 (쉼표로 구분)</label>
+          <input style={S.input} placeholder="비우면 유사어가 모두 지워집니다"
+            value={syns} onChange={(e) => setSyns(e.target.value)} />
+        </div>
+        <div>
           <label style={S.modalLabel}>카테고리</label>
           <select style={{ ...S.input, cursor: "pointer" }} value={qType}
             onChange={(e) => setQType(e.target.value)}>
@@ -1225,6 +1237,7 @@ function EditCandidateForm({ candidate, categories, saving, onSave, onClose }) {
             standardQuestion: q,
             answerDraft: a,
             keywords: tags.split(",").map((t) => t.trim()).filter(Boolean),
+            synonyms: syns.split(",").map((t) => t.trim()).filter(Boolean),
             qType: qType === "" ? undefined : Number(qType),
           })}>
           {saving ? "저장 중..." : "저장"}
