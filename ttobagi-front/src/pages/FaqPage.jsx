@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { faqApi } from "../api/faq.js";
 import { saveBlob, fieldErrors } from "../api/client.js";
+import { formatKst } from "../utils/datetime.js";
 import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
@@ -544,7 +545,7 @@ export default function FaqPage() {
                 {h.editReason && (
                   <div style={{ fontSize: 11, color: "#6B7280", marginTop: 6 }}>사유: {h.editReason}</div>
                 )}
-                <div style={{ fontSize: 11, color: "#C4C8CE", marginTop: 6 }}>{h.createdAt}</div>
+                <div style={{ fontSize: 11, color: "#C4C8CE", marginTop: 6 }}>{formatKst(h.createdAt)}</div>
               </div>
             ))
           )}
@@ -579,7 +580,7 @@ export default function FaqPage() {
                     <EditTypeTag editType={h.editType} />
                     <span style={{ fontSize: 11, color: "#9CA3AF" }}>
                       {/* 탈퇴한 사용자가 남긴 이력은 editedBy가 null로 온다 (AuthService.deleteMyInfo) */}
-                      {h.editedBy || "-"} · {h.createdAt}
+                      {h.editedBy || "-"} · {formatKst(h.createdAt)}
                     </span>
                   </div>
                   {h.editReason && (

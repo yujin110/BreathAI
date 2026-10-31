@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { faqApi } from "../api/faq.js";
 import { saveBlob } from "../api/client.js";
+import { formatKst } from "../utils/datetime.js";
 import { useToast } from "../hooks/useToast.js";
 import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
@@ -248,7 +249,7 @@ export default function FaqVersionsPage() {
                   <span>확장 <strong style={{ color: "#5B21B6" }}>{v.expandedCount ?? 0}</strong></span>
                 </div>
                 <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 6 }}>
-                  {v.createdAt} · {v.createdBy || "-"}
+                  {formatKst(v.createdAt)} · {v.createdBy || "-"}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
@@ -307,7 +308,7 @@ export default function FaqVersionsPage() {
                 </div>
 
                 <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 14 }}>
-                  {detail.data?.createdAt} · {detail.data?.createdBy || "-"}
+                  {formatKst(detail.data?.createdAt)} · {detail.data?.createdBy || "-"}
                   {detail.data?.previousVersionId && ` · 이전 버전 #${detail.data.previousVersionId}`}
                 </div>
 
