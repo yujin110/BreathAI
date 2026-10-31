@@ -153,6 +153,21 @@ public class FaqController {
                 .body(file.content());
     }
 
+    // 키워드만 CSV로 다운로드, 버전은 FAQ 다운로드와 같은 규칙 (변경이 있으면 새 버전 생성)
+    // sinceVersionId를 주면 그 버전 이후 새로 생긴 키워드만 내려준다
+    @GetMapping("/keywords/download")
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
+    public ResponseEntity<byte[]> downloadKeywords(
+            @RequestParam(required = false) Long sinceVersionId,
+            @AuthenticationPrincipal String email) {
+        FaqExportService.ExportFile file = faqExportService.exportKeywords(sinceVersionId, email);
+        return ResponseEntity.ok()
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment().filename(file.fileName()).build().toString())
+                .body(file.content());
+    }
+
     // FAQ 변경 이력 조회, FAQ와 변경 유형으로 필터링 가능
     @GetMapping("/history")
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
