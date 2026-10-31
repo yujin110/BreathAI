@@ -5,6 +5,7 @@ import { formatKst } from "../utils/datetime.js";
 import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
+import { useIsMobile } from "../hooks/useIsMobile.js";
 
 const PAGE_SIZE = 10;
 // 백엔드 spring.servlet.multipart.max-file-size=50MB 와 같게 맞춘다
@@ -64,6 +65,7 @@ function EditTypeTag({ editType }) {
 }
 
 export default function FaqPage() {
+  const isMobile = useIsMobile();
   const [tab, setTab]               = useState("list");
 
   // FAQ 리스트
@@ -341,7 +343,7 @@ export default function FaqPage() {
   if (loading) return <div style={{ padding: 40, color: "#6B7280" }}>불러오는 중...</div>;
 
   return (
-    <div style={S.page}>
+    <div style={{ ...S.page, ...(isMobile ? S.pageMobile : {}) }}>
       <div style={S.pageTitle}>FAQ 관리</div>
       <div style={S.pageSub}>현재 운영 중인 FAQ를 확인하고 수정합니다. 신규 후보 검토는 <strong>신규 데이터 분석</strong>에서 합니다.</div>
 
@@ -693,8 +695,9 @@ export default function FaqPage() {
               오류가 {importErrors.totalErrors?.toLocaleString()}건 있어 아무것도 반영하지 않았습니다.
               파일을 고쳐서 다시 올려주세요.
             </div>
-            <div style={{ maxHeight: 360, overflowY: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            {/* 좁은 화면에서는 "사유"가 길어 표가 넘치므로 가로로도 밀 수 있게 한다 */}
+            <div style={{ maxHeight: 360, overflowY: "auto", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+              <table style={{ width: "100%", minWidth: 320, borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
                   <tr>
                     {["행", "칸", "사유"].map((h) => (
@@ -951,6 +954,7 @@ const S = {
   diffBefore:  { color: "#B91C1C", textDecoration: "line-through" },
   diffAfter:   { color: "#065F46", fontWeight: 500 },
   page:        { padding: 28 },
+  pageMobile:  { padding: 16 },
   pageTitle:   { fontSize: 20, fontWeight: 700, color: "#111827", marginBottom: 4 },
   pageSub:     { fontSize: 13, color: "#6B7280", marginBottom: 20 },
   tabs:        { display: "flex", gap: 2, background: "#F3F4F6", borderRadius: 10, padding: 4, width: "fit-content", marginBottom: 20 },

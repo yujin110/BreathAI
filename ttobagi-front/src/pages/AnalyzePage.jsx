@@ -7,6 +7,7 @@ import MatchedFaqBadge from "../components/MatchedFaqBadge.jsx";
 import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
+import { useIsMobile } from "../hooks/useIsMobile.js";
 
 // Spring의 spring.servlet.multipart.max-file-size=50MB 와 동일하게 맞춘다
 const HISTORY_SIZE = 10;
@@ -137,6 +138,7 @@ function ClusterScatterPlot({ points, clusterNames }) {
 }
 
 export default function AnalyzePage() {
+  const isMobile = useIsMobile();
   const [tab, setTab]               = useState("upload");
   const [file, setFile]             = useState(null);
   const [drag, setDrag]             = useState(false);
@@ -652,7 +654,7 @@ export default function AnalyzePage() {
   };
 
   return (
-    <div style={S.page}>
+    <div style={{ ...S.page, ...(isMobile ? S.pageMobile : {}) }}>
       <div style={S.pageTitle}>신규 데이터 분석</div>
       <div style={S.pageSub}>미답변 로그를 업로드하고 AI 분석을 실행합니다.</div>
 
@@ -670,7 +672,7 @@ export default function AnalyzePage() {
 
       {/* ── 탭 1: 업로드 · 분석 ── */}
       {tab === "upload" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 340px", gap: 16 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={S.card}>
               <div style={S.cardHeader}>
@@ -780,6 +782,7 @@ export default function AnalyzePage() {
                     <div style={S.errorHead}>
                       파일 내용에 오류가 {uploadErrors.totalErrors?.toLocaleString()}건 있습니다. 고쳐서 다시 올려주세요.
                     </div>
+                    <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
                     <table style={S.errorTable}>
                       <thead>
                         <tr>
@@ -799,6 +802,7 @@ export default function AnalyzePage() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                     {uploadErrors.totalErrors > uploadErrors.errors.length && (
                       <div style={S.errorMore}>
                         외 {(uploadErrors.totalErrors - uploadErrors.errors.length).toLocaleString()}건
@@ -983,7 +987,7 @@ export default function AnalyzePage() {
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16 }}>
             <div style={S.card}>
               <div style={S.cardHeader}><span style={S.cardTitle}>응답 유형 비교</span></div>
               <div style={S.cardBody}>
@@ -1261,7 +1265,7 @@ function EditCandidateForm({ candidate, categories, saving, onSave, onClose }) {
 const S = {
   errorBox:    { marginTop: 12, border: "1px solid #FECACA", background: "#FEF2F2", borderRadius: 10, padding: 14 },
   errorHead:   { fontSize: 13, fontWeight: 600, color: "#B91C1C", marginBottom: 10 },
-  errorTable:  { width: "100%", borderCollapse: "collapse", fontSize: 12 },
+  errorTable:  { width: "100%", minWidth: 320, borderCollapse: "collapse", fontSize: 12 },
   errorTh:     { textAlign: "left", padding: "6px 8px", color: "#991B1B", borderBottom: "1px solid #FECACA", fontWeight: 600 },
   errorTd:     { padding: "6px 8px", color: "#374151", borderBottom: "1px solid #FEE2E2", verticalAlign: "top" },
   errorMore:   { marginTop: 8, fontSize: 11, color: "#991B1B" },
@@ -1276,6 +1280,7 @@ const S = {
   btnSm:       { padding: "7px 14px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, background: "#fff", color: "#374151", cursor: "pointer", fontFamily: "inherit" },
 
   page:        { padding: 28 },
+  pageMobile:  { padding: 16 },
   pageTitle:   { fontSize: 20, fontWeight: 700, color: "#111827", marginBottom: 4 },
   pageSub:     { fontSize: 13, color: "#6B7280", marginBottom: 20 },
   tabs:        { display: "flex", gap: 2, background: "#F3F4F6", borderRadius: 10, padding: 4, width: "fit-content", marginBottom: 20 },

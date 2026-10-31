@@ -3,8 +3,10 @@ import { useNavigate, Link } from "react-router-dom";
 import { authApi } from "../api/auth.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
+import { useIsMobile } from "../hooks/useIsMobile.js";
 
 export default function LoginPage() {
+  const isMobile = useIsMobile();
   const [email, setEmail]       = useState("");
   const [pw, setPw]             = useState("");
   const [remember, setRemember] = useState(false);
@@ -31,7 +33,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={S.page}>
+    <div style={{ ...S.page, ...(isMobile ? { padding: 16 } : {}) }}>
       {/* ── 배경 도형들 ── */}
       <div style={S.bgCircle1} />
       <div style={S.bgCircle2} />
@@ -44,9 +46,10 @@ export default function LoginPage() {
       <div style={S.bgRect2} />
 
       {/* ── 가운데 카드 ── */}
-      <div style={S.card}>
+      <div style={{ ...S.card, ...(isMobile ? S.cardMobile : {}) }}>
         {/* 왼쪽 — 설명 */}
-        <div style={S.cardLeft}>
+        {/* 장식용 패널이라 좁은 화면에서는 감추고 입력칸에 폭을 넘긴다 */}
+        {!isMobile && <div style={S.cardLeft}>
           <div style={S.cardLeftInner}>
             <div style={{ position: "relative", zIndex: 2 }}>
               <div style={S.leftTitle}>또타24<br />현행화 시스템</div>
@@ -57,7 +60,7 @@ export default function LoginPage() {
               </div>
             </div>
           </div>
-        </div>
+        </div>}
 
         {/* 오른쪽 — 로그인 폼 */}
         <div style={S.cardRight}>
@@ -148,6 +151,9 @@ const S = {
     position: "relative",
     zIndex: 10,
   },
+
+  // 폰에서는 820px를 화면에 맞추고, 장식용 왼쪽 패널은 숨겨 입력칸만 남긴다
+  cardMobile: { width: "100%", maxWidth: 420, minHeight: 0 },
 
   // 카드 왼쪽
   cardLeft: {

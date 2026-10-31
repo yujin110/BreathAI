@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth.js";
+import { useIsMobile } from "../hooks/useIsMobile.js";
 
 const NAV = [
   { to: "/dashboard", icon: "📊", label: "대시보드" },
@@ -12,39 +13,52 @@ const NAV = [
   { to: "/account",   icon: "👤", label: "계정 관리" },
 ];
 
-export default function Sidebar() {
+// 좁은 화면에서는 왼쪽에서 밀어 나오는 서랍이 되고, 넓은 화면에서는 지금처럼 고정이다.
+export default function Sidebar({ open = false, onClose }) {
   const { user } = useAuth();
+  const isMobile = useIsMobile();
   const isAdmin = user?.role === "ADMIN";
   const items = NAV.filter((n) => !n.adminOnly || isAdmin);
 
+  const panel = isMobile
+    ? { ...S.sidebar, transform: open ? "translateX(0)" : "translateX(-100%)", transition: "transform .2s", zIndex: 201 }
+    : S.sidebar;
+
   return (
-    <div style={S.sidebar}>
-      <div style={S.logo}>
-        <span style={{ fontSize: 24 }}>🚇</span>
-        <div>
-          <div style={S.logoText}>또타24</div>
-          <div style={S.logoSub}>현행화 시스템</div>
+    <>
+      {/* 서랍이 열렸을 때 뒤를 덮어 바깥을 누르면 닫히게 한다 */}
+      {isMobile && open && <div style={S.backdrop} onClick={onClose} />}
+
+      <div style={panel}>
+        <div style={S.logo}>
+          <span style={{ fontSize: 24 }}>🚇</span>
+          <div>
+            <div style={S.logoText}>또타24</div>
+            <div style={S.logoSub}>현행화 시스템</div>
+          </div>
         </div>
+
+        <nav style={{ flex: 1 }}>
+          <div style={S.section}>메뉴</div>
+          {items.map((n) => (
+            <NavLink key={n.to} to={n.to} end={n.end}
+              onClick={() => { if (isMobile) onClose?.(); }}
+              style={({ isActive }) => ({ ...S.navItem, ...(isActive ? S.navActive : {}) })}>
+              <span>{n.icon}</span>
+              <span>{n.label}</span>
+            </NavLink>
+          ))}
+        </nav>
+
+        <div style={S.footer}>BreathAI · v1.0</div>
       </div>
-
-      <nav style={{ flex: 1 }}>
-        <div style={S.section}>메뉴</div>
-        {items.map((n) => (
-          <NavLink key={n.to} to={n.to} end={n.end}
-            style={({ isActive }) => ({ ...S.navItem, ...(isActive ? S.navActive : {}) })}>
-            <span>{n.icon}</span>
-            <span>{n.label}</span>
-          </NavLink>
-        ))}
-      </nav>
-
-      <div style={S.footer}>BreathAI · v1.0</div>
-    </div>
+    </>
   );
 }
 
 const S = {
   sidebar:     { width: 220, minHeight: "100vh", background: "#0D3B7A", display: "flex", flexDirection: "column", position: "fixed", left: 0, top: 0, bottom: 0, zIndex: 100 },
+  backdrop:    { position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 200 },
   logo:        { display: "flex", alignItems: "center", gap: 10, padding: "18px 20px", borderBottom: "1px solid rgba(255,255,255,.1)" },
   logoText:    { fontSize: 14, fontWeight: 700, color: "#fff" },
   logoSub:     { fontSize: 10, color: "rgba(255,255,255,.5)" },
