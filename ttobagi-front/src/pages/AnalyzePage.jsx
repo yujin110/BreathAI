@@ -160,6 +160,8 @@ export default function AnalyzePage() {
   const [rejectTarget, setRejectTarget] = useState(null); // 반려 사유 입력 대상 후보
   const [editTarget, setEditTarget]     = useState(null); // 수정 중인 후보
   const [rejectReason, setRejectReason] = useState("");
+  // 후보 카드에서 "묶인 질문"을 펼쳐 둔 candidateId 집합
+  const [openQuestions, setOpenQuestions] = useState(() => new Set());
   // 후보 수정의 카테고리 선택지. GET /faq/categories 가 없으면 빈 배열로 둔다.
   const [categories, setCategories]     = useState([]);
   const [startedAt, setStartedAt]   = useState(null); // 분석 시작 시각
@@ -287,6 +289,24 @@ export default function AnalyzePage() {
 
   // 반영(/faq/apply)은 백엔드가 @PreAuthorize("hasRole('ADMIN')")로 막는다
   const isAdmin = user?.role === "ADMIN";
+
+  // 후보에 묶인 질문 목록. 후보의 clusterLabel과 같은 점을 clusteringView.points에서 고른다.
+  // AI가 군집별 점 개수와 summaries.size가 어긋나면 분석을 실패시키므로(dashboard_metrics.py)
+  // 이렇게 추린 개수는 occurrenceCount와 같다.
+  // text는 마스킹·정규화를 거친 문장이다(예: 열차번호가 [METRO_TRAIN]).
+  const clusterPoints = analyzeResult?.clusteringView?.points;
+  const questionsOf = (clusterLabel) =>
+    (clusterPoints || [])
+      .filter((pt) => pt.clusterLabel === clusterLabel)
+      .sort((a, b) => (a.sourceLogSeqNum ?? 0) - (b.sourceLogSeqNum ?? 0));
+
+  const toggleQuestions = (candidateId) =>
+    setOpenQuestions((prev) => {
+      const next = new Set(prev);
+      if (next.has(candidateId)) next.delete(candidateId);
+      else next.add(candidateId);
+      return next;
+    });
 
   const setOption = (key) => (e) =>
     setOptions((prev) => ({
@@ -1031,13 +1051,26 @@ export default function AnalyzePage() {
               <div>분석을 먼저 실행해주세요.</div>
             </div>
           ) : (
-            candidates.map((c) => (
+            candidates.map((c) => {
+              const isOpen = openQuestions.has(c.candidateId);
+              // 시각화 결과를 아직 못 받았거나 후보에 군집 번호가 없으면 펼칠 수 없다.
+              const canExpand = Boolean(clusterPoints?.length) && typeof c.clusterLabel === "number";
+              const questions = isOpen ? questionsOf(c.clusterLabel) : [];
+              return (
               <div key={c.candidateId} style={{ ...S.card, marginBottom: 12, padding: 18 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginBottom: 4 }}>{c.standardQuestion}</div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
-                      <span style={{ color: "#9CA3AF" }}>매칭 {c.occurrenceCount}건</span>
+                      {canExpand ? (
+                        <button type="button" style={S.matchToggle}
+                          aria-expanded={isOpen}
+                          onClick={() => toggleQuestions(c.candidateId)}>
+                          묶인 질문 {c.occurrenceCount}건 {isOpen ? "▴" : "▾"}
+                        </button>
+                      ) : (
+                        <span style={{ color: "#9CA3AF" }}>묶인 질문 {c.occurrenceCount}건</span>
+                      )}
                       <MatchedFaqBadge matches={c.matchedFaqs} candidateType={c.candidateType} />
                     </div>
                   </div>
@@ -1079,8 +1112,32 @@ export default function AnalyzePage() {
                     </span>
                   ))}
                 </div>
+
+                {/* 이 후보로 묶인 실제 질문들. 목록이 길어도 카드가 늘어나지 않게 안에서 스크롤한다. */}
+                {isOpen && (
+                  <div style={S.questionBox}>
+                    {questions.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "#9CA3AF" }}>묶인 질문을 찾지 못했습니다.</div>
+                    ) : (
+                      <>
+                        <div style={S.questionNote}>
+                          개인정보를 가린 문장입니다. 번호는 업로드한 파일의 번호입니다.
+                        </div>
+                        <div style={S.questionList}>
+                          {questions.map((pt) => (
+                            <div key={pt.sourceLogSeqNum} style={S.questionRow}>
+                              <span style={S.questionNo}>#{pt.sourceLogSeqNum}</span>
+                              <span>{pt.text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
-            ))
+              );
+            })
           )}
         </div>
       )}
@@ -1226,6 +1283,12 @@ const S = {
   optionRow:   { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid #F3F4F6" },
   optionLabel: { fontSize: 12, color: "#6B7280", display: "flex", alignItems: "center", gap: 6 },
   optionInput: { height: 32, padding: "0 10px", border: "1px solid #D1D5DB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", width: 132 },
+  matchToggle: { background: "none", border: "none", padding: 0, fontSize: 12, color: "#1565C0", fontWeight: 500, cursor: "pointer", fontFamily: "inherit" },
+  questionBox: { marginTop: 12, paddingTop: 12, borderTop: "1px solid #F3F4F6" },
+  questionNote:{ fontSize: 11, color: "#9CA3AF", marginBottom: 8 },
+  questionList:{ maxHeight: 260, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 },
+  questionRow: { display: "flex", gap: 8, fontSize: 12, color: "#374151", lineHeight: 1.5 },
+  questionNo:  { flexShrink: 0, fontFamily: "monospace", color: "#9CA3AF" },
   checkLabel:  { fontSize: 12, color: "#374151", display: "flex", alignItems: "center", gap: 5, cursor: "pointer" },
   dropzoneDrag:{ borderColor: "#1565C0", background: "#EFF8FF" },
   dropzoneDisabled: { opacity: 0.5, cursor: "not-allowed", background: "#F9FAFB" },
