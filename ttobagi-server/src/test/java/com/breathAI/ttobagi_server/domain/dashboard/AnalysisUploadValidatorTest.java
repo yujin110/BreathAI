@@ -125,6 +125,29 @@ class AnalysisUploadValidatorTest {
         assertThat(headerOnly.getErrors().get(0).getReason()).contains("데이터 행이 없습니다");
     }
 
+    @Test
+    @DisplayName("logType이 없어도 백분율과 원본 점수를 허용하고 잘못된 값은 거절한다")
+    void validatesKeywordMatchPercent() {
+        for (String score : new String[]{"0", "29.99", "30", "75%", "75.01", "100"}) {
+            assertThatCode(() -> validateCsv("번호,질문,날짜,keywordMatchPercent\n1,문의,2026-10-17," + score + "\n"))
+                    .doesNotThrowAnyException();
+        }
+        for (String score : new String[]{"", "NaN", "Infinity", "-1", "100.01", "9999", "30%%", "3e1"}) {
+            UploadErrorResponse report = errors("번호,질문,날짜,keywordMatchPercent\n1,문의,2026-10-17," + score + "\n");
+            assertThat(report.getErrors()).extracting(UploadErrorResponse.ErrorItem::getColumn)
+                    .containsExactly("keywordMatchPercent");
+        }
+        assertThatCode(() -> validateCsv("번호,질문,날짜,ai_percent\n1,문의,2026-10-17,9999\n"))
+                .doesNotThrowAnyException();
+        assertThat(errors("번호,질문,날짜,ai_percent\n1,문의,2026-10-17,10001\n").getErrors())
+                .extracting(UploadErrorResponse.ErrorItem::getColumn).containsExactly("ai_percent");
+        // 명시적 분류가 있으면 점수를 다시 해석하지 않는다.
+        assertThatCode(() -> validateCsv("번호,질문,날짜,logType,keywordMatchPercent\n1,문의,2026-10-17,CORRECT,0\n"))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> validateCsv("번호,질문,날짜,logType,keywordMatchPercent\n1,문의,2026-10-17,,30\n"))
+                .doesNotThrowAnyException();
+    }
+
     private void validateCsv(String csv) {
         validator.validate(new AnalysisUploadReader.PipelineFile("logs.csv", csv.getBytes(StandardCharsets.UTF_8), null));
     }
