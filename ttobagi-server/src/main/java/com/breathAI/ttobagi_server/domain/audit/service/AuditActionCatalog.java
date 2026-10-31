@@ -66,6 +66,7 @@ public final class AuditActionCatalog {
 
             // 데이터 반출 (/faq/download는 아래 /faq/{faqId}보다 먼저 맞춰야 한다)
             entry("GET", "/api/v1/faq/download", "FAQ 다운로드", EXPORT),
+            entry("GET", "/api/v1/faq/keywords/download", "키워드 다운로드", EXPORT),
             entry("GET", "/api/v1/audit-logs", "감사로그 조회", EXPORT),
 
             entry("GET", "/api/v1/faq/{faqId}", "FAQ 상세 조회", READ, "faqId", "FAQ")
