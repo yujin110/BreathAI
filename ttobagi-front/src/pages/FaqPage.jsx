@@ -227,7 +227,7 @@ export default function FaqPage() {
       await runSearch(page, query);
       if (historyLoaded) runHistory(0, editType);
     } catch (err) {
-      toast.error(err.message || "FAQ 수정에 실패했습니다.");
+      toast.error(fieldErrors(err) || err.message || "FAQ 수정에 실패했습니다.");
     }
   };
 
@@ -264,7 +264,7 @@ export default function FaqPage() {
       await runSearch(0, query);
       if (historyLoaded) runHistory(0, editType);
     } catch (err) {
-      toast.error(err.message || "FAQ 등록에 실패했습니다.");
+      toast.error(fieldErrors(err) || err.message || "FAQ 등록에 실패했습니다.");
     } finally {
       setCreating(false);
     }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { ScatterChart, Scatter, XAxis, YAxis, Tooltip, Cell, ResponsiveContainer } from "recharts";
 import { dashApi } from "../api/dashboard.js";
+import { fieldErrors } from "../api/client.js";
 import { faqApi } from "../api/faq.js";
 import MatchedFaqBadge from "../components/MatchedFaqBadge.jsx";
 import { toPlainText } from "../utils/text.js";
@@ -590,7 +591,7 @@ export default function AnalyzePage() {
         : "신규 FAQ로 반영되었습니다.");
       await reloadCandidates(analysisId);
     } catch (err) {
-      toast.error(err.message || "FAQ 반영에 실패했습니다.");
+      toast.error(fieldErrors(err) || err.message || "FAQ 반영에 실패했습니다.");
     } finally {
       setReviewing(null);
     }
@@ -640,9 +641,11 @@ export default function AnalyzePage() {
       toast.success("후보를 저장했습니다.");
       setEditTarget(null);
     } catch (err) {
+      // 400이면 칸별 사유가 data에 온다 (예: synonyms[0] "유사어는 100자 이하여야 합니다.")
+      const fields = fieldErrors(err);
       toast.error(err?.status === 409
         ? "이미 검토가 끝난 후보는 수정할 수 없습니다."
-        : (err.message || "후보 저장에 실패했습니다."));
+        : (fields || err.message || "후보 저장에 실패했습니다."));
     } finally {
       setReviewing(null);
     }
