@@ -501,8 +501,7 @@ export default function AnalyzePage() {
         periodStartDate: options.periodStartDate,
         periodEndDate: options.periodEndDate,
         isMaskingEnabled: options.isMaskingEnabled,
-        // 외국어 번역은 AI 점검 중이라 화면에서 막아 두었다. 항상 false로 보낸다.
-        isTranslationEnabled: false,
+        isTranslationEnabled: options.isTranslationEnabled,
         clustering: {
           minClusterSize: options.minClusterSize,
           minSamples: options.minSamples,
@@ -724,14 +723,11 @@ export default function AnalyzePage() {
                           onChange={setOption("isMaskingEnabled")} />
                         개인정보 마스킹
                       </label>
-                      {/* 2026-10-26 확인: 켜도 번역되지 않는다(AI 쪽 번역 API 호출 실패로 보류 중).
-                          되살릴 때는 아래 체크박스를 다시 넣고 전송값(isTranslationEnabled)을
-                          options.isTranslationEnabled 로 되돌린다.
-                          <label style={S.checkLabel}>
-                            <input type="checkbox" checked={options.isTranslationEnabled}
-                              onChange={setOption("isTranslationEnabled")} />
-                            외국어 번역
-                          </label> */}
+                      <label style={S.checkLabel}>
+                        <input type="checkbox" checked={options.isTranslationEnabled}
+                          onChange={setOption("isTranslationEnabled")} />
+                        외국어 번역
+                      </label>
                     </div>
                   </div>
 
@@ -753,7 +749,7 @@ export default function AnalyzePage() {
                     클러스터 개수는 HDBSCAN 특성상 직접 지정할 수 없어 최소 크기로 조절합니다.
                     값을 키우면 클러스터가 적고 커집니다. 비워 두면 기본값(5 / 2)을 씁니다.
                     <br />
-                    같은 파일이라도 기간·마스킹·군집화 값을 바꾸면 새로 분석합니다.
+                    같은 파일이라도 기간·마스킹·군집화·번역 값을 바꾸면 새로 분석합니다.
                   </div>
 
                 </div>
