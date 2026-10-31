@@ -3,6 +3,7 @@ package com.breathAI.ttobagi_server.domain.faq.controller;
 import com.breathAI.ttobagi_server.domain.faq.dto.*;
 import com.breathAI.ttobagi_server.domain.faq.entity.FaqEditHistory.EditType;
 import com.breathAI.ttobagi_server.domain.faq.service.FaqExportService;
+import com.breathAI.ttobagi_server.domain.faq.service.FaqImportService;
 import com.breathAI.ttobagi_server.domain.faq.service.FaqService;
 import com.breathAI.ttobagi_server.domain.faq.service.FaqVersionService;
 import com.breathAI.ttobagi_server.global.dto.ApiResponse;
@@ -15,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.charset.StandardCharsets;
 
@@ -28,6 +30,7 @@ public class FaqController {
     private final FaqService faqService;
     private final FaqVersionService faqVersionService;
     private final FaqExportService faqExportService;
+    private final FaqImportService faqImportService;
 
     // FAQ 목록 조회, 카테고리와 키워드로 검색 가능
     // versionId를 주면 그 버전 시점의 FAQ를, 생략하면 현재 운영 FAQ를 조회한다
@@ -151,6 +154,21 @@ public class FaqController {
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.attachment().filename(file.fileName()).build().toString())
                 .body(file.content());
+    }
+
+    // FAQ 파일(csv·xlsx) 일괄 업로드, 없는 FAQ는 추가하고 내용이 다르면 수정한다
+    // 건너뛴 행이 있으면 안내 문구에도 알린다 (화면은 결과의 skipped 목록을 꼭 보여 줘야 한다)
+    @PostMapping("/import")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<FaqImportResponse>> importFaqs(
+            @RequestParam("file") MultipartFile file,
+            @AuthenticationPrincipal String email) {
+        FaqImportResponse result = faqImportService.importFaqs(file, email);
+        String message = result.getSkippedCount() > 0
+                ? "FAQ 파일을 반영했습니다. " + result.getSkippedCount()
+                        + "건은 같은 질문의 FAQ가 여러 개라 건너뛰었습니다. 건너뛴 행을 확인해 주세요."
+                : "FAQ 파일을 반영했습니다.";
+        return ResponseEntity.ok(ApiResponse.success(result, message));
     }
 
     // 키워드만 CSV로 다운로드, 버전은 FAQ 다운로드와 같은 규칙 (변경이 있으면 새 버전 생성)

@@ -158,9 +158,8 @@ public class FaqService {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
 
-        // 전각 공백 등 유니코드 공백도 공백으로 본다
-        String name = request.getName().strip().replaceAll("(?U)\\s+", " ");
-        String nameKey = name.replaceAll("(?U)\\s+", "");
+        String name = normalizeCategoryName(request.getName());
+        String nameKey = categoryNameKey(name);
         if (nameKey.isEmpty()) {
             throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
         }
@@ -168,6 +167,37 @@ public class FaqService {
             throw new CustomException(ErrorCode.FAQ_CATEGORY_DUPLICATED);
         }
 
+        FaqCategory category = saveCategory(name, nameKey, user);
+        return FaqCategoryListResponse.CategoryItem.builder()
+                .qType(category.getQType())
+                .name(category.getName())
+                .build();
+    }
+
+    // 공백을 뺀 이름이 같은 카테고리가 있으면 그것을, 없으면 새로 만든다 (FAQ 일괄 업로드)
+    CategoryRef findOrCreateCategory(String rawName, User user) {
+        String name = normalizeCategoryName(rawName);
+        String nameKey = categoryNameKey(name);
+        List<FaqRepository.CategoryRow> found = faqCategoryRepository.findByNameKeyInMaster(nameKey);
+        if (!found.isEmpty()) {
+            return new CategoryRef(found.get(0).getCode(), found.get(0).getName(), false);
+        }
+        FaqCategory category = saveCategory(name, nameKey, user);
+        return new CategoryRef(category.getQType(), category.getName(), true);
+    }
+
+    record CategoryRef(Integer qType, String name, boolean created) {}
+
+    // 전각 공백 등 유니코드 공백도 공백으로 본다
+    static String normalizeCategoryName(String rawName) {
+        return rawName.strip().replaceAll("(?U)\\s+", " ");
+    }
+
+    static String categoryNameKey(String name) {
+        return name.replaceAll("(?U)\\s+", "");
+    }
+
+    private FaqCategory saveCategory(String name, String nameKey, User user) {
         FaqCategory category;
         try {
             category = faqCategoryRepository.saveAndFlush(FaqCategory.builder()
@@ -181,10 +211,7 @@ public class FaqService {
             throw new CustomException(ErrorCode.FAQ_CATEGORY_DUPLICATED);
         }
         log.info("카테고리 생성: qType={}, name={}", category.getQType(), category.getName());
-        return FaqCategoryListResponse.CategoryItem.builder()
-                .qType(category.getQType())
-                .name(category.getName())
-                .build();
+        return category;
     }
 
     // FAQ 단건 상세 조회
@@ -754,7 +781,7 @@ public class FaqService {
     }
 
     // 유사어 정리: 앞뒤 공백 제거, 빈 값 제외, 대소문자만 다른 중복은 처음 것만 남긴다 (순서 유지)
-    private List<String> normalizeSynonyms(List<String> synonyms) {
+    static List<String> normalizeSynonyms(List<String> synonyms) {
         if (synonyms == null) return null;
         Map<String, String> byKey = new LinkedHashMap<>();
         for (String synonym : synonyms) {
