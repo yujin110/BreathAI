@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.StringReader;
 import java.math.BigInteger;
+import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
@@ -38,6 +39,7 @@ public class AnalysisUploadValidator {
     private static final BigInteger INT_MAX = BigInteger.valueOf(Integer.MAX_VALUE);
     // Python int()처럼 앞뒤 공백, 부호, 숫자 사이 밑줄을 허용한다
     private static final Pattern INTEGER = Pattern.compile("[+-]?\\d+(_\\d+)*");
+    private static final Pattern PERCENT = Pattern.compile("[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)");
     // 2026-08-27, 20260827, 2026-08-27 12:04:00, 2026-08-27T12:04:00.5+09:00 등
     private static final Pattern ISO_DATE = Pattern.compile(
             "(\\d{4})-?(\\d{2})-?(\\d{2})"
@@ -88,6 +90,7 @@ public class AnalysisUploadValidator {
         }
 
         Integer logTypeColumn = columns.get("logType");
+        Integer percentColumn = columns.get("keywordMatchPercent");
         Map<BigInteger, Integer> seenNumbers = new HashMap<>();
         for (int i = 1; i < records.size(); i++) {
             CSVRecord record = records.get(i);
@@ -117,10 +120,25 @@ public class AnalysisUploadValidator {
                 report.add(row, "날짜", "날짜 형식이 올바르지 않습니다(예: 2026-08-27 또는 2026-08-27 12:04:00): " + date.strip());
             }
 
-            // 칸이 없거나 비어 있으면 미답변으로 본다. 공백만 있으면 AI가 거절하므로 오류로 본다
+            // 분류가 없거나 비어 있으면 아래 매칭률 검사를 따른다. 공백만 있는 분류는 오류다.
             String logType = logTypeColumn != null ? cell(record, logTypeColumn) : null;
             if (logType != null && !logType.isEmpty() && !LOG_TYPES.contains(logType.strip())) {
                 report.add(row, "logType", "logType은 CORRECT, LOW_QUALITY, UNANSWER 중 하나여야 합니다: " + logType.strip());
+            }
+            // AI와 같은 우선순위: 명시적 logType → 백분율 → 원본 점수 → 기존 미답변 전용 입력.
+            if (logType == null || logType.isEmpty()) {
+                if (percentColumn != null) {
+                    String percent = cell(record, percentColumn);
+                    if (!isPercent(percent)) {
+                        report.add(row, "keywordMatchPercent", "키워드 매칭률은 0~100의 백분율이어야 합니다(예: 30 또는 30%).");
+                    }
+                } else if (columns.containsKey("ai_percent")) {
+                    String raw = cell(record, columns.get("ai_percent"));
+                    if (raw == null || !raw.strip().matches("[0-9]+")
+                            || new BigInteger(raw.strip()).compareTo(BigInteger.valueOf(10000)) > 0) {
+                        report.add(row, "ai_percent", "원본 매칭 점수는 0~10000의 정수여야 합니다(9999 = 99.99%).");
+                    }
+                }
             }
         }
         report.throwIfAny();
@@ -140,6 +158,15 @@ public class AnalysisUploadValidator {
             return false;
         }
         return inRange(m.group(4), 23) && inRange(m.group(5), 59) && inRange(m.group(6), 59);
+    }
+
+    private static boolean isPercent(String value) {
+        if (value == null) return false;
+        String text = value.strip();
+        if (text.endsWith("%")) text = text.substring(0, text.length() - 1).strip();
+        if (!PERCENT.matcher(text).matches()) return false;
+        BigDecimal number = new BigDecimal(text);
+        return number.signum() >= 0 && number.compareTo(BigDecimal.valueOf(100)) <= 0;
     }
 
     private static boolean inRange(String value, int max) {

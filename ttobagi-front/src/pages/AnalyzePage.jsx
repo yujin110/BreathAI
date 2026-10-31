@@ -674,6 +674,7 @@ export default function AnalyzePage() {
                     {file ? file.name : "CSV 또는 엑셀 파일을 드래그하거나 클릭하여 선택"}
                   </div>
                   <div style={{ fontSize: 12, color: "#9CA3AF" }}>.csv 또는 .xlsx, 최대 {MAX_UPLOAD_MB}MB</div>
+                  <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>원본 대화 로그와 기존 분석 양식을 그대로 업로드할 수 있습니다.</div>
                 </div>
                 <div style={S.optionBox}>
                   <div style={S.optionTitle}>분석 옵션</div>
