@@ -434,8 +434,11 @@ export default function FaqPage() {
                   onClick={() => document.getElementById("faqImportInput").click()}>
                   {importing ? "반영 중..." : "엑셀 업로드"}
                 </button>
+                {/* 바로 왼쪽이 "키워드 다운로드"라 어느 파일인지 헷갈린다.
+                    키워드 CSV에는 답변 열이 없어 올리면 "필수 열이 없습니다"로 거부된다. */}
                 <span style={{ fontSize: 11, color: "#9CA3AF" }}>
-                  다운로드와 같은 양식(.csv·.xlsx, 최대 {IMPORT_MAX_MB}MB)
+                  FAQ 버전 관리의 CSV 양식(ID·카테고리·질문·답변·키워드·유사어)으로 올려주세요.
+                  .csv·.xlsx, 최대 {IMPORT_MAX_MB}MB
                 </span>
               </>
             )}
