@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { faqApi } from "../api/faq.js";
-import { saveBlob } from "../api/client.js";
+import { saveBlob, fieldErrors } from "../api/client.js";
 import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
@@ -772,10 +772,12 @@ function CategorySelect({ categories, value, onChange, isAdmin, onCreated, empty
       setName("");
       toast.success(`카테고리 "${created.name}"을 만들었습니다.`);
     } catch (err) {
-      // 공백을 모두 뺀 이름이 이미 있으면 409다 ("열차 운영관련" = "열차운영관련")
+      // 공백을 모두 뺀 이름이 이미 있으면 409다 ("열차 운영관련" = "열차운영관련").
+      // 비었거나 100자를 넘으면 400이고 사유가 data.name에 온다.
+      const fields = fieldErrors(err);
       toast.error(err?.status === 409
         ? "이미 있는 카테고리입니다. 목록에서 골라 주세요."
-        : (err.message || "카테고리를 만들지 못했습니다."));
+        : (fields || err.message || "카테고리를 만들지 못했습니다."));
     } finally {
       setSaving(false);
     }

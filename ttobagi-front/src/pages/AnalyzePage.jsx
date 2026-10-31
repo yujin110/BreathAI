@@ -575,8 +575,10 @@ export default function AnalyzePage() {
         finalQuestion: c.standardQuestion,
         finalAnswer: c.answerDraft,
         keywords: c.representativeKeywords,
-        // synonyms를 생략하면 FaqService가 후보에 저장된 유사어를 그대로 쓴다.
-        // (신규는 그대로 저장, 확장은 기존 FAQ의 유사어에 합친다)
+        // 후보의 유사어를 그대로 보낸다. 생략해도 서버가 후보 유사어를 쓰지만(FaqService),
+        // 보낸 값이 그대로 저장되는 편이 화면에서 본 것과 어긋나지 않는다.
+        // 신규는 그대로 저장되고 확장은 기존 FAQ의 유사어에 합쳐진다.
+        synonyms: (c.synonyms || []).map((x) => x.text).filter(Boolean),
         isManualPatchConfirmed: false,
       });
       // 백엔드가 EXPAND 후보면 기존 FAQ를 확장하고 editType으로 알려준다
