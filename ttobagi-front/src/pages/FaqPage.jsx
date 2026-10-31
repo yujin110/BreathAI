@@ -121,6 +121,16 @@ export default function FaqPage() {
     }
   }, []);
 
+  // 새로 만든 카테고리를 선택지에 넣는다. 이름 순서는 목록을 받을 때와 같게 맞춘다.
+  const addCategory = useCallback((created) => {
+    if (!created?.name) return;
+    setCategories((prev) => {
+      const list = [...(prev || []), created];
+      list.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+      return list;
+    });
+  }, []);
+
   const loadHistories = useCallback(async (targetPage, type) => {
     const res = await faqApi.getHistory({ page: targetPage, size: PAGE_SIZE, editType: type });
     setHistories(res.data?.histories || []);
@@ -493,6 +503,8 @@ export default function FaqPage() {
             <div style={S.modalTitle}>FAQ 등록</div>
             <CreateFaqForm
               categories={categories}
+              isAdmin={isAdmin}
+              onCategoryCreated={addCategory}
               saving={creating}
               onSave={handleCreate}
               onClose={() => setModal(null)}
@@ -505,7 +517,9 @@ export default function FaqPage() {
         <div style={S.modalBg} onClick={() => setModal(null)}>
           <div style={S.modal} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalTitle}>FAQ 수정</div>
-            <EditFaqForm faq={modal.data} onSave={handleUpdate} onClose={() => setModal(null)} />
+            <EditFaqForm faq={modal.data} categories={categories} isAdmin={isAdmin}
+              onCategoryCreated={addCategory}
+              onSave={handleUpdate} onClose={() => setModal(null)} />
           </div>
         </div>
       )}
@@ -513,8 +527,67 @@ export default function FaqPage() {
   );
 }
 
+// 카테고리 선택칸. 관리자는 맨 아래 "+ 새 카테고리"로 바로 만들 수 있다.
+// 만들면 선택지에 넣고 곧바로 선택된 상태로 둔다.
+function CategorySelect({ categories, value, onChange, isAdmin, onCreated, emptyLabel }) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName]     = useState("");
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
+
+  const submit = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) { toast.error("카테고리 이름을 입력해주세요."); return; }
+    setSaving(true);
+    try {
+      const created = (await faqApi.createCategory(trimmed)).data;
+      onCreated(created);
+      onChange(String(created.qType));
+      setAdding(false);
+      setName("");
+      toast.success(`카테고리 "${created.name}"을 만들었습니다.`);
+    } catch (err) {
+      // 공백을 모두 뺀 이름이 이미 있으면 409다 ("열차 운영관련" = "열차운영관련")
+      toast.error(err?.status === 409
+        ? "이미 있는 카테고리입니다. 목록에서 골라 주세요."
+        : (err.message || "카테고리를 만들지 못했습니다."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (adding) {
+    return (
+      <div style={{ display: "flex", gap: 6 }}>
+        <input style={S.input} placeholder="새 카테고리 이름 (100자 이하)" autoFocus
+          value={name} onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
+        <button style={{ ...S.btnSm, whiteSpace: "nowrap" }} disabled={saving} onClick={submit}>
+          {saving ? "만드는 중..." : "만들기"}
+        </button>
+        <button style={{ ...S.btnSm, whiteSpace: "nowrap" }}
+          onClick={() => { setAdding(false); setName(""); }}>취소</button>
+      </div>
+    );
+  }
+
+  return (
+    <select style={{ ...S.input, cursor: "pointer" }} value={value}
+      onChange={(e) => {
+        if (e.target.value === "__new__") { setAdding(true); return; }
+        onChange(e.target.value);
+      }}>
+      <option value="">{emptyLabel}</option>
+      {(categories || []).map((c) => (
+        <option key={c.qType} value={c.qType}>{c.name}</option>
+      ))}
+      {isAdmin && <option value="__new__">+ 새 카테고리</option>}
+    </select>
+  );
+}
+
 // FAQ 직접 등록 폼. 질문·답변은 필수, 카테고리는 선택(생략하면 서버가 null 로 둔다).
-function CreateFaqForm({ categories, saving, onSave, onClose }) {
+function CreateFaqForm({ categories, isAdmin, onCategoryCreated, saving, onSave, onClose }) {
   const [q, setQ]       = useState("");
   const [a, setA]       = useState("");
   const [tags, setTags] = useState("");
@@ -546,13 +619,8 @@ function CreateFaqForm({ categories, saving, onSave, onClose }) {
         </div>
         <div>
           <label style={S.modalLabel}>카테고리</label>
-          <select style={{ ...S.input, cursor: "pointer" }} value={qType}
-            onChange={(e) => setQType(e.target.value)}>
-            <option value="">선택 안 함</option>
-            {(categories || []).map((c) => (
-              <option key={c.qType} value={c.qType}>{c.name}</option>
-            ))}
-          </select>
+          <CategorySelect categories={categories} value={qType} onChange={setQType}
+            isAdmin={isAdmin} onCreated={onCategoryCreated} emptyLabel="선택 안 함" />
         </div>
       </div>
       <div style={S.modalActions}>
@@ -572,11 +640,12 @@ function CreateFaqForm({ categories, saving, onSave, onClose }) {
   );
 }
 
-function EditFaqForm({ faq, onSave, onClose }) {
+function EditFaqForm({ faq, categories, isAdmin, onCategoryCreated, onSave, onClose }) {
   const [q, setQ]       = useState(faq.standardQuestion || "");
   const [a, setA]       = useState(faq.answer || "");
   const [tags, setTags] = useState(faq.keywords?.join(", ") || "");
   const [syns, setSyns] = useState(faq.synonyms?.join(", ") || "");
+  const [qType, setQType] = useState(faq.qType == null ? "" : String(faq.qType));
   const [reason, setReason] = useState("");
 
   return (
@@ -601,6 +670,11 @@ function EditFaqForm({ faq, onSave, onClose }) {
             value={syns} onChange={(e) => setSyns(e.target.value)} />
         </div>
         <div>
+          <label style={S.modalLabel}>카테고리</label>
+          <CategorySelect categories={categories} value={qType} onChange={setQType}
+            isAdmin={isAdmin} onCreated={onCategoryCreated} emptyLabel="선택 안 함 (기존 값 유지)" />
+        </div>
+        <div>
           <label style={S.modalLabel}>수정 사유 (선택)</label>
           <input style={S.input} placeholder="변경 이력에 함께 기록됩니다"
             value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -616,6 +690,8 @@ function EditFaqForm({ faq, onSave, onClose }) {
               answer: a,
               keywords: tags.split(",").map((t) => t.trim()).filter(Boolean),
               synonyms: toList(syns),
+              // 비워 두면 보내지 않아 기존 카테고리가 그대로 남는다
+              qType: qType === "" ? undefined : Number(qType),
             },
             reason.trim()
           )
