@@ -290,9 +290,13 @@ export default function AnalyzePage() {
   // 반영(/faq/apply)은 백엔드가 @PreAuthorize("hasRole('ADMIN')")로 막는다
   const isAdmin = user?.role === "ADMIN";
 
-  // 후보에 묶인 질문 목록. 후보의 clusterLabel과 같은 점을 clusteringView.points에서 고른다.
-  // AI가 군집별 점 개수와 summaries.size가 어긋나면 분석을 실패시키므로(dashboard_metrics.py)
-  // 이렇게 추린 개수는 occurrenceCount와 같다.
+  // 후보가 속한 군집의 질문 목록. 후보의 clusterLabel과 같은 점을 clusteringView.points에서 고른다.
+  //
+  // 주의: 이 개수가 occurrenceCount와 같지 않을 수 있다. 한 군집에서 후보가 여러 개 나오면
+  // (예: 분석 #3의 cluster 3에서 후보 2개) 후보마다 occurrenceCount는 자기 몫이지만
+  // points는 군집 전체라 더 많다. 후보별로 어떤 로그가 묶였는지는 응답에 없어서
+  // 군집 단위까지만 보여 줄 수 있다.
+  //
   // text는 마스킹·정규화를 거친 문장이다(예: 열차번호가 [METRO_TRAIN]).
   const clusterPoints = analyzeResult?.clusteringView?.points;
   const questionsOf = (clusterLabel) =>
@@ -1066,13 +1070,16 @@ export default function AnalyzePage() {
                     <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginBottom: 4 }}>{c.standardQuestion}</div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
                       {canExpand ? (
-                        <button type="button" style={S.matchToggle}
-                          aria-expanded={isOpen}
-                          onClick={() => toggleQuestions(c.candidateId)}>
-                          묶인 질문 {c.occurrenceCount}건 {isOpen ? "▴" : "▾"}
-                        </button>
+                        <>
+                          <span style={{ color: "#9CA3AF" }}>매칭 {c.occurrenceCount}건</span>
+                          <button type="button" style={S.matchToggle}
+                            aria-expanded={isOpen}
+                            onClick={() => toggleQuestions(c.candidateId)}>
+                            질문 보기 {isOpen ? "▴" : "▾"}
+                          </button>
+                        </>
                       ) : (
-                        <span style={{ color: "#9CA3AF" }}>묶인 질문 {c.occurrenceCount}건</span>
+                        <span style={{ color: "#9CA3AF" }}>매칭 {c.occurrenceCount}건</span>
                       )}
                       <MatchedFaqBadge matches={c.matchedFaqs} candidateType={c.candidateType} />
                     </div>
@@ -1124,7 +1131,10 @@ export default function AnalyzePage() {
                     ) : (
                       <>
                         <div style={S.questionNote}>
-                          개인정보를 가린 문장입니다. 번호는 업로드한 파일의 번호입니다.
+                          이 후보가 속한 군집의 질문 {questions.length.toLocaleString()}건입니다.
+                          {questions.length !== c.occurrenceCount
+                            && " 한 군집에서 후보가 여러 개 나와 매칭 건수와 다릅니다."}
+                          {" "}개인정보를 가린 문장이고, 번호는 업로드한 파일의 번호입니다.
                         </div>
                         <div style={S.questionList}>
                           {questions.map((pt) => (
