@@ -12,7 +12,8 @@ function withFields(err, fallback) {
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 
-const PW_PATTERN = /^(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[a-z\d@$!%*?&]{6,20}$/;
+// 백엔드 UserUpdateRequest.newPassword의 @Pattern과 같은 식이다.
+const PW_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9])[\x21-\x7E]{6,20}$/;
 
 export default function AccountPage() {
   const { user, logout } = useAuth();
@@ -35,7 +36,7 @@ export default function AccountPage() {
       return;
     }
     if (!PW_PATTERN.test(pw.next)) {
-      setPwError("비밀번호는 영문 소문자·숫자·특수문자(@$!%*?&)를 포함한 6~20자여야 합니다.");
+      setPwError("비밀번호는 영문·숫자·특수문자를 각각 1개 이상 포함한 6~20자여야 합니다(공백·한글 불가).");
       return;
     }
     setLoading(true);
@@ -138,7 +139,7 @@ export default function AccountPage() {
             <div style={S.cardBody}>
               {[
                 { label: "현재 비밀번호", key: "current", ph: "현재 비밀번호 입력" },
-                { label: "새 비밀번호", key: "next", ph: "6~20자, 소문자+숫자+특수문자(@$!%*?&)" },
+                { label: "새 비밀번호", key: "next", ph: "영문·숫자·특수문자 각각 1개 이상, 6~20자" },
                 { label: "새 비밀번호 확인", key: "confirm", ph: "새 비밀번호 재입력" },
               ].map((f) => (
                 <div key={f.key} style={{ marginBottom: 14 }}>
