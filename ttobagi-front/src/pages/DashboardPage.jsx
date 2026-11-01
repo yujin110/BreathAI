@@ -119,7 +119,7 @@ export default function DashboardPage() {
       </div>
 
       <div style={S.scopeRow}>
-        <select style={S.pickerSelect} value={picked}
+        <select style={{ ...S.pickerSelect, ...(isMobile ? S.pickerSelectMobile : {}) }} value={picked}
           onChange={(e) => changePicked(e.target.value)}>
           <option value="">최신 분석</option>
           {options.map((o) => (
@@ -287,6 +287,8 @@ const S = {
   newTag:     { fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#DBEAFE", color: "#1E40AF", border: "1px solid #BFDBFE" },
   scopeRow:    { display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" },
   pickerSelect:{ maxWidth: 420, padding: "6px 10px", fontSize: 12, border: "1px solid #E5E7EB", borderRadius: 8, background: "#fff", color: "#374151", cursor: "pointer" },
+  // maxWidth 420은 폰 폭(여백 빼면 약 358)을 넘어 오른쪽이 잘린다. 폭에 맞춘다.
+  pickerSelectMobile: { width: "100%", maxWidth: "100%", minWidth: 0 },
   segment:     { display: "flex", border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" },
   segmentBtn:  { padding: "5px 14px", fontSize: 12, background: "#fff", border: "none", cursor: "pointer", color: "#6B7280" },
   segmentBtnOn:{ background: "#1565C0", color: "#fff", fontWeight: 600 },
