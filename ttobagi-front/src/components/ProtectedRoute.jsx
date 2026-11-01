@@ -39,13 +39,18 @@ export default function ProtectedRoute() {
             <span style={S.topTitle}>또타24 현행화 시스템</span>
           </header>
         )}
-        <Outlet />
+        {/* 넓은 모니터에서 본문이 끝까지 늘어나면 글줄이 지나치게 길어져 읽기 어렵다.
+            바탕은 그대로 꽉 채우고 내용만 가운데로 묶는다. */}
+        <div style={S.content}>
+          <Outlet />
+        </div>
       </div>
     </div>
   );
 }
 
 const S = {
+  content:   { width: "100%", maxWidth: 1320, margin: "0 auto" },
   topBar:    { position: "sticky", top: 0, zIndex: 90, display: "flex", alignItems: "center", gap: 12,
                height: 52, padding: "0 14px", background: "#0D3B7A", color: "#fff" },
   hamburger: { display: "flex", alignItems: "center", background: "none", border: "none", color: "#fff",

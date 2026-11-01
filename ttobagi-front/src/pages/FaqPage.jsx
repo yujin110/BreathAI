@@ -427,7 +427,9 @@ export default function FaqPage() {
 
             {isAdmin && (
               <>
-                <span style={{ ...S.toolLabel, marginLeft: 12 }}>FAQ 파일 업로드</span>
+                {/* 두 기능이 한 줄에 있어 구분선을 둔다 */}
+                <span style={S.toolDivider} />
+                <span style={S.toolLabel}>FAQ 파일 업로드</span>
                 <input type="file" accept=".csv,.xlsx" id="faqImportInput"
                   style={{ display: "none" }} disabled={importing}
                   onChange={(e) => { handleImport(e.target.files[0]); e.target.value = ""; }} />
@@ -435,15 +437,19 @@ export default function FaqPage() {
                   onClick={() => document.getElementById("faqImportInput").click()}>
                   {importing ? "반영 중..." : "엑셀 업로드"}
                 </button>
-                {/* 바로 왼쪽이 "키워드 다운로드"라 어느 파일인지 헷갈린다.
-                    키워드 CSV에는 답변 열이 없어 올리면 "필수 열이 없습니다"로 거부된다. */}
-                <span style={{ fontSize: 11, color: "#9CA3AF" }}>
-                  FAQ 버전 관리의 CSV 양식(ID·카테고리·질문·답변·키워드·유사어)으로 올려주세요.
-                  .csv·.xlsx, 최대 {IMPORT_MAX_MB}MB
-                </span>
+
               </>
             )}
           </div>
+
+          {/* 바로 위 "키워드 다운로드"와 헷갈리기 쉬워 어느 양식인지 따로 적는다.
+              키워드 CSV에는 답변 열이 없어 올리면 "필수 열이 없습니다"로 거부된다. */}
+          {isAdmin && (
+            <div style={S.toolHint}>
+              엑셀 업로드는 <strong>FAQ 버전 관리</strong>의 CSV 양식(ID·카테고리·질문·답변·키워드·유사어)으로 올려주세요.
+              .csv·.xlsx, 최대 {IMPORT_MAX_MB}MB
+            </div>
+          )}
 
           {faqs.length === 0 ? (
             <div style={S.empty}>
@@ -950,6 +956,8 @@ function EditFaqForm({ faq, categories, isAdmin, onCategoryCreated, onSave, onCl
 const S = {
   toolRow:     { marginBottom: 14, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", paddingTop: 12, borderTop: "1px solid #F3F4F6" },
   toolLabel:   { fontSize: 12, fontWeight: 600, color: "#374151" },
+  toolHint:    { fontSize: 11.5, color: "#9CA3AF", lineHeight: 1.6, margin: "-4px 0 14px" },
+  toolDivider: { width: 1, height: 20, background: "#E5E7EB", margin: "0 6px" },
   statBox:     { flex: 1, minWidth: 96, background: "#F9FAFB", borderRadius: 8, padding: "10px 12px", textAlign: "center" },
   resultLine:  { fontSize: 12, color: "#374151", marginBottom: 6 },
   resultBlock: { marginTop: 12, paddingTop: 12, borderTop: "1px solid #F3F4F6" },
