@@ -104,7 +104,7 @@ export default function AuditLogPage() {
         <input style={S.input} type="date" value={filter.from} onChange={setField("from")} />
         <span style={{ color: "#9CA3AF" }}>~</span>
         <input style={S.input} type="date" value={filter.to} onChange={setField("to")} />
-        <input style={{ ...S.input, width: 170 }} placeholder="사용자 (일부)"
+        <input style={{ ...S.input, width: 170, maxWidth: "100%" }} placeholder="사용자 (일부)"
           value={filter.email} onChange={setField("email")}
           onKeyDown={(e) => { if (e.key === "Enter") load(0, filter); }} />
         <select style={S.input} value={filter.category} onChange={applyNow("category")}>

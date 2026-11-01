@@ -29,6 +29,9 @@ export default function ProtectedRoute() {
         minWidth: 0,          // 자식이 넘쳐도 flex 칸이 늘어나지 않게 한다
         minHeight: "100vh",
         background: "#F9FAFB",
+        // 어딘가 폭을 넘겨도 화면이 좌우로 밀리지 않게 잘라 둔다.
+        // hidden이 아니라 clip이어야 상단 바의 sticky가 살아 있다.
+        ...(isMobile ? { overflowX: "clip" } : {}),
       }}>
         {isMobile && (
           <header style={S.topBar}>

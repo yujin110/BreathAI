@@ -365,7 +365,7 @@ export default function FaqPage() {
       {tab === "list" && (
         <div>
           <div style={{ marginBottom: 14, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <input style={S.searchInput} placeholder="질문·답변·키워드 검색"
+            <input style={{ ...S.searchInput, ...(isMobile ? { width: "100%" } : {}) }} placeholder="질문·답변·키워드 검색"
               value={keywordInput}
               onChange={(e) => setKeywordInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") runSearch(0, { keyword: keywordInput.trim(), category: categoryInput.trim() }); }} />
@@ -973,7 +973,8 @@ const S = {
   tabs:        { display: "flex", gap: 2, background: "#F3F4F6", borderRadius: 10, padding: 4, width: "fit-content", marginBottom: 20 },
   tab:         { padding: "8px 20px", borderRadius: 8, fontSize: 13, cursor: "pointer", color: "#6B7280" },
   tabActive:   { background: "#fff", color: "#1565C0", fontWeight: 600, boxShadow: "0 1px 3px rgba(0,0,0,.08)" },
-  searchInput: { height: 38, padding: "0 14px", border: "1.5px solid #D1D5DB", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", width: 280, boxSizing: "border-box" },
+  // maxWidth 100%가 있어야 좁은 화면에서 고정 폭이 화면을 넘지 않는다. 넓은 화면은 그대로다.
+  searchInput: { height: 38, padding: "0 14px", border: "1.5px solid #D1D5DB", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", width: 280, maxWidth: "100%", boxSizing: "border-box" },
   btnSearch:   { height: 38, padding: "0 18px", background: "#1565C0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   filterChip:  { padding: "5px 14px", background: "#F3F4F6", color: "#6B7280", border: "none", borderRadius: 20, fontSize: 12, cursor: "pointer", fontFamily: "inherit" },
   filterChipActive: { background: "#1565C0", color: "#fff", fontWeight: 600 },

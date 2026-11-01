@@ -212,16 +212,16 @@ export default function FaqVersionsPage() {
       </div>
 
       {/* 버전 비교 — 비교 대상을 비우면 현재 운영 FAQ와 비교한다 */}
-      <div style={S.compareBar}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>버전 비교</span>
-        <select style={S.compareSelect} value={baseId} onChange={(e) => setBaseId(e.target.value)}>
+      <div style={{ ...S.compareBar, ...(isMobile ? S.compareBarMobile : {}) }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "#374151", ...(isMobile ? { width: "100%" } : {}) }}>버전 비교</span>
+        <select style={{ ...S.compareSelect, ...(isMobile ? S.compareSelectMobile : {}) }} value={baseId} onChange={(e) => setBaseId(e.target.value)}>
           <option value="">기준 버전</option>
           {versions.map((v) => (
             <option key={v.versionId} value={v.versionId}>{v.versionName || `#${v.versionId}`}</option>
           ))}
         </select>
         <span style={{ color: "#9CA3AF" }}>→</span>
-        <select style={S.compareSelect} value={targetId} onChange={(e) => setTargetId(e.target.value)}>
+        <select style={{ ...S.compareSelect, ...(isMobile ? S.compareSelectMobile : {}) }} value={targetId} onChange={(e) => setTargetId(e.target.value)}>
           <option value="">현재 운영 FAQ</option>
           {versions.map((v) => (
             <option key={v.versionId} value={v.versionId}>{v.versionName || `#${v.versionId}`}</option>
@@ -450,7 +450,10 @@ export default function FaqVersionsPage() {
 const S = {
   btnOutline:   { padding: "9px 16px", fontSize: 13, fontWeight: 600, border: "1.5px solid #1565C0", borderRadius: 8, background: "#fff", color: "#1565C0", cursor: "pointer", fontFamily: "inherit" },
   compareBar:   { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 14px", marginBottom: 16, background: "#F9FAFB", border: "1px solid #F3F4F6", borderRadius: 10 },
-  compareSelect:{ padding: "6px 10px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, background: "#fff", color: "#374151", cursor: "pointer", maxWidth: 220 },
+  compareSelect:{ padding: "6px 10px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, background: "#fff", color: "#374151", cursor: "pointer", maxWidth: "100%" },
+  compareBarMobile:   { rowGap: 10 },
+  // 드롭다운 두 개가 남는 폭을 나눠 갖게 한다. 내용이 길어도 줄을 넘지 않는다.
+  compareSelectMobile:{ flex: "1 1 120px", minWidth: 0 },
   diffSection:  { marginTop: 14 },
   diffHead:     { fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 },
   diffItem:     { padding: "8px 0", borderBottom: "1px solid #F3F4F6", fontSize: 12, color: "#374151" },
