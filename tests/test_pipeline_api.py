@@ -14,6 +14,8 @@ from fastapi.testclient import TestClient
 from services.pipeline_api import create_app
 from services.pipeline_worker import deliver_one, process_one, worker_lock
 from services.run_job import _copy_input
+from services.dashboard_metrics import build_dashboard
+from tests.test_analysis_input import RAW
 
 CSV = '번호,질문,날짜\n1,문의,2026-10-17\n'.encode('utf-8')
 
@@ -127,6 +129,57 @@ class PipelineApiTest(unittest.TestCase):
                 files={'file': ('input.csv', ('번호,질문,날짜\n' + rows).encode('utf-8'))})
             self.assertEqual(response.status_code, 422)
         self.assertIsNone(self.app.state.store.get(2))
+
+    def test_percent_upload_validation_accepts_confirmed_raw_scores(self):
+        for analysis_id, score in enumerate(('0', '24.99', '25', '74.99', '75%', '100'), start=10):
+            response = self.client.post('/pipeline', headers=self.auth,
+                data={'analysisId': str(analysis_id), 'uploadId': 'percent'},
+                files={'file': ('input.csv', f'번호,질문,날짜,keywordMatchPercent\n1,문의,2026-10-17,{score}\n'.encode('utf-8'))})
+            self.assertEqual(response.status_code, 202)
+        for column, score in [('keywordMatchPercent', ''), ('keywordMatchPercent', '9999'),
+                              ('keywordMatchPercent', 'NaN'), ('ai_percent', '10001')]:
+            response = self.client.post('/pipeline', headers=self.auth,
+                data={'analysisId': '3', 'uploadId': 'invalid-percent'},
+                files={'file': ('input.csv', f'번호,질문,날짜,{column}\n1,문의,2026-10-17,{score}\n'.encode('utf-8'))})
+            self.assertEqual(response.status_code, 422)
+        self.assertIsNone(self.app.state.store.get(3))
+        response = self.client.post('/pipeline', headers=self.auth,
+            data={'analysisId': '4', 'uploadId': 'raw-score'},
+            files={'file': ('input.csv', '번호,질문,날짜,ai_percent\n1,문의,2026-10-17,9999\n'.encode('utf-8'))})
+        self.assertEqual(response.status_code, 202)
+
+    def test_original_csv_upload_automatically_reaches_dashboard_with_label_precedence(self):
+        for analysis_id, encoding in enumerate(('utf-8-sig', 'cp949'), start=20):
+            response = self.client.post('/pipeline', headers=self.auth,
+                data={'analysisId': str(analysis_id), 'uploadId': 'original'},
+                files={'file': ('chatting_log.csv', RAW.encode(encoding))})
+            self.assertEqual(response.status_code, 202)
+            queued = Path(self.app.state.store.get(analysis_id)['input_path'])
+            data = self.root / f'dashboard-{analysis_id}'
+            data.mkdir()
+            _copy_input(queued, data / 'tota24_unanswered_2026Q1.csv')
+            with (data / 'tota24_unanswered_2026Q1.csv').open(encoding='utf-8-sig', newline='') as stream:
+                rows = list(csv.DictReader(stream))
+            self.assertEqual([r['번호'] for r in rows], ['2', '3', '4'])
+            (data / 'preprocessed_full.csv').write_text(
+                'logId,normalizedForClustering\n2,문의\n3,환승 문의\n4,시간 문의\n', encoding='utf-8')
+            (data / 'clusters.csv').write_text(
+                'logId,clusterId,umap_x,umap_y\n2,0,0,0\n3,0,1,1\n4,0,2,2\n', encoding='utf-8')
+            dashboard = build_dashboard(data, {}, {0: {'size': '3'}})
+            self.assertEqual(dashboard['systemStatus']['samplingStatus'],
+                             {'correct': 1, 'lowQuality': 1, 'unanswer': 1})
+            self.assertEqual([p['logType'] for p in dashboard['points']], ['UNANSWER', 'LOW_QUALITY', 'CORRECT'])
+            self.assertEqual(dashboard['usageStats'][0]['unanswerCnt'], 1)
+            # The first response has a high score but its explicit UNANSWER wins.
+            self.assertEqual(rows[0]['ai_percent'], '9999')
+            self.assertEqual(rows[0]['logType'], 'UNANSWER')
+
+    def test_daily_aggregate_upload_is_rejected_before_queueing(self):
+        response = self.client.post('/pipeline', headers=self.auth,
+            data={'analysisId': '30', 'uploadId': 'daily'},
+            files={'file': ('chatting_log_day.csv', b'qa_date,answer_cnt,unanswer_cnt\n2026-03-01,10,2\n')})
+        self.assertEqual(response.status_code, 422)
+        self.assertIsNone(self.app.state.store.get(30))
 
     def fake_inference(self, source, job, **options):
         self.assertTrue(options["masking"])

@@ -13,7 +13,7 @@ BE 수신·저장 반영은 [이슈 #66](https://github.com/yujin110/BreathAI/is
 2. `performanceMetrics.currentUnanswerRate`는 업로드 원본의 **개선 전** 미답변율이다.
    `unanswer / totalLogCount * 100`, 0~100 숫자(예: 15% → 15.0)로 보낸다.
    FAQ 생성만으로 원본 logType이나 이 비율을 변경하지 않는다.
-   미답변 전용 입력에 logType이 없으면 계약상 전부 UNANSWER라 100%이며,
+   미답변 전용 입력에 logType, keywordMatchPercent, ai_percent가 모두 없으면 계약상 전부 UNANSWER라 100%이며,
    정상 답변까지 포함한 전체 서비스 미답변율은 이 입력만으로 산출할 수 없다.
 3. `usageStats`는 `statDate`(yyyy-MM-dd), `totalCnt`, `answerCnt`,
    `lowQualityCount`, `unanswerCnt`를 보낸다. 입력이 있는 날짜만 오름차순으로 보낸다.
@@ -29,6 +29,8 @@ BE 수신·저장 반영은 [이슈 #66](https://github.com/yujin110/BreathAI/is
 
 - `metricsScope=ANALYSIS_INPUT`: 기간 필터 후 이번 업로드가 분모다. 서비스 전체 통계가 아니다.
 - `sourceLogIdScope=UPLOAD_LOCAL`: CSV 번호 → 전처리/군집 logId → points.sourceLogSeqNum.
+  원본 chatting_log 양식은 업로드 시 seq_num→번호, msg_m→질문, sysdate→날짜로 자동 정규화하고 kind=1만 사용한다.
+  UTF-8/CP949 CSV 및 기존 XLSX 업로드 모두 별도 변환 도구 없이 처리한다.
   Bronze 전역 PK라고 가정하지 않는다. BE는 analysis→cluster→point 구조로 저장하며 원본 번호에 외래키가 없다.
   같은 업로드의 번호 중복·INT 범위 초과·잘못된 날짜/logType은 접수 단계에서 422로 거절한다.
 - `points`: 군집화 좌표 전부, 샘플링 없음. 노이즈(-1)와 해당 클러스터 메타데이터도 포함한다.
@@ -37,9 +39,14 @@ BE 수신·저장 반영은 [이슈 #66](https://github.com/yujin110/BreathAI/is
   `visualizedLogCount`, `excludedLogCount`, `isSampled=false`로 시각화 범위를 구분한다.
   예: 입력 60행, 짧은 문장 제외 7행이면 total=60, points=53, excluded=7.
 - `samplingStatus`: 명시적 logType(CORRECT/LOW_QUALITY/UNANSWER)이 있으면 사용한다.
-  없으면 기존 미답변 업로드 계약에 따라 UNANSWER로 집계한다.
+  없거나 빈 값이면 `keywordMatchPercent`(0~100 백분율)로 분류한다.
+  25 미만 UNANSWER, 25 이상 75 미만 LOW_QUALITY, 75 이상 CORRECT다.
+  keywordMatchPercent가 없고 ai_percent가 있으면 원본 정수를 100으로 나눠 같은 기준으로 분류한다.
+  세 속성이 모두 없으면 기존 미답변 업로드 계약에 따라 UNANSWER로 집계한다.
+  매칭률 열이 있지만 값이 비었거나 잘못된 경우에는 접수 단계에서 거절한다.
   질의 유효/무효·답변확률·검색 유사도를 답변 성공 여부로 재해석하지 않는다.
-  확인한 코드에는 공통 정상/저품질 분류 임계값이 없다.
+  원본 `ai_percent=9999`는 확인된 정의에 따라 99.99%다.
+  원본 로그 변환 절차와 입력 예시는 [매칭률 분류 계약](keyword-match-classification.md)을 따른다.
 - `performanceMetrics.currentUnanswerRate`: 입력 미답변 건수 / 전체 입력 행수 × 100, 백분율(0~100).
   미답변 파일만 입력하면 100%다. 서비스 전체 실시간 미답변율이나 도입 후 예측값이 아니다.
   predictedAccuracyGain/resolvedCountByAI는 전후 평가가 없어 null이다.
