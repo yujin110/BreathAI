@@ -16,6 +16,8 @@ const PAD_LEFT   = 14;
 const PAD_RIGHT  = 38;  // 화살표가 들어갈 자리
 const ARROW_SIZE = 14;
 const ARROW_GAP  = 13;  // 화살표와 오른쪽 테두리 사이
+// 글꼴 렌더링 차이로 1~2px이 모자라 끝 글자가 잘리는 것을 막는 여유분
+const SAFETY     = 4;
 
 const MEASURE = {
   position: "absolute",
@@ -34,14 +36,29 @@ export default function FitSelect({ value, onChange, options, style, minWidth = 
   const label = selected ? selected.label : "";
 
   useEffect(() => {
-    const el = selectRef.current;
-    const span = measureRef.current;
-    if (!el || !span) return;
-    // 글꼴이 같아야 폭이 맞는다. select에 실제로 적용된 값을 그대로 가져온다.
-    const css = window.getComputedStyle(el);
-    span.style.font = css.font;
-    span.style.letterSpacing = css.letterSpacing;
-    el.style.width = `${Math.max(minWidth, span.offsetWidth + PAD_LEFT + PAD_RIGHT)}px`;
+    const measure = () => {
+      const el = selectRef.current;
+      const span = measureRef.current;
+      if (!el || !span) return;
+
+      // 글꼴이 같아야 폭이 맞는다. font 축약형은 브라우저가 빈 문자열로 주는 경우가 있어
+      // 항목을 하나씩 가져온다.
+      const css = window.getComputedStyle(el);
+      span.style.fontFamily    = css.fontFamily;
+      span.style.fontSize      = css.fontSize;
+      span.style.fontWeight    = css.fontWeight;
+      span.style.fontStyle     = css.fontStyle;
+      span.style.letterSpacing = css.letterSpacing;
+
+      // offsetWidth는 정수로 깎여 끝 글자가 잘린다. 소수까지 담는 값을 올림해서 쓴다.
+      const text = Math.ceil(span.getBoundingClientRect().width) + SAFETY;
+      el.style.width = `${Math.max(minWidth, text + PAD_LEFT + PAD_RIGHT)}px`;
+    };
+
+    measure();
+    // 한글 웹폰트가 늦게 올라오면 첫 측정이 대체 글꼴 기준이라 어긋난다.
+    // 글꼴이 준비되면 한 번 더 잰다.
+    document.fonts?.ready.then(measure).catch(() => {});
   });
 
   return (
