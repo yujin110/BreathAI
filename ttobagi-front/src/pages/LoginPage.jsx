@@ -120,7 +120,7 @@ const NAVY = "#0D3B7A";
 const S = {
   page: {
     minHeight: "100vh",
-    background: "#081A33",
+    background: "#11315B",
     display: "flex", alignItems: "center", justifyContent: "center",
     padding: 24, position: "relative", overflow: "hidden",
   },
@@ -129,19 +129,19 @@ const S = {
   glowTop: {
     position: "absolute", top: "-30%", left: "50%", transform: "translateX(-50%)",
     width: 900, height: 900,
-    background: "radial-gradient(circle, rgba(37,99,235,.34) 0%, rgba(37,99,235,0) 66%)",
+    background: "radial-gradient(circle, rgba(59,130,246,.42) 0%, rgba(59,130,246,0) 66%)",
     pointerEvents: "none",
   },
   glowBottom: {
     position: "absolute", bottom: "-38%", right: "-16%", width: 780, height: 780,
-    background: "radial-gradient(circle, rgba(14,165,233,.22) 0%, rgba(14,165,233,0) 66%)",
+    background: "radial-gradient(circle, rgba(56,189,248,.28) 0%, rgba(56,189,248,0) 66%)",
     pointerEvents: "none",
   },
 
   // 브랜드와 카드를 한 덩어리로 세운다
   orgLockup: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2, marginTop: 4 },
-  orgKo:     { fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,.58)", letterSpacing: "-.01em" },
-  orgEn:     { fontSize: 9.5, fontWeight: 600, color: "rgba(255,255,255,.3)", letterSpacing: ".14em", textTransform: "uppercase" },
+  orgKo:     { fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,.72)", letterSpacing: "-.01em" },
+  orgEn:     { fontSize: 9.5, fontWeight: 600, color: "rgba(255,255,255,.44)", letterSpacing: ".14em", textTransform: "uppercase" },
 
   stack: {
     position: "relative", zIndex: 10,
@@ -160,7 +160,7 @@ const S = {
   card: {
     width: "100%", background: "#fff",
     borderRadius: 18, padding: "38px 36px",
-    boxShadow: "0 28px 70px -24px rgba(2,8,23,.6)",
+    boxShadow: "0 28px 70px -24px rgba(2,8,23,.45)",
   },
   cardMobile: { padding: "32px 22px", borderRadius: 16 },
 

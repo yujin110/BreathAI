@@ -203,15 +203,15 @@ export default function ResetPage() {
 }
 
 const S = {
-  page: { minHeight: "100vh", background: "#081A33", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, position: "relative", overflow: "hidden" },
+  page: { minHeight: "100vh", background: "#11315B", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, position: "relative", overflow: "hidden" },
   pageMobile: { padding: 16 },
   // 흩어진 도형 대신 넓게 번지는 빛으로 깊이만 준다 (로그인 화면과 같은 결)
   glow: { position: "absolute", top: "-30%", left: "50%", transform: "translateX(-50%)", width: 900, height: 900,
-          background: "radial-gradient(circle, rgba(37,99,235,.32) 0%, rgba(37,99,235,0) 66%)", pointerEvents: "none" },
+          background: "radial-gradient(circle, rgba(59,130,246,.42) 0%, rgba(59,130,246,0) 66%)", pointerEvents: "none" },
 
   orgLockup: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2, marginTop: 4 },
-  orgKo:     { fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,.58)", letterSpacing: "-.01em" },
-  orgEn:     { fontSize: 9.5, fontWeight: 600, color: "rgba(255,255,255,.3)", letterSpacing: ".14em", textTransform: "uppercase" },
+  orgKo:     { fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,.72)", letterSpacing: "-.01em" },
+  orgEn:     { fontSize: 9.5, fontWeight: 600, color: "rgba(255,255,255,.44)", letterSpacing: ".14em", textTransform: "uppercase" },
 
   stack: { position: "relative", zIndex: 10, width: "100%", maxWidth: 400,
            display: "flex", flexDirection: "column", alignItems: "center", gap: 22 },
@@ -221,7 +221,7 @@ const S = {
   brandName: { fontSize: 15, fontWeight: 700, color: "#fff", letterSpacing: "-.02em" },
 
   card: { width: "100%", background: "#fff", borderRadius: 18, padding: "38px 36px",
-          boxShadow: "0 28px 70px -24px rgba(2,8,23,.6)" },
+          boxShadow: "0 28px 70px -24px rgba(2,8,23,.45)" },
   cardMobile: { padding: "32px 22px", borderRadius: 16 },
   title: { fontSize: 23, fontWeight: 700, color: "#0F172A", letterSpacing: "-.03em", marginBottom: 6 },
   desc: { fontSize: 13, color: "#94A3B8", marginBottom: 28, lineHeight: 1.6 },
