@@ -368,12 +368,34 @@ class FaqImportIntegrationTest {
     }
 
     @Test
-    @DisplayName("오류: UTF-8이 아닌 CSV, 다른 확장자, 빈 파일, 머리글만 있는 파일은 400")
+    @DisplayName("CP949(엑셀 'CSV (쉼표로 분리)')로 저장한 CSV도 한글이 깨지지 않고 반영된다")
+    void acceptsCp949Csv() throws Exception {
+        String t = tail();
+        String csv = HEADER + ",영업 / 제도,씨피 질문 " + t + ",\"답변, 쉼표\n둘째 줄\",\"막차, 첫차\",지하철 막차\n";
+        String response = body(upload(admin, new MockMultipartFile("file", "cp949.csv", "text/csv",
+                csv.getBytes(Charset.forName("MS949")))).andExpect(status().isOk()));
+        assertThat((Integer) read(response, "$.data.addedCount")).isEqualTo(1);
+
+        Map<String, Object> faq = faqByQuestion("씨피 질문 " + t);
+        assertThat(faq.get("answer")).isEqualTo("답변, 쉼표\n둘째 줄");
+        assertThat(faq.get("category")).isEqualTo("영업/제도");
+        assertThat(json(faq.get("keywords"))).containsExactly("막차", "첫차");
+        assertThat(json(faq.get("synonyms"))).containsExactly("지하철 막차");
+    }
+
+    @Test
+    @DisplayName("오류: 인코딩을 읽을 수 없는 CSV, 따옴표가 닫히지 않은 CSV, 다른 확장자, 빈 파일, 머리글만 있는 파일은 400")
     void rejectsUnreadableFiles() throws Exception {
         Snapshot before = snapshot();
-        String eucKr = body(upload(admin, new MockMultipartFile("file", "euc.csv", "text/csv",
-                ("질문,답변\n가,나\n").getBytes(Charset.forName("EUC-KR")))).andExpect(status().isBadRequest()));
-        assertThat((String) read(eucKr, "$.data.errors[0].reason")).isEqualTo("CSV 파일을 UTF-8로 읽을 수 없습니다. UTF-8로 저장해 주세요.");
+        // 0x81 0x20은 UTF-8로도 CP949로도 읽을 수 없다
+        String unreadable = body(upload(admin, new MockMultipartFile("file", "bin.csv", "text/csv",
+                new byte[]{'q', ',', 'a', '\n', (byte) 0x81, ' ', '\n'})).andExpect(status().isBadRequest()));
+        assertThat((String) read(unreadable, "$.data.errors[0].reason"))
+                .isEqualTo("CSV 파일의 문자 인코딩을 읽을 수 없습니다. UTF-8 또는 CP949(ANSI)로 저장해 주세요.");
+
+        String quote = body(upload(admin, csvFile("질문,답변\n\"닫히지 않은 질문,답\n")).andExpect(status().isBadRequest()));
+        assertThat((String) read(quote, "$.data.errors[0].reason"))
+                .isEqualTo("CSV 형식을 읽을 수 없습니다. 따옴표가 닫히지 않은 칸이 있는지 확인해 주세요.");
 
         upload(admin, new MockMultipartFile("file", "faq.txt", "text/plain", "질문,답변\n가,나\n".getBytes(StandardCharsets.UTF_8)))
                 .andExpect(status().isBadRequest())
