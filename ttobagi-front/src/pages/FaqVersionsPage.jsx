@@ -5,6 +5,7 @@ import { formatKst } from "../utils/datetime.js";
 import { useToast } from "../hooks/useToast.js";
 import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
+import { useIsMobile } from "../hooks/useIsMobile.js";
 
 const PAGE_SIZE = 10;
 
@@ -38,6 +39,7 @@ function fieldText(field, value) {
 }
 
 export default function FaqVersionsPage() {
+  const isMobile = useIsMobile();
   const [versions, setVersions] = useState([]);
   const [page, setPage] = useState(0);
   const [pageInfo, setPageInfo] = useState({ totalCount: 0, totalPages: 0 });
@@ -182,7 +184,7 @@ export default function FaqVersionsPage() {
   if (loading) return <div style={{ padding: 40, color: "#6B7280" }}>불러오는 중...</div>;
 
   return (
-    <div style={S.page}>
+    <div style={{ ...S.page, ...(isMobile ? S.pageMobile : {}) }}>
       <div style={S.pageTitle}>FAQ 버전 관리</div>
       <div style={S.pageSub}>
         버전 만들기, CSV 다운로드, FAQ 파일 일괄 업로드로 그 시점의 FAQ 스냅샷이 쌓입니다. 버전별로 CSV를 내려받을 수 있습니다.
@@ -292,7 +294,7 @@ export default function FaqVersionsPage() {
                   )}
                 </div>
 
-                <div style={S.statRow}>
+                <div style={{ ...S.statRow, ...(isMobile ? { gridTemplateColumns: "repeat(3, 1fr)" } : {}) }}>
                   {[
                     { label: "전체", value: detail.data?.totalFaqCount ?? 0, color: "#111827" },
                     { label: "신규", value: detail.data?.createdCount ?? 0, color: "#1565C0" },
@@ -366,7 +368,7 @@ export default function FaqVersionsPage() {
                     : "현재 운영 FAQ"}
                 </div>
 
-                <div style={S.statRow}>
+                <div style={{ ...S.statRow, ...(isMobile ? { gridTemplateColumns: "repeat(3, 1fr)" } : {}) }}>
                   {[
                     { label: "추가", value: compare.data?.addedCount ?? 0, color: "#1565C0" },
                     { label: "삭제", value: compare.data?.deletedCount ?? 0, color: "#B91C1C" },
@@ -455,6 +457,7 @@ const S = {
   diffAfter:    { color: "#065F46", fontWeight: 500 },
 
   page:        { padding: 28 },
+  pageMobile:  { padding: 16 },
   pageTitle:   { fontSize: 20, fontWeight: 700, color: "#111827", marginBottom: 4 },
   pageSub:     { fontSize: 13, color: "#6B7280", marginBottom: 20, lineHeight: 1.6 },
   card:        { background: "#fff", borderRadius: 12, padding: 18, marginBottom: 10, boxShadow: "0 1px 3px rgba(0,0,0,.06)", border: "1px solid rgba(0,0,0,.06)" },

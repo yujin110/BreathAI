@@ -10,6 +10,7 @@ function withFields(err, fallback) {
   return fields ? `${base} (${fields})` : base;
 }
 import { useToast } from "../hooks/useToast.js";
+import { useIsMobile } from "../hooks/useIsMobile.js";
 
 // 백엔드 SignupRequest.password의 @Pattern과 같은 식이다. 한쪽만 바꾸면 통과·거부가 어긋난다.
 const PW_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9])[\x21-\x7E]{6,20}$/;
@@ -20,6 +21,7 @@ const CODE_LENGTH = 6;
 const RESEND_SECONDS = 60;
 
 export default function SignupPage() {
+  const isMobile = useIsMobile();
   const [step, setStep]           = useState("email"); // email | code
   const [email, setEmail]         = useState("");
   const [code, setCode]           = useState("");
@@ -91,14 +93,15 @@ export default function SignupPage() {
   };
 
   return (
-    <div style={S.page}>
-      <div style={S.left}>
+    <div style={{ ...S.page, ...(isMobile ? S.pageMobile : {}) }}>
+      {/* 설명 패널은 폰에서 접는다. 폼이 화면을 다 쓰게 한다 */}
+      {!isMobile && <div style={S.left}>
         <span style={{ fontSize: 52 }}>🚇</span>
         <h1 style={S.brand}>또타24<br />현행화 시스템</h1>
         <p style={S.tagline}>서울교통공사 운영 담당자를 위한<br />챗봇 학습데이터 관리 시스템</p>
-      </div>
+      </div>}
 
-      <div style={S.right}>
+      <div style={{ ...S.right, ...(isMobile ? S.rightMobile : {}) }}>
         <div style={S.box}>
           <h2 style={S.title}>회원가입</h2>
           <p style={S.desc}>
@@ -186,6 +189,8 @@ const S = {
   left: { flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", padding: "60px 56px", color: "#fff" },
   brand: { fontSize: 32, fontWeight: 700, lineHeight: 1.3, margin: "20px 0 16px" },
   tagline: { fontSize: 15, color: "rgba(255,255,255,0.75)", lineHeight: 1.8 },
+  pageMobile: { flexDirection: "column" },
+  rightMobile: { width: "100%", minHeight: "100vh", padding: "32px 20px" },
   right: { width: 480, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 32px" },
   box: { width: "100%", maxWidth: 380 },
   title: { fontSize: 24, fontWeight: 700, color: "#111827", marginBottom: 6 },

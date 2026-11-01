@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
 import { dashApi } from "../api/dashboard.js";
 import { useToast } from "../hooks/useToast.js";
+import { useIsMobile } from "../hooks/useIsMobile.js";
 
 export default function DashboardPage() {
+  const isMobile = useIsMobile();
   const [analyze, setAnalyze]   = useState(null);
   const [loading, setLoading]   = useState(true);
   // scope=mine(기본)은 내 이력에 남은 완료 분석, all은 완료된 분석 전체
@@ -109,7 +111,7 @@ export default function DashboardPage() {
     : null;
 
   return (
-    <div style={S.page}>
+    <div style={{ ...S.page, ...(isMobile ? S.pageMobile : {}) }}>
       <div style={S.pageTitle}>대시보드</div>
       <div style={S.pageSub}>
         또타24 챗봇 응답 현황을 확인합니다.
@@ -148,7 +150,7 @@ export default function DashboardPage() {
       )}
 
       {/* 통계 카드 */}
-      <div style={S.statGrid}>
+      <div style={{ ...S.statGrid, ...(isMobile ? { gridTemplateColumns: "repeat(2, 1fr)", gap: 10 } : {}) }}>
         {[
           { label: "총 대화 수",      value: (system?.totalLogCount || 0).toLocaleString(),
             sub: period || "분석 대상 파일 기준", color: "#111827" },
@@ -264,6 +266,7 @@ export default function DashboardPage() {
 
 const S = {
   page:       { padding: 28 },
+  pageMobile: { padding: 16 },
   pageTitle:  { fontSize: 20, fontWeight: 700, color: "#111827", marginBottom: 4 },
   pageSub:    { fontSize: 13, color: "#6B7280", marginBottom: 24 },
   statGrid:   { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 },

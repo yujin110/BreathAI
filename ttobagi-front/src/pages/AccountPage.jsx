@@ -11,11 +11,13 @@ function withFields(err, fallback) {
 }
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
+import { useIsMobile } from "../hooks/useIsMobile.js";
 
 // 백엔드 UserUpdateRequest.newPassword의 @Pattern과 같은 식이다.
 const PW_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9])[\x21-\x7E]{6,20}$/;
 
 export default function AccountPage() {
+  const isMobile = useIsMobile();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
@@ -69,7 +71,7 @@ export default function AccountPage() {
   };
 
   return (
-    <div style={S.page}>
+    <div style={{ ...S.page, ...(isMobile ? S.pageMobile : {}) }}>
       <div style={S.pageTitle}>계정 관리</div>
       <div style={S.pageSub}>계정 정보를 확인하고 관리합니다.</div>
 
@@ -215,6 +217,7 @@ export default function AccountPage() {
 
 const S = {
   page:       { padding: 28 },
+  pageMobile: { padding: 16 },
   pageTitle:  { fontSize: 20, fontWeight: 700, color: "#111827", marginBottom: 4 },
   pageSub:    { fontSize: 13, color: "#6B7280", marginBottom: 20 },
   tabs:       { display: "flex", gap: 2, background: "#F3F4F6", borderRadius: 10, padding: 4, width: "fit-content", marginBottom: 24 },

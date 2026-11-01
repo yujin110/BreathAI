@@ -10,6 +10,7 @@ function withFields(err, fallback) {
   return fields ? `${base} (${fields})` : base;
 }
 import { useToast } from "../hooks/useToast.js";
+import { useIsMobile } from "../hooks/useIsMobile.js";
 
 // 새 비밀번호 규칙: 영문(대소문자)·숫자·특수문자를 각각 1개 이상 포함한 6~20자.
 // 특수문자는 키보드의 32개 모두 되고 공백·한글은 안 된다.
@@ -30,6 +31,7 @@ function needsNewCode(err) {
 }
 
 export default function ResetPage() {
+  const isMobile = useIsMobile();
   const [step, setStep]       = useState("email"); // email | code
   const [email, setEmail]     = useState("");
   const [code, setCode]       = useState("");
@@ -92,8 +94,9 @@ export default function ResetPage() {
   };
 
   return (
-    <div style={S.page}>
-      <div style={S.left}>
+    <div style={{ ...S.page, ...(isMobile ? S.pageMobile : {}) }}>
+      {/* 설명 패널은 폰에서 접는다. 폼이 화면을 다 쓰게 한다 */}
+      {!isMobile && <div style={S.left}>
         <span style={{ fontSize: 52 }}>🚇</span>
         <h1 style={S.brand}>비밀번호 찾기</h1>
         <p style={S.tagline}>
@@ -101,9 +104,9 @@ export default function ResetPage() {
             ? "등록된 이메일로 인증 코드를 발송합니다."
             : <>메일로 받은 6자리 인증 코드와<br />새 비밀번호를 입력하세요.</>}
         </p>
-      </div>
+      </div>}
 
-      <div style={S.right}>
+      <div style={{ ...S.right, ...(isMobile ? S.rightMobile : {}) }}>
         <div style={S.box}>
           {step === "email" ? (
             <>
@@ -200,6 +203,8 @@ const S = {
   left: { flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", padding: "60px 56px", color: "#fff" },
   brand: { fontSize: 32, fontWeight: 700, lineHeight: 1.3, margin: "20px 0 16px" },
   tagline: { fontSize: 15, color: "rgba(255,255,255,0.75)", lineHeight: 1.8 },
+  pageMobile: { flexDirection: "column" },
+  rightMobile: { width: "100%", minHeight: "100vh", padding: "32px 20px" },
   right: { width: 480, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 32px" },
   box: { width: "100%", maxWidth: 380 },
   title: { fontSize: 24, fontWeight: 700, color: "#111827", marginBottom: 6 },

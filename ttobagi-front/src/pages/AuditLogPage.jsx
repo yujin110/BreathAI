@@ -3,6 +3,7 @@ import { auditApi } from "../api/audit.js";
 import { formatKst } from "../utils/datetime.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
+import { useIsMobile } from "../hooks/useIsMobile.js";
 
 const PAGE_SIZE = 50;
 
@@ -28,6 +29,7 @@ const CATEGORY_LABEL = Object.fromEntries(CATEGORIES.filter((c) => c.value).map(
 const EMPTY_FILTER = { from: "", to: "", email: "", category: "", result: "", includeReads: false };
 
 export default function AuditLogPage() {
+  const isMobile = useIsMobile();
   const [logs, setLogs] = useState([]);
   const [pageInfo, setPageInfo] = useState({ totalCount: 0, totalPages: 0, currentPage: 0 });
   const [loading, setLoading] = useState(true);
@@ -83,7 +85,7 @@ export default function AuditLogPage() {
 
   if (!isAdmin) {
     return (
-      <div style={S.page}>
+      <div style={{ ...S.page, ...(isMobile ? S.pageMobile : {}) }}>
         <div style={S.pageTitle}>감사로그</div>
         <div style={S.empty}>관리자만 볼 수 있는 화면입니다.</div>
       </div>
@@ -91,7 +93,7 @@ export default function AuditLogPage() {
   }
 
   return (
-    <div style={S.page}>
+    <div style={{ ...S.page, ...(isMobile ? S.pageMobile : {}) }}>
       <div style={S.pageTitle}>감사로그</div>
       <div style={S.pageSub}>
         계정·분석·FAQ·데이터 반출 작업과 권한이 막힌 요청을 보여 줍니다.
@@ -211,6 +213,7 @@ export default function AuditLogPage() {
 
 const S = {
   page:       { padding: 28 },
+  pageMobile: { padding: 16 },
   pageTitle:  { fontSize: 20, fontWeight: 700, color: "#111827", marginBottom: 4 },
   pageSub:    { fontSize: 13, color: "#6B7280", marginBottom: 20, lineHeight: 1.6 },
   filterBar:  { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 },
@@ -218,7 +221,8 @@ const S = {
   check:      { display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#374151", cursor: "pointer" },
   btnSearch:  { height: 36, padding: "0 18px", background: "#1565C0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   btnSm:      { height: 36, padding: "0 14px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 8, background: "#fff", color: "#374151", cursor: "pointer", fontFamily: "inherit" },
-  tableWrap:  { background: "#fff", borderRadius: 12, border: "1px solid rgba(0,0,0,.06)", boxShadow: "0 1px 3px rgba(0,0,0,.06)", overflowX: "auto" },
+  // 이미 overflowX: auto 라 좁은 화면에서도 표가 잘리지 않고 옆으로 밀린다
+  tableWrap:  { background: "#fff", borderRadius: 12, border: "1px solid rgba(0,0,0,.06)", boxShadow: "0 1px 3px rgba(0,0,0,.06)", overflowX: "auto", WebkitOverflowScrolling: "touch" },
   table:      { width: "100%", borderCollapse: "collapse", fontSize: 12 },
   th:         { textAlign: "left", padding: "10px 12px", color: "#6B7280", fontWeight: 600, borderBottom: "1px solid #F3F4F6", whiteSpace: "nowrap" },
   row:        { cursor: "pointer" },
