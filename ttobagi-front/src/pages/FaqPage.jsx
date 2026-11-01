@@ -372,7 +372,7 @@ export default function FaqPage() {
             {/* 어느 쪽이든 명세서 GET /api/v1/faq 의 category(표시명 문자열)를 그대로 보낸다.
                 선택지를 받아오면 드롭다운, 못 받아오면 입력창이다. */}
             {categories ? (
-              <select style={{ ...S.searchInput, width: 180, cursor: "pointer" }}
+              <select style={{ ...S.searchInput, ...S.selectAuto }}
                 value={categoryInput}
                 onChange={(e) => {
                   const next = e.target.value;
@@ -412,7 +412,7 @@ export default function FaqPage() {
           {/* 키워드만 내려받기 · FAQ 파일 일괄 업로드 */}
           <div style={S.toolRow}>
             <span style={S.toolLabel}>키워드 다운로드</span>
-            <select style={{ ...S.searchInput, width: 220, cursor: "pointer" }}
+            <select style={{ ...S.searchInput, ...S.selectAuto }}
               value={sinceVersionId} onChange={(e) => setSinceVersionId(e.target.value)}>
               <option value="">현재 전체</option>
               {versions.map((v) => (
@@ -958,6 +958,9 @@ const S = {
   toolLabel:   { fontSize: 12, fontWeight: 600, color: "#374151" },
   toolHint:    { fontSize: 11.5, color: "#9CA3AF", lineHeight: 1.6, margin: "-4px 0 14px" },
   toolDivider: { width: 1, height: 20, background: "#E5E7EB", margin: "0 6px" },
+  // 고정 폭을 주면 글자가 짧을 때 화살표만 오른쪽에 동떨어져 보인다.
+  // 내용 길이에 맞춰 줄이고, 좁은 화면에서만 화면 폭을 넘지 않게 막는다.
+  selectAuto:  { width: "auto", minWidth: 130, maxWidth: "100%", paddingRight: 10, cursor: "pointer" },
   statBox:     { flex: 1, minWidth: 96, background: "#F9FAFB", borderRadius: 8, padding: "10px 12px", textAlign: "center" },
   resultLine:  { fontSize: 12, color: "#374151", marginBottom: 6 },
   resultBlock: { marginTop: 12, paddingTop: 12, borderTop: "1px solid #F3F4F6" },
