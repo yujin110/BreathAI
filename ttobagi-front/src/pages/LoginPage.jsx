@@ -13,6 +13,8 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState("");
+  // 인라인 스타일에는 :focus를 쓸 수 없어 어느 칸이 눌렸는지 직접 들고 있는다
+  const [focused, setFocused]   = useState(null);
   const { login } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
@@ -33,70 +35,69 @@ export default function LoginPage() {
     }
   };
 
+  const field = (key, { type, placeholder, icon, value, onChange }) => (
+    <div style={{ ...S.inputWrap, ...(focused === key ? S.inputWrapOn : {}) }}>
+      <span style={{ ...S.inputIcon, ...(focused === key ? { color: "#0D3B7A" } : {}) }}>
+        <Icon name={icon} size={17} />
+      </span>
+      <input style={S.input} type={type} placeholder={placeholder}
+        value={value} onChange={onChange}
+        onFocus={() => setFocused(key)} onBlur={() => setFocused(null)}
+        onKeyDown={(e) => e.key === "Enter" && submit()} />
+    </div>
+  );
+
   return (
-    <div style={{ ...S.page, ...(isMobile ? { padding: 16 } : {}) }}>
-      {/* ── 배경 도형들 ── */}
-      <div style={S.bgCircle1} />
-      <div style={S.bgCircle2} />
-      <div style={S.bgCircle3} />
-      <div style={S.bgCircle4} />
-      <div style={S.bgDot1} />
-      <div style={S.bgDot2} />
-      <div style={S.bgDot3} />
-      <div style={S.bgRect1} />
-      <div style={S.bgRect2} />
+    <div style={{ ...S.page, ...(isMobile ? S.pageMobile : {}) }}>
+      {/* 흩어진 도형 대신 넓게 번지는 빛 두 개로 깊이만 준다 */}
+      <div style={S.glowTop} />
+      <div style={S.glowBottom} />
 
-      {/* ── 가운데 카드 ── */}
       <div style={{ ...S.card, ...(isMobile ? S.cardMobile : {}) }}>
-        {/* 왼쪽 — 설명 */}
-        {/* 장식용 패널이라 좁은 화면에서는 감추고 입력칸에 폭을 넘긴다 */}
-        {!isMobile && <div style={S.cardLeft}>
-          <div style={S.cardLeftInner}>
-            <div style={{ position: "relative", zIndex: 2 }}>
-              <div style={S.leftTitle}>또타24<br />현행화 시스템</div>
-              <div style={S.leftSub}>
-                AI 기반 미답변 분석을 통해<br />
-                챗봇 학습데이터를<br />
-                자동으로 현행화합니다.
-              </div>
+        {/* 왼쪽은 소개용이라 좁은 화면에서는 접고 폼에 폭을 넘긴다 */}
+        {!isMobile && (
+          <div style={S.cardLeft}>
+            <div style={S.brandRow}>
+              <span style={S.brandMark}><Icon name="train" size={18} /></span>
+              <span style={S.brandName}>또타24</span>
             </div>
+
+            <div>
+              <h1 style={S.leftTitle}>챗봇 학습데이터를<br />스스로 최신으로</h1>
+              <p style={S.leftSub}>
+                미답변 대화를 AI가 분석해 FAQ 후보를 제안하고,
+                담당자가 승인한 내용만 반영합니다.
+              </p>
+            </div>
+
+            <div style={S.leftFoot}>서울교통공사 · 정보운영센터</div>
           </div>
-        </div>}
+        )}
 
-        {/* 오른쪽 — 로그인 폼 */}
-        <div style={S.cardRight}>
-          {/* 로고 */}
-          <div style={S.logoWrap}>
-            <Icon name="train" size={24} />
+        <div style={{ ...S.cardRight, ...(isMobile ? S.cardRightMobile : {}) }}>
+          {isMobile && (
+            <div style={S.logoWrap}><Icon name="train" size={22} /></div>
+          )}
+
+          <h2 style={S.welcome}>반갑습니다</h2>
+          <p style={S.desc}>운영자 계정으로 로그인하세요.</p>
+
+          <div style={S.fields}>
+            {field("email", {
+              type: "email", placeholder: "이메일 주소", icon: "mail",
+              value: email, onChange: (e) => setEmail(e.target.value),
+            })}
+            {field("pw", {
+              type: "password", placeholder: "비밀번호", icon: "lock",
+              value: pw, onChange: (e) => setPw(e.target.value),
+            })}
           </div>
 
-          <div style={S.welcome}>반갑습니다!</div>
-          <div style={S.desc}>운영자 계정으로 로그인하세요.</div>
-
-          {/* 이메일 */}
-          <div style={S.inputWrap}>
-            <span style={S.inputIcon}><Icon name="mail" size={17} /></span>
-            <input style={S.input} type="email"
-              placeholder="이메일 주소"
-              value={email} onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submit()} />
-          </div>
-
-          {/* 비밀번호 */}
-          <div style={S.inputWrap}>
-            <span style={S.inputIcon}><Icon name="lock" size={17} /></span>
-            <input style={S.input} type="password"
-              placeholder="비밀번호"
-              value={pw} onChange={(e) => setPw(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submit()} />
-          </div>
-
-          {/* Remember me + 비번 찾기 */}
           <div style={S.row}>
             <label style={S.rememberLabel}>
               <input type="checkbox" checked={remember}
                 onChange={(e) => setRemember(e.target.checked)}
-                style={{ marginRight: 6, accentColor: "#1565C0" }} />
+                style={{ marginRight: 7, accentColor: "#0D3B7A", width: 14, height: 14 }} />
               로그인 상태 유지
             </label>
             <Link to="/reset" style={S.link}>비밀번호 찾기</Link>
@@ -104,140 +105,142 @@ export default function LoginPage() {
 
           {error && <div style={S.error}>{error}</div>}
 
-          {/* 로그인 버튼 */}
-          <button style={{ ...S.btn, opacity: loading ? 0.7 : 1 }}
+          <button style={{ ...S.btn, ...(loading ? S.btnLoading : {}) }}
             onClick={submit} disabled={loading}>
             {loading ? "로그인 중..." : "로그인"}
           </button>
 
-          {/* 구분선 */}
           <div style={S.divider}>
-            <div style={S.dividerLine} />
+            <span style={S.dividerLine} />
             <span style={S.dividerText}>또는</span>
-            <div style={S.dividerLine} />
+            <span style={S.dividerLine} />
           </div>
 
-          {/* 회원가입 */}
-          <div style={{ textAlign: "center", fontSize: 13 }}>
-            <span style={{ color: "#6B7280", marginRight: 4 }}>계정이 없으신가요?</span>
+          <div style={S.signupRow}>
+            <span style={{ color: "#64748B" }}>계정이 없으신가요?</span>
             <Link to="/signup" style={S.link}>회원가입</Link>
           </div>
-
         </div>
       </div>
     </div>
   );
 }
 
+const NAVY = "#0D3B7A";
+
 const S = {
-  // ── 전체 배경 ──
+  // 밝은 파랑 그라데이션은 눈이 피로해, 짙은 남색에 빛만 얹는다
   page: {
     minHeight: "100vh",
-    background: "linear-gradient(135deg, #1565C0 0%, #42A5F5 100%)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-    overflow: "hidden",
+    background: "#081A33",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    padding: 24, position: "relative", overflow: "hidden",
+  },
+  pageMobile: { padding: 16 },
+
+  glowTop: {
+    position: "absolute", top: "-28%", left: "-10%", width: 760, height: 760,
+    background: "radial-gradient(circle, rgba(37,99,235,.38) 0%, rgba(37,99,235,0) 68%)",
+    pointerEvents: "none",
+  },
+  glowBottom: {
+    position: "absolute", bottom: "-34%", right: "-14%", width: 820, height: 820,
+    background: "radial-gradient(circle, rgba(14,165,233,.26) 0%, rgba(14,165,233,0) 68%)",
+    pointerEvents: "none",
   },
 
-  // ── 가운데 카드 ──
   card: {
-    display: "flex",
-    width: 820,
-    minHeight: 500,
-    borderRadius: 24,
-    overflow: "hidden",
-    boxShadow: "0 24px 60px rgba(0,0,0,0.2)",
-    position: "relative",
-    zIndex: 10,
-  },
-
-  // 폰에서는 820px를 화면에 맞추고, 장식용 왼쪽 패널은 숨겨 입력칸만 남긴다
-  cardMobile: { width: "100%", maxWidth: 420, minHeight: 0 },
-
-  // 카드 왼쪽
-  cardLeft: {
-    width: 320,
-    background: "linear-gradient(160deg, #0D47A1 0%, #1976D2 100%)",
-    position: "relative",
-    overflow: "hidden",
-    flexShrink: 0,
-  },
-  cardLeftInner: {
-    height: "100%",
-    display: "flex",
-    alignItems: "flex-end",
-    padding: "40px 36px",
-    position: "relative",
-  },
-
-  leftTitle: { fontSize: 28, fontWeight: 800, color: "#fff", lineHeight: 1.25, marginBottom: 12, letterSpacing: "-0.5px" },
-  leftSub:   { fontSize: 13, color: "rgba(255,255,255,0.75)", lineHeight: 1.8 },
-
-  // 카드 오른쪽
-  cardRight: {
-    flex: 1,
+    display: "flex", width: 880, minHeight: 540,
+    borderRadius: 20, overflow: "hidden", position: "relative", zIndex: 10,
     background: "#fff",
-    padding: "44px 40px",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
+    boxShadow: "0 32px 80px -24px rgba(2,8,23,.55)",
   },
+  cardMobile: { width: "100%", maxWidth: 420, minHeight: 0, borderRadius: 18 },
+
+  // ── 왼쪽: 소개 ──
+  cardLeft: {
+    width: 360, flexShrink: 0,
+    background: `linear-gradient(170deg, ${NAVY} 0%, #0A2550 100%)`,
+    padding: "40px 38px",
+    display: "flex", flexDirection: "column", justifyContent: "space-between",
+  },
+  brandRow:  { display: "flex", alignItems: "center", gap: 10 },
+  brandMark: {
+    display: "flex", alignItems: "center", justifyContent: "center",
+    width: 32, height: 32, borderRadius: 9,
+    background: "rgba(255,255,255,.14)", color: "#fff",
+  },
+  brandName: { fontSize: 15, fontWeight: 700, color: "#fff", letterSpacing: "-.01em" },
+
+  leftTitle: {
+    fontSize: 27, fontWeight: 700, color: "#fff",
+    lineHeight: 1.42, letterSpacing: "-.035em", margin: "0 0 14px",
+  },
+  leftSub: {
+    fontSize: 13, color: "rgba(255,255,255,.62)", lineHeight: 1.85,
+    margin: 0, wordBreak: "keep-all",
+  },
+  leftFoot: { fontSize: 11, color: "rgba(255,255,255,.38)", letterSpacing: ".01em" },
+
+  // ── 오른쪽: 폼 ──
+  cardRight: {
+    flex: 1, background: "#fff", padding: "48px 44px",
+    display: "flex", flexDirection: "column", justifyContent: "center",
+  },
+  cardRightMobile: { padding: "36px 24px" },
 
   logoWrap: {
-    width: 56, height: 56,
-    background: "#EFF8FF",
-    borderRadius: 14,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    width: 44, height: 44, borderRadius: 12,
+    background: "#EEF2F7", color: NAVY,
+    display: "flex", alignItems: "center", justifyContent: "center",
     marginBottom: 18,
-    boxShadow: "0 2px 8px rgba(21,101,192,0.15)",
   },
-  welcome: { fontSize: 20, fontWeight: 700, color: "#111827", marginBottom: 4 },
-  desc:    { fontSize: 12, color: "#9CA3AF", marginBottom: 24, lineHeight: 1.6 },
+
+  welcome: { fontSize: 22, fontWeight: 700, color: "#0F172A", letterSpacing: "-.03em", margin: "0 0 6px" },
+  desc:    { fontSize: 13, color: "#94A3B8", margin: "0 0 28px" },
+
+  fields: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 },
 
   inputWrap: {
     display: "flex", alignItems: "center",
-    background: "#F9FAFB",
-    border: "1.5px solid #E5E7EB",
-    borderRadius: 10,
-    padding: "0 14px",
-    marginBottom: 12,
+    background: "#F8FAFC",
+    border: "1.5px solid #E2E8F0",
+    borderRadius: 12, padding: "0 14px",
+    transition: "border-color .15s, box-shadow .15s, background .15s",
   },
-  inputIcon: { display: "flex", alignItems: "center", marginRight: 10, color: "#9CA3AF" },
+  // 눌린 칸을 분명히 보여 준다
+  inputWrapOn: {
+    background: "#fff",
+    borderColor: NAVY,
+    boxShadow: `0 0 0 3px rgba(13,59,122,.1)`,
+  },
+  inputIcon: { display: "flex", alignItems: "center", marginRight: 10, color: "#94A3B8", transition: "color .15s" },
   input: {
-    flex: 1, height: 44, border: "none", outline: "none",
-    fontSize: 13, fontFamily: "inherit",
-    background: "transparent", color: "#111827",
+    flex: 1, minWidth: 0, height: 48, border: "none", outline: "none",
+    fontSize: 14, fontFamily: "inherit", background: "transparent", color: "#0F172A",
   },
 
-  row: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 },
-  rememberLabel: { display: "flex", alignItems: "center", fontSize: 12, color: "#6B7280", cursor: "pointer" },
-  link: { fontSize: 12, color: "#1565C0", cursor: "pointer", fontWeight: 500, textDecoration: "none" },
-  error: { fontSize: 12, color: "#DC2626", marginBottom: 12, textAlign: "center" },
+  row: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 20 },
+  rememberLabel: { display: "flex", alignItems: "center", fontSize: 12.5, color: "#64748B", cursor: "pointer" },
+  link: { fontSize: 12.5, color: NAVY, cursor: "pointer", fontWeight: 600, textDecoration: "none" },
+  error: {
+    fontSize: 12.5, color: "#BE123C", background: "#FFF1F2", border: "1px solid #FECDD3",
+    borderRadius: 10, padding: "9px 12px", marginBottom: 14, lineHeight: 1.5,
+  },
 
   btn: {
-    width: "100%", height: 46,
-    background: "linear-gradient(135deg, #1565C0, #42A5F5)",
-    color: "#fff", border: "none", borderRadius: 10,
-    fontSize: 14, fontWeight: 600, cursor: "pointer",
-    fontFamily: "inherit",
-    boxShadow: "0 4px 14px rgba(21,101,192,0.35)",
+    width: "100%", height: 48,
+    background: NAVY, color: "#fff", border: "none", borderRadius: 12,
+    fontSize: 14.5, fontWeight: 600, letterSpacing: "-.01em",
+    cursor: "pointer", fontFamily: "inherit",
+    boxShadow: "0 8px 20px -8px rgba(13,59,122,.6)",
+    transition: "opacity .15s",
   },
+  btnLoading: { opacity: .65, cursor: "default" },
 
-  divider:     { display: "flex", alignItems: "center", gap: 10, margin: "18px 0" },
-  dividerLine: { flex: 1, height: 1, background: "#E5E7EB" },
-  dividerText: { fontSize: 11, color: "#9CA3AF" },
+  divider:     { display: "flex", alignItems: "center", gap: 12, margin: "22px 0" },
+  dividerLine: { flex: 1, height: 1, background: "#E2E8F0" },
+  dividerText: { fontSize: 11.5, color: "#94A3B8" },
 
-  bgCircle1: { position: "absolute", top: -80, left: -80, width: 240, height: 240, borderRadius: "50%", background: "rgba(255,255,255,0.08)" },
-  bgCircle2: { position: "absolute", bottom: -100, right: -60, width: 300, height: 300, borderRadius: "50%", background: "rgba(255,255,255,0.06)" },
-  bgCircle3: { position: "absolute", top: "20%", right: "10%", width: 60, height: 60, borderRadius: "50%", background: "rgba(255,255,255,0.1)" },
-  bgCircle4: { position: "absolute", bottom: "15%", left: "8%", width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.1)" },
-  bgDot1: { position: "absolute", top: "12%", left: "20%", width: 8, height: 8, borderRadius: "50%", background: "rgba(255,255,255,0.3)" },
-  bgDot2: { position: "absolute", top: "70%", right: "22%", width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,0.3)" },
-  bgDot3: { position: "absolute", bottom: "8%", right: "40%", width: 10, height: 10, borderRadius: "50%", background: "rgba(255,255,255,0.25)" },
-  bgRect1: { position: "absolute", top: "8%", right: "30%", width: 24, height: 24, borderRadius: 6, background: "rgba(255,255,255,0.08)", transform: "rotate(20deg)" },
-  bgRect2: { position: "absolute", bottom: "20%", left: "30%", width: 18, height: 18, borderRadius: 5, background: "rgba(255,255,255,0.08)", transform: "rotate(-15deg)" },
+  signupRow: { display: "flex", justifyContent: "center", alignItems: "center", gap: 6, fontSize: 13 },
 };
