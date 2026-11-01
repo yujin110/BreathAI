@@ -10,6 +10,8 @@ function withFields(err, fallback) {
   return fields ? `${base} (${fields})` : base;
 }
 import { useToast } from "../hooks/useToast.js";
+import { useIsMobile } from "../hooks/useIsMobile.js";
+import Icon from "../components/Icon.jsx";
 
 // 백엔드 SignupRequest.password의 @Pattern과 같은 식이다. 한쪽만 바꾸면 통과·거부가 어긋난다.
 const PW_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9])[\x21-\x7E]{6,20}$/;
@@ -20,6 +22,7 @@ const CODE_LENGTH = 6;
 const RESEND_SECONDS = 60;
 
 export default function SignupPage() {
+  const isMobile = useIsMobile();
   const [step, setStep]           = useState("email"); // email | code
   const [email, setEmail]         = useState("");
   const [code, setCode]           = useState("");
@@ -91,15 +94,16 @@ export default function SignupPage() {
   };
 
   return (
-    <div style={S.page}>
-      <div style={S.left}>
-        <span style={{ fontSize: 52 }}>🚇</span>
-        <h1 style={S.brand}>또타24<br />현행화 시스템</h1>
-        <p style={S.tagline}>서울교통공사 운영 담당자를 위한<br />챗봇 학습데이터 관리 시스템</p>
-      </div>
+    <div style={{ ...S.page, ...(isMobile ? S.pageMobile : {}) }}>
+      <div style={S.glow} />
+      {/* 어디에 가입·접속하는지만 밝히고 설명은 두지 않는다 */}
+      <div style={S.stack}>
+        <div style={S.brandRow}>
+          <span style={S.brandMark}><Icon name="train" size={20} /></span>
+          <span style={S.brandName}>또타24 현행화 시스템</span>
+        </div>
 
-      <div style={S.right}>
-        <div style={S.box}>
+        <div style={{ ...S.card, ...(isMobile ? S.cardMobile : {}) }}>
           <h2 style={S.title}>회원가입</h2>
           <p style={S.desc}>
             {step === "email"
@@ -176,26 +180,47 @@ export default function SignupPage() {
             <Link to="/login" style={S.link}>로그인으로 돌아가기</Link>
           </div>
         </div>
+
+        {/* 운영 주체 표기. 공식 로고 파일을 받으면 이 자리에 이미지를 넣는다.
+            (public/ 에 두고 import.meta.env.BASE_URL 로 경로를 잡으면 배포에서도 맞는다) */}
+        <div style={S.orgLockup}>
+          <span style={S.orgKo}>서울교통공사</span>
+          <span style={S.orgEn}>Seoul Metro</span>
+        </div>
       </div>
     </div>
   );
 }
 
 const S = {
-  page: { display: "flex", minHeight: "100vh", background: "linear-gradient(135deg, #0D3B7A 0%, #1565C0 100%)" },
-  left: { flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", padding: "60px 56px", color: "#fff" },
-  brand: { fontSize: 32, fontWeight: 700, lineHeight: 1.3, margin: "20px 0 16px" },
-  tagline: { fontSize: 15, color: "rgba(255,255,255,0.75)", lineHeight: 1.8 },
-  right: { width: 480, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 32px" },
-  box: { width: "100%", maxWidth: 380 },
-  title: { fontSize: 24, fontWeight: 700, color: "#111827", marginBottom: 6 },
-  desc: { fontSize: 13, color: "#6B7280", marginBottom: 24 },
-  label: { display: "block", fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 5 },
-  input: { width: "100%", height: 44, padding: "0 14px", border: "1.5px solid #D1D5DB", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" },
-  btn: { width: "100%", height: 46, background: "#1565C0", color: "#fff", border: "none", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
-  inputLocked: { background: "#F9FAFB", color: "#6B7280" },
-  btnGhost: { flexShrink: 0, height: 44, padding: "0 14px", background: "#fff", color: "#1565C0", border: "1.5px solid #1565C0", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
-  hint: { fontSize: 11, color: "#6B7280", lineHeight: 1.6, marginTop: 6 },
-  error: { fontSize: 12, color: "#DC2626", marginTop: 10, lineHeight: 1.5 },
-  link: { color: "#1976D2", cursor: "pointer", textDecoration: "underline" },
+  page: { minHeight: "100vh", background: "#11315B", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, position: "relative", overflow: "hidden" },
+  pageMobile: { padding: 16 },
+  // 흩어진 도형 대신 넓게 번지는 빛으로 깊이만 준다 (로그인 화면과 같은 결)
+  glow: { position: "absolute", top: "-30%", left: "50%", transform: "translateX(-50%)", width: 900, height: 900,
+          background: "radial-gradient(circle, rgba(59,130,246,.42) 0%, rgba(59,130,246,0) 66%)", pointerEvents: "none" },
+
+  orgLockup: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2, marginTop: 4 },
+  orgKo:     { fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,.72)", letterSpacing: "-.01em" },
+  orgEn:     { fontSize: 9.5, fontWeight: 600, color: "rgba(255,255,255,.44)", letterSpacing: ".14em", textTransform: "uppercase" },
+
+  stack: { position: "relative", zIndex: 10, width: "100%", maxWidth: 400,
+           display: "flex", flexDirection: "column", alignItems: "center", gap: 22 },
+  brandRow:  { display: "flex", alignItems: "center", gap: 10 },
+  brandMark: { display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34,
+               borderRadius: 10, background: "rgba(255,255,255,.14)", color: "#fff" },
+  brandName: { fontSize: 15, fontWeight: 700, color: "#fff", letterSpacing: "-.02em" },
+
+  card: { width: "100%", background: "#fff", borderRadius: 18, padding: "38px 36px",
+          boxShadow: "0 28px 70px -24px rgba(2,8,23,.45)" },
+  cardMobile: { padding: "32px 22px", borderRadius: 16 },
+  title: { fontSize: 23, fontWeight: 700, color: "#0F172A", letterSpacing: "-.03em", marginBottom: 6 },
+  desc: { fontSize: 13, color: "#94A3B8", marginBottom: 26, lineHeight: 1.6 },
+  label: { display: "block", fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 6 },
+  input: { width: "100%", height: 46, padding: "0 14px", background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 12, fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#0F172A" },
+  btn: { width: "100%", height: 48, background: "#0D3B7A", color: "#fff", border: "none", borderRadius: 12, fontSize: 14.5, fontWeight: 600, letterSpacing: "-.01em", cursor: "pointer", fontFamily: "inherit", boxShadow: "0 8px 20px -8px rgba(13,59,122,.6)" },
+  inputLocked: { background: "#F1F5F9", color: "#64748B" },
+  btnGhost: { flexShrink: 0, height: 46, padding: "0 16px", background: "#fff", color: "#0D3B7A", border: "1.5px solid #CBD5E1", borderRadius: 12, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
+  hint: { fontSize: 11.5, color: "#94A3B8", lineHeight: 1.65, marginTop: 7 },
+  error: { fontSize: 12.5, color: "#BE123C", background: "#FFF1F2", border: "1px solid #FECDD3", borderRadius: 10, padding: "9px 12px", marginTop: 12, lineHeight: 1.5 },
+  link: { color: "#0D3B7A", fontWeight: 600, cursor: "pointer", textDecoration: "none" },
 };
