@@ -190,6 +190,13 @@ export default function ResetPage() {
             <Link to="/login" style={S.link}>로그인으로 돌아가기</Link>
           </div>
         </div>
+
+        {/* 운영 주체 표기. 공식 로고 파일을 받으면 이 자리에 이미지를 넣는다.
+            (public/ 에 두고 import.meta.env.BASE_URL 로 경로를 잡으면 배포에서도 맞는다) */}
+        <div style={S.orgLockup}>
+          <span style={S.orgKo}>서울교통공사</span>
+          <span style={S.orgEn}>Seoul Metro</span>
+        </div>
       </div>
     </div>
   );
@@ -201,6 +208,10 @@ const S = {
   // 흩어진 도형 대신 넓게 번지는 빛으로 깊이만 준다 (로그인 화면과 같은 결)
   glow: { position: "absolute", top: "-30%", left: "50%", transform: "translateX(-50%)", width: 900, height: 900,
           background: "radial-gradient(circle, rgba(37,99,235,.32) 0%, rgba(37,99,235,0) 66%)", pointerEvents: "none" },
+
+  orgLockup: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2, marginTop: 4 },
+  orgKo:     { fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,.58)", letterSpacing: "-.01em" },
+  orgEn:     { fontSize: 9.5, fontWeight: 600, color: "rgba(255,255,255,.3)", letterSpacing: ".14em", textTransform: "uppercase" },
 
   stack: { position: "relative", zIndex: 10, width: "100%", maxWidth: 400,
            display: "flex", flexDirection: "column", alignItems: "center", gap: 22 },

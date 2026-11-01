@@ -103,6 +103,13 @@ export default function LoginPage() {
             <Link to="/signup" style={S.link}>회원가입</Link>
           </div>
         </div>
+
+        {/* 운영 주체 표기. 공식 로고 파일을 받으면 이 자리에 이미지를 넣는다.
+            (public/ 에 두고 import.meta.env.BASE_URL 로 경로를 잡으면 배포에서도 맞는다) */}
+        <div style={S.orgLockup}>
+          <span style={S.orgKo}>서울교통공사</span>
+          <span style={S.orgEn}>Seoul Metro</span>
+        </div>
       </div>
     </div>
   );
@@ -132,6 +139,10 @@ const S = {
   },
 
   // 브랜드와 카드를 한 덩어리로 세운다
+  orgLockup: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2, marginTop: 4 },
+  orgKo:     { fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,.58)", letterSpacing: "-.01em" },
+  orgEn:     { fontSize: 9.5, fontWeight: 600, color: "rgba(255,255,255,.3)", letterSpacing: ".14em", textTransform: "uppercase" },
+
   stack: {
     position: "relative", zIndex: 10,
     width: "100%", maxWidth: 400,
