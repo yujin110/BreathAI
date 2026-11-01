@@ -7,6 +7,7 @@ import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
 import Icon from "../components/Icon.jsx";
+import FitSelect from "../components/FitSelect.jsx";
 
 const PAGE_SIZE = 10;
 // 백엔드 spring.servlet.multipart.max-file-size=50MB 와 같게 맞춘다
@@ -372,16 +373,15 @@ export default function FaqPage() {
             {/* 어느 쪽이든 명세서 GET /api/v1/faq 의 category(표시명 문자열)를 그대로 보낸다.
                 선택지를 받아오면 드롭다운, 못 받아오면 입력창이다. */}
             {categories ? (
-              <select style={{ ...S.searchInput, width: 180, cursor: "pointer" }}
+              <FitSelect style={{ ...S.searchInput, cursor: "pointer" }}
                 value={categoryInput}
+                options={[{ value: "", label: "전체 카테고리" },
+                          ...categories.map((c) => ({ value: c.name, label: c.name }))]}
                 onChange={(e) => {
                   const next = e.target.value;
                   setCategoryInput(next);
                   runSearch(0, { keyword: keywordInput.trim(), category: next });
-                }}>
-                <option value="">전체 카테고리</option>
-                {categories.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-              </select>
+                }} />
             ) : (
               <input style={{ ...S.searchInput, width: 160 }} placeholder="카테고리명"
                 value={categoryInput}
@@ -412,15 +412,13 @@ export default function FaqPage() {
           {/* 키워드만 내려받기 · FAQ 파일 일괄 업로드 */}
           <div style={S.toolRow}>
             <span style={S.toolLabel}>키워드 다운로드</span>
-            <select style={{ ...S.searchInput, width: 220, cursor: "pointer" }}
-              value={sinceVersionId} onChange={(e) => setSinceVersionId(e.target.value)}>
-              <option value="">현재 전체</option>
-              {versions.map((v) => (
-                <option key={v.versionId} value={v.versionId}>
-                  {v.versionName || `버전 #${v.versionId}`} 이후 새 키워드
-                </option>
-              ))}
-            </select>
+            <FitSelect style={{ ...S.searchInput, cursor: "pointer" }}
+              value={sinceVersionId} onChange={(e) => setSinceVersionId(e.target.value)}
+              options={[{ value: "", label: "현재 전체" },
+                        ...versions.map((v) => ({
+                          value: v.versionId,
+                          label: `${v.versionName || `버전 #${v.versionId}`} 이후`,
+                        }))]} />
             <button style={S.btnSm} disabled={downloadingKeywords} onClick={handleKeywordDownload}>
               {downloadingKeywords ? "내려받는 중..." : "CSV 받기"}
             </button>

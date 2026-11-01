@@ -3,6 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, Cart
 import { dashApi } from "../api/dashboard.js";
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
+import FitSelect from "../components/FitSelect.jsx";
 
 export default function DashboardPage() {
   const isMobile = useIsMobile();
@@ -119,15 +120,13 @@ export default function DashboardPage() {
       </div>
 
       <div style={S.scopeRow}>
-        <select style={{ ...S.pickerSelect, ...(isMobile ? S.pickerSelectMobile : {}) }} value={picked}
-          onChange={(e) => changePicked(e.target.value)}>
-          <option value="">최신 분석</option>
-          {options.map((o) => (
-            <option key={o.analysisId} value={o.analysisId}>
-              #{o.analysisId} · {o.fileName}{o.period ? ` · ${o.period}` : ""}
-            </option>
-          ))}
-        </select>
+        <FitSelect style={{ ...S.pickerSelect, ...(isMobile ? S.pickerSelectMobile : {}) }}
+          value={picked} onChange={(e) => changePicked(e.target.value)}
+          options={[{ value: "", label: "최신 분석" },
+                    ...options.map((o) => ({
+                      value: o.analysisId,
+                      label: `#${o.analysisId} · ${o.fileName}${o.period ? ` · ${o.period}` : ""}`,
+                    }))]} />
         <div style={S.segment}>
           {[{ key: "mine", label: "내 분석" }, { key: "all", label: "전체 분석" }].map((t) => (
             <button key={t.key}

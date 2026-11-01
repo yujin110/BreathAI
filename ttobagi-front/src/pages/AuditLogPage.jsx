@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { auditApi } from "../api/audit.js";
 import { formatKst } from "../utils/datetime.js";
+import FitSelect from "../components/FitSelect.jsx";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
@@ -107,9 +108,8 @@ export default function AuditLogPage() {
         <input style={{ ...S.input, width: 170, maxWidth: "100%" }} placeholder="사용자 (일부)"
           value={filter.email} onChange={setField("email")}
           onKeyDown={(e) => { if (e.key === "Enter") load(0, filter); }} />
-        <select style={S.input} value={filter.category} onChange={applyNow("category")}>
-          {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-        </select>
+        <FitSelect style={{ ...S.input, cursor: "pointer" }} value={filter.category}
+          onChange={applyNow("category")} options={CATEGORIES} />
         <label style={S.check}>
           <input type="checkbox" checked={filter.result === "fail"}
             onChange={(e) => {

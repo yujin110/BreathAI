@@ -7,6 +7,7 @@ import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
 import Icon from "../components/Icon.jsx";
+import FitSelect from "../components/FitSelect.jsx";
 
 const PAGE_SIZE = 10;
 
@@ -214,19 +215,15 @@ export default function FaqVersionsPage() {
       {/* 버전 비교 — 비교 대상을 비우면 현재 운영 FAQ와 비교한다 */}
       <div style={{ ...S.compareBar, ...(isMobile ? S.compareBarMobile : {}) }}>
         <span style={{ fontSize: 12, fontWeight: 600, color: "#374151", ...(isMobile ? { width: "100%" } : {}) }}>버전 비교</span>
-        <select style={{ ...S.compareSelect, ...(isMobile ? S.compareSelectMobile : {}) }} value={baseId} onChange={(e) => setBaseId(e.target.value)}>
-          <option value="">기준 버전</option>
-          {versions.map((v) => (
-            <option key={v.versionId} value={v.versionId}>{v.versionName || `#${v.versionId}`}</option>
-          ))}
-        </select>
+        <FitSelect style={{ ...S.compareSelect, ...(isMobile ? S.compareSelectMobile : {}) }}
+          value={baseId} onChange={(e) => setBaseId(e.target.value)}
+          options={[{ value: "", label: "기준 버전" },
+                    ...versions.map((v) => ({ value: v.versionId, label: v.versionName || `#${v.versionId}` }))]} />
         <span style={{ color: "#9CA3AF" }}>→</span>
-        <select style={{ ...S.compareSelect, ...(isMobile ? S.compareSelectMobile : {}) }} value={targetId} onChange={(e) => setTargetId(e.target.value)}>
-          <option value="">현재 운영 FAQ</option>
-          {versions.map((v) => (
-            <option key={v.versionId} value={v.versionId}>{v.versionName || `#${v.versionId}`}</option>
-          ))}
-        </select>
+        <FitSelect style={{ ...S.compareSelect, ...(isMobile ? S.compareSelectMobile : {}) }}
+          value={targetId} onChange={(e) => setTargetId(e.target.value)}
+          options={[{ value: "", label: "현재 운영 FAQ" },
+                    ...versions.map((v) => ({ value: v.versionId, label: v.versionName || `#${v.versionId}` }))]} />
         <button style={S.btnSm} onClick={runCompare}>비교</button>
       </div>
 
