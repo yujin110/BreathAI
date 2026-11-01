@@ -18,8 +18,10 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.io.StringWriter;
 import java.io.StringReader;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
@@ -96,11 +98,16 @@ public class AnalysisUploadReader {
         }
     }
 
-    private static String decodeCsv(byte[] bytes) throws CharacterCodingException {
+    // UTF-8로 먼저 읽고 안 되면 CP949(엑셀의 "CSV (쉼표로 분리)")로 읽는다
+    private static String decodeCsv(byte[] bytes) {
         try {
             return decode(bytes, StandardCharsets.UTF_8);
         } catch (CharacterCodingException e) {
-            return decode(bytes, Charset.forName("MS949"));
+            try {
+                return decode(bytes, Charset.forName("MS949"));
+            } catch (CharacterCodingException e2) {
+                throw inputError(null, null, "CSV 파일의 문자 인코딩을 읽을 수 없습니다. UTF-8 또는 CP949(ANSI)로 저장해 주세요.");
+            }
         }
     }
 
@@ -115,6 +122,8 @@ public class AnalysisUploadReader {
         List<CSVRecord> records;
         try (CSVParser parser = CSVFormat.DEFAULT.parse(new StringReader(text))) {
             records = parser.getRecords();
+        } catch (IOException | UncheckedIOException e) {
+            return file; // 따옴표 오류 등은 검사기가 설명한다
         }
         if (records.isEmpty()) return file; // 기존 검증기가 파일 오류를 설명한다.
         List<String> header = new ArrayList<>();

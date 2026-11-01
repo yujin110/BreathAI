@@ -85,6 +85,31 @@ class AnalysisUploadCompatibilityTest {
     }
 
     @Test
+    void canonicalCp949CsvIsReadAsUtf8() throws Exception {
+        String csv = "번호,질문,날짜,logType\n1,\"막차, 첫차 시간\",2026-03-01,CORRECT\n";
+        var file = reader.read(new MockMultipartFile("file", "analysis.csv", null, csv.getBytes(Charset.forName("MS949"))));
+        assertThat(new String(file.content(), StandardCharsets.UTF_8)).isEqualTo(csv);
+        assertThatCode(() -> validator.validate(file)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void unclosedQuoteStillReportsTheCsvFormatError() {
+        for (String csv : new String[]{"번호,질문,날짜\n1,\"막차,2026-03-01\n",
+                "seq_num,kind,msg_m,sysdate,ai_percent\n1,1,\"막차,2026-03-01,9999\n"}) {
+            var file = reader.read(new MockMultipartFile("file", "quote.csv", null, csv.getBytes(StandardCharsets.UTF_8)));
+            var error = assertThrows(UploadValidationException.class, () -> validator.validate(file));
+            assertThat(error.getReport().getErrors().get(0).getReason()).startsWith("CSV 형식을 읽을 수 없습니다.");
+        }
+    }
+
+    @Test
+    void unreadableEncodingIsExplained() {
+        var error = assertThrows(UploadValidationException.class, () -> reader.read(new MockMultipartFile(
+                "file", "bin.csv", null, new byte[]{'a', '\n', (byte) 0x81, ' ', '\n'})));
+        assertThat(error.getReport().getErrors().get(0).getReason()).contains("UTF-8 또는 CP949");
+    }
+
+    @Test
     void invalidKindAndDailyAggregatesAreExplainedBeforeAnalysisStarts() {
         var invalidKind = assertThrows(UploadValidationException.class, () -> reader.read(
                 new MockMultipartFile("file", "raw.csv", null, RAW.replace("2,1,", "2,99,").getBytes(StandardCharsets.UTF_8))));
