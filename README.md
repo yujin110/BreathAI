@@ -1,5 +1,11 @@
 # BreathAI
 
+Built with Llama. AI 서버의 현재 기본 LLM은 `meta-llama/Llama-3.1-8B-Instruct`입니다.
+설정·배포·복구 및 검증 범위는 [Llama 전환 기록](docs/llama-migration-20261031.md)을 참고하세요.
+승인 후 공식 8B 실행 결과와 남은 사실성 문제는 [실행·호환성 검증](docs/llama31-8b-execution-20261031.md)에 기록했습니다.
+최신 답변 생성 방식과 참고용 20문항 결과는 [근거 외 생성 원인·수정 기록](docs/grounding-fix-reference-twenty-20261031.md)을 참고하세요.
+해당 20문항에서 남았던 5건은 [추가 수정·재검증 기록](docs/remaining-five-fix-20261031.md)에 정리했습니다.
+
 > AI 기반 미답변 분석을 통한 룰기반 챗봇 학습 데이터 자동화 현행화 시스템
 
 챗봇 운영 과정에서 발생하는 대화 로그를 수집·분석하여 학습 데이터 구축과 FAQ 갱신을 자동화하는 시스템입니다.

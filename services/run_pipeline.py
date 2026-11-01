@@ -192,7 +192,9 @@ def run_answer_pipeline() -> None:
     clu_df = pd.read_csv(CLUSTERS_CSV, encoding='utf-8-sig')
     _log(f'대상 {len(candidates)}건')
 
-    tok, mdl = AE.load_llm()
+    from services.llm_runtime import load_pipeline_models
+    tok, mdl, judge_tok, judge_mdl = load_pipeline_models(
+        lambda: AR.load_model(), AE.load_llm)
     ce = AE.load_ce()
 
     t0 = time.time()
@@ -226,7 +228,7 @@ def run_answer_pipeline() -> None:
         history.append('regen')
 
         # --- Step 6: 평가 ---
-        c['evaluation'] = _evaluate(c, ce, tok, mdl)
+        c['evaluation'] = _evaluate(c, ce, judge_tok, judge_mdl)
 
         # --- Step 7: needsReview면 refine ---
         if c['evaluation']['needs_review_v2']:
@@ -238,7 +240,7 @@ def run_answer_pipeline() -> None:
                 c, retrieval, templates, tok, mdl)
             c['standardQuestion'] = new_q
             c['answerDraft'] = new_body
-            c['evaluation'] = _evaluate(c, ce, tok, mdl)
+            c['evaluation'] = _evaluate(c, ce, judge_tok, judge_mdl)
             c['refinement'] = {
                 'stage': 'refine',
                 'question_refined': q_refined,
@@ -254,7 +256,7 @@ def run_answer_pipeline() -> None:
             # 새 답변 평가 후 더 좋을 때만 채택
             prev_eval = c['evaluation']
             trial = {**c, 'answerDraft': trial_body, 'oos_case': case}
-            trial_eval = _evaluate(trial, ce, tok, mdl)
+            trial_eval = _evaluate(trial, ce, judge_tok, judge_mdl)
             prev_mean = prev_eval.get('llm_mean') or 0
             trial_mean = trial_eval.get('llm_mean') or 0
             if trial_mean >= prev_mean:

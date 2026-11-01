@@ -23,10 +23,11 @@ import re
 import time
 import unicodedata
 from pathlib import Path
-from services.runtime_config import runtime_path, llm_memory_options
+from services.runtime_config import runtime_path
+from services.llm_runtime import model_id, load_chat_model, generate_chat
+from services import grounded_answer as GA
 
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
 from services.retrieval_contract import index_retrieval, bind_retrieval, select_evidence, evidence_label
 
 
@@ -49,12 +50,11 @@ RUN_LOG = LOG_DIR / 'answer_regen.log'              # 한 줄 요약 (stdout 미
 DETAIL_LOG = LOG_DIR / 'answer_regen_detail.log'    # 프롬프트 + LLM output + 최종답변
 PROMPT_DUMP = LOG_DIR / 'answer_regen_prompts.txt'  # DRY_RUN 전용
 
-MODEL_NAME = 'Qwen/Qwen2.5-7B-Instruct'
+MODEL_NAME = model_id()
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-DTYPE = torch.bfloat16
 
-MAX_NEW_TOKENS = 600
-TEMPERATURE = 0.3
+MAX_NEW_TOKENS = 160
+TEMPERATURE = 0.0
 TOP_P = 0.9
 
 # RAG 품질 게이트: 이보다 낮으면 KB 무근거로 간주
@@ -117,13 +117,14 @@ def build_prompt(cluster: dict, tag_cfg: dict, shared: dict,
             tag_cfg['_forbidden_mentions'] = case_cfg.get('forbidden_mentions', [])
             # default_contacts를 케이스 contacts로 교체
             tag_cfg['default_contacts'] = case_cfg.get('contacts', tag_cfg.get('default_contacts', []))
+            tag_cfg['approved_facts'] = case_cfg.get('approved_facts', tag_cfg.get('approved_facts', []))
 
     formality_desc = templates_meta['formality_levels'][tag_cfg['formality']]
-    citations = shared['citation_phrases'].get(tag_cfg['citation_style'], [])
+    citations = shared['citation_phrases'].get(tag_cfg['citation_style'], []) if kb_chunks else []
     contacts = [resolve_contact(shared, k) for k in tag_cfg['default_contacts']]
     question = cluster.get('standardQuestion') or '(표준질문 없음 — 클러스터 샘플 참고)'
 
-    kb_block = '(검색된 KB 근거 없음 — 답변에서 "고객센터로 문의" 식으로 우회)' \
+    kb_block = '(사용할 수 있는 검색 근거 없음. 근거를 인용하거나 연락처·대응을 추측하지 말 것.)' \
         if not kb_chunks \
         else '\n\n'.join(
             f'[근거 {i+1}] ({evidence_label(c)}, score={c["rerank_score"]:.3f})\n{c["text"]}'
@@ -179,7 +180,7 @@ def build_prompt(cluster: dict, tag_cfg: dict, shared: dict,
             f'\n\n[원본 사용자 샘플 (대표)]\n{samples_block}'
         )
 
-    return f"""너는 서울교통공사 챗봇 '또타24'다. 아래 질문에 대해 **인사 → 안내 → 마무리**가 매끄럽게 이어지는 답변 한 통을 자연스럽게 작성하라. (이음새가 어색하지 않게 한 덩어리로)
+    prompt = f"""너는 서울교통공사 챗봇 '또타24'다. 아래 질문에 대해 **인사 → 안내 → 마무리**가 매끄럽게 이어지는 답변 한 통을 자연스럽게 작성하라. (이음새가 어색하지 않게 한 덩어리로)
 
 [페르소나]
 {templates_meta['persona']}
@@ -218,12 +219,13 @@ def build_prompt(cluster: dict, tag_cfg: dict, shared: dict,
 - 도입부 예시의 톤을 참고하되, 똑같이 복사하지 말고 질문에 맞춰 자연스럽게 변주하라.
 - KB 근거에 없는 사실은 만들어내지 말 것. 추측·과장 금지.
 - 격식 레벨에 맞는 종결 어미를 일관되게 사용하라.
-- 답변 분량: 5~9문장. 인사+안내+마무리가 한 덩어리로 자연스러워야 함.
+- 답변 길이를 억지로 늘리지 말 것. 짧은 근거는 짧게 안내하고 확인되지 않는 내용은 생략.
 - 마크다운/JSON/코드블록/리스트 기호 사용 금지. 일반 산문으로 작성.
 - 답변 텍스트 외 메타·설명·헤더 절대 출력 금지.
 
 [답변]
 """
+    return GA.append_contract(prompt, GA.make_contract(cluster, tag_cfg, shared, kb_chunks))
 
 
 # ---------------------------------------------------------------------------
@@ -231,38 +233,18 @@ def build_prompt(cluster: dict, tag_cfg: dict, shared: dict,
 # ---------------------------------------------------------------------------
 def load_model() -> tuple:
     print(f'모델 로드: {MODEL_NAME}')
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_NAME, torch_dtype=DTYPE, device_map='auto', trust_remote_code=True,
-        **llm_memory_options(),
-    )
-    return tokenizer, model
+    return load_chat_model(MODEL_NAME)
 
 
-@torch.no_grad()
 def generate(prompt: str, tokenizer, model) -> str:
-    messages = [
-        {'role': 'system', 'content': '당신은 또타24 챗봇 답변 본문 작성자입니다.'},
-        {'role': 'user', 'content': prompt},
-    ]
-    inputs = tokenizer.apply_chat_template(
-        messages, add_generation_prompt=True, return_tensors='pt'
-    ).to(DEVICE)
-    out = model.generate(
-        inputs,
-        max_new_tokens=MAX_NEW_TOKENS,
-        temperature=TEMPERATURE,
-        top_p=TOP_P,
-        do_sample=True,
-        eos_token_id=tokenizer.eos_token_id,
-        pad_token_id=tokenizer.eos_token_id,
-    )
-    text = tokenizer.decode(out[0][inputs.shape[1]:], skip_special_tokens=True)
-    return clean_body(text)
+    contract = GA.read_contract(prompt)
+    return GA.answer(contract, lambda messages: generate_chat(
+        messages, tokenizer, model, max_new_tokens=MAX_NEW_TOKENS,
+        temperature=TEMPERATURE, top_p=TOP_P))
 
 
 def build_retry_prompt(orig_prompt: str, prev_answer: str, missing: list[str]) -> str:
-    """검증 실패 시: 이전 답변을 보존하면서 누락만 보완하도록 요청."""
+    """형식 보완 요청. 사실은 서명된 근거 계약에서만 사용한다."""
     return orig_prompt.rstrip() + f"""
 
 [직전 시도의 답변 — 참고]
@@ -270,7 +252,7 @@ def build_retry_prompt(orig_prompt: str, prev_answer: str, missing: list[str]) -
 
 [수정 요청]
 위 답변에서 다음 항목이 누락되었다: {', '.join(missing)}
-누락된 항목을 반드시 보완하되, 직전 답변의 내용·분량(5~9문장)·자연스러운 흐름은 그대로 유지하라.
+근거와 승인된 고정 정보 안에서만 보완하라. 직전 답변의 사실이나 분량을 유지할 의무는 없다.
 처음부터 다시 한 통의 답변으로 작성하라. 마크다운/메타 텍스트 금지.
 
 [수정된 답변]
@@ -289,8 +271,8 @@ def clean_body(text: str) -> str:
 # 답변 조립
 # ---------------------------------------------------------------------------
 def assemble_answer_fallback(body: str, tag_cfg: dict) -> str:
-    """검증 실패 시 fallback: 기존 조립식 구조로 안전하게 반환."""
-    return f"{tag_cfg['prefix']}\n\n{body}\n\n{tag_cfg['suffix']}"
+    """검증 실패한 자유 본문을 재사용하지 않고 확인 불가로 반환."""
+    return f"{tag_cfg['prefix']}\n\n{GA.INSUFFICIENT}\n\n{tag_cfg['suffix']}"
 
 
 # 검증: 필수 표현이 포함됐는지
@@ -304,8 +286,8 @@ def validate_answer(text: str, tag: str) -> tuple[bool, list[str]]:
         missing.append('사과 표현 누락')
     if tag == 'EMERGENCY' and '안녕하십니까' not in text:
         missing.append('격식체 인사 누락')
-    if len(text.strip()) < 80:
-        missing.append('답변이 너무 짧음')
+    if not text.strip():
+        missing.append('답변이 비어 있음')
     return (len(missing) == 0, missing)
 
 
