@@ -11,7 +11,8 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 
 from services.job_store import Conflict, JobStore
-from services.dashboard_metrics import read_csv, validate_source_rows
+from services.dashboard_metrics import validate_source_rows
+from services.analysis_input import read_analysis_csv, write_analysis_csv
 
 
 def create_app(*, root=None, token=None, max_upload_bytes=50 * 1024 * 1024):
@@ -76,14 +77,11 @@ def create_app(*, root=None, token=None, max_upload_bytes=50 * 1024 * 1024):
             if not size:
                 raise HTTPException(422, "Empty input file")
             try:
-                with path.open(encoding="utf-8-sig", newline="") as incoming:
-                    columns = next(csv.reader(incoming))
-                    columns = {column.replace("\n", "") for column in columns}
-                    if not {"번호", "질문", "날짜"} <= columns:
-                        raise ValueError()
-                validate_source_rows(read_csv(path))
+                columns, rows = read_analysis_csv(path)
+                validate_source_rows(rows)
+                write_analysis_csv(path, columns, rows)
             except (UnicodeDecodeError, StopIteration, ValueError, csv.Error, KeyError, TypeError, AttributeError):
-                raise HTTPException(422, "Expected UTF-8 CSV with unique INT 번호, 질문, ISO 날짜 and optional valid logType") from None
+                raise HTTPException(422, "Expected analysis CSV (번호, 질문, 날짜) or chatting_log CSV (seq_num, kind, msg_m, sysdate) in UTF-8/CP949, with valid logType or keyword matching score. Daily aggregates are not conversation logs.") from None
             created = store.submit(analysisId, digest.hexdigest(), metadata, path)
             keep = created
             return {"analysisId": analysisId, "status": store.get(analysisId)["state"], "duplicate": not created}

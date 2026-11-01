@@ -3,7 +3,6 @@
 This is a local batch boundary, not a durable queue or an HTTP server.
 """
 import argparse
-import csv
 import json
 import os
 from pathlib import Path
@@ -12,6 +11,8 @@ import subprocess
 import sys
 from datetime import date, datetime, timezone
 from services.keyword_policy import KeywordPolicy, DEFAULT_POLICY_PATH
+from services.analysis_input import read_analysis_csv, write_analysis_csv
+from services.dashboard_metrics import validate_source_rows
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,34 +29,18 @@ def _write_status(job_dir, status, **details):
 
 
 def _copy_input(source, target, period_start=None, period_end=None):
-    if not period_start and not period_end:
-        shutil.copyfile(source, target)
-        return
     start = date.fromisoformat(period_start) if period_start else None
     end = date.fromisoformat(period_end) if period_end else None
     if start and end and start > end:
         raise ValueError("Invalid analysis period")
-    count = 0
-    with source.open(encoding="utf-8-sig", newline="") as incoming, target.open("w", encoding="utf-8-sig", newline="") as outgoing:
-        reader = csv.DictReader(incoming)
-        if not reader.fieldnames:
-            raise ValueError("Missing CSV header")
-        reader.fieldnames = [column.replace("\n", "") for column in reader.fieldnames]
-        if "날짜" not in reader.fieldnames:
-            raise ValueError("Missing date column")
-        writer = csv.DictWriter(outgoing, fieldnames=reader.fieldnames)
-        writer.writeheader()
-        for row in reader:
-            value = row["날짜"].strip()
-            try:
-                day = date.fromisoformat(value) if len(value) == 10 else datetime.fromisoformat(value).date()
-            except (ValueError, TypeError):
-                raise ValueError("CSV dates must use ISO YYYY-MM-DD or ISO datetime") from None
-            if (not start or day >= start) and (not end or day <= end):
-                writer.writerow(row)
-                count += 1
-        if not count:
-            raise ValueError("No input rows in analysis period")
+    fields, rows = read_analysis_csv(source)
+    validate_source_rows(rows)
+    selected = [row for row in rows if
+                (not start or datetime.fromisoformat(row['날짜'].strip()).date() >= start) and
+                (not end or datetime.fromisoformat(row['날짜'].strip()).date() <= end)]
+    if not selected:
+        raise ValueError("No input rows in analysis period")
+    write_analysis_csv(target, fields, selected)
 
 
 def _run_with_progress(command, *, output, on_progress, **options):
