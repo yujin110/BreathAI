@@ -13,6 +13,14 @@ import Icon from "../components/Icon.jsx";
 // Spring의 spring.servlet.multipart.max-file-size=50MB 와 동일하게 맞춘다
 const HISTORY_SIZE = 10;
 
+// 동의어 종류별 색. 색 하나가 뜻 하나를 맡아야 글자를 읽지 않고도 구분된다.
+// FAQ 관리 목록의 키워드(파랑)·유사어(보라)와 같은 규칙을 쓴다.
+const SYNONYM_KIND = {
+  SYNONYM: { label: "유사어", background: "#F5F3FF", color: "#5B21B6", border: "#DDD6FE" },
+  TYPO:    { label: "오타",   background: "#FEF3C7", color: "#92400E", border: "#FDE68A" },
+  ABBR:    { label: "약어",   background: "#ECFEFF", color: "#0E7490", border: "#A5F3FC" },
+};
+
 // 백엔드 ReviewStatus: PENDING / ACCEPTED / REJECTED / APPLIED
 const REVIEW_STATUS = {
   APPLIED:  { label: "반영됨", text: "#047857", dot: "#10B981", bg: "#ECFDF5", border: "#A7F3D0" },
@@ -1128,20 +1136,19 @@ export default function AnalyzePage() {
                 </div>
                 <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.6, marginBottom: 10 }}>{toPlainText(c.answerDraft)}</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                  {(c.synonyms || []).map((s, i) => (
-                    <span key={i} style={{
-                      fontSize: 11, padding: "2px 8px",
-                      background: s.type === "TYPO" ? "#FEF3C7" : "#EFF8FF",
-                      color: s.type === "TYPO" ? "#92400E" : "#1565C0",
-                      borderRadius: 12,
-                      border: `1px solid ${s.type === "TYPO" ? "#FDE68A" : "#BFDBFE"}`,
-                    }}>
-                      {s.text}
-                      <span style={{ fontSize: 9, marginLeft: 3, opacity: 0.6 }}>
-                        {s.type === "TYPO" ? "오타" : s.type === "ABBR" ? "약어" : "유사어"}
+                  {(c.synonyms || []).map((s, i) => {
+                    const kind = SYNONYM_KIND[s.type] || SYNONYM_KIND.SYNONYM;
+                    return (
+                      <span key={i} style={{
+                        fontSize: 11, padding: "2px 8px", borderRadius: 12,
+                        background: kind.background, color: kind.color,
+                        border: `1px solid ${kind.border}`,
+                      }}>
+                        {s.text}
+                        <span style={{ fontSize: 9, marginLeft: 3, opacity: 0.6 }}>{kind.label}</span>
                       </span>
-                    </span>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {/* 이 후보로 묶인 실제 질문들. 목록이 길어도 카드가 늘어나지 않게 안에서 스크롤한다. */}
