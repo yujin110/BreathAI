@@ -6,6 +6,7 @@ import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
+import Icon from "../components/Icon.jsx";
 
 const PAGE_SIZE = 10;
 // 백엔드 spring.servlet.multipart.max-file-size=50MB 와 같게 맞춘다
@@ -446,7 +447,7 @@ export default function FaqPage() {
 
           {faqs.length === 0 ? (
             <div style={S.empty}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 44, height: 44, borderRadius: "50%", background: "#F3F4F6", color: "#9CA3AF", marginBottom: 12 }}><Icon name="analyze" size={21} /></span>
               <div>{query.keyword || query.category ? "검색 결과가 없습니다." : "등록된 FAQ가 없습니다."}</div>
             </div>
           ) : (
@@ -525,7 +526,7 @@ export default function FaqPage() {
           </div>
 
           {histories.length === 0 ? (
-            <div style={S.empty}><div style={{ fontSize: 32, marginBottom: 8 }}>🗒️</div><div>변경 이력이 없습니다.</div></div>
+            <div style={S.empty}><span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 44, height: 44, borderRadius: "50%", background: "#F3F4F6", color: "#9CA3AF", marginBottom: 12 }}><Icon name="audit" size={21} /></span><div>변경 이력이 없습니다.</div></div>
           ) : (
             histories.map((h) => (
               <div key={h.historyId} style={S.faqCard}>

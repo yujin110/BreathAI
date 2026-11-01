@@ -11,6 +11,7 @@ function withFields(err, fallback) {
 }
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
+import Icon from "../components/Icon.jsx";
 
 // 백엔드 SignupRequest.password의 @Pattern과 같은 식이다. 한쪽만 바꾸면 통과·거부가 어긋난다.
 const PW_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9])[\x21-\x7E]{6,20}$/;
@@ -96,7 +97,7 @@ export default function SignupPage() {
     <div style={{ ...S.page, ...(isMobile ? S.pageMobile : {}) }}>
       {/* 설명 패널은 폰에서 접는다. 폼이 화면을 다 쓰게 한다 */}
       {!isMobile && <div style={S.left}>
-        <span style={{ fontSize: 52 }}>🚇</span>
+        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 52, height: 52, borderRadius: 16, background: "rgba(255,255,255,.14)", color: "#fff" }}><Icon name="train" size={28} strokeWidth={1.6} /></span>
         <h1 style={S.brand}>또타24<br />현행화 시스템</h1>
         <p style={S.tagline}>서울교통공사 운영 담당자를 위한<br />챗봇 학습데이터 관리 시스템</p>
       </div>}

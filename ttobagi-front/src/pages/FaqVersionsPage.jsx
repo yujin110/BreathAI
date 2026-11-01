@@ -6,6 +6,7 @@ import { useToast } from "../hooks/useToast.js";
 import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
+import Icon from "../components/Icon.jsx";
 
 const PAGE_SIZE = 10;
 
@@ -231,7 +232,7 @@ export default function FaqVersionsPage() {
 
       {versions.length === 0 ? (
         <div style={S.empty}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>🗂️</div>
+          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 44, height: 44, borderRadius: "50%", background: "#F3F4F6", color: "#9CA3AF", marginBottom: 12 }}><Icon name="versions" size={21} /></span>
           <div>아직 버전이 없습니다.</div>
           <div style={{ fontSize: 12, marginTop: 6 }}>CSV를 내려받거나 버전 만들기를 누르면 생성됩니다. FAQ 파일을 일괄 업로드해도 생깁니다.</div>
         </div>

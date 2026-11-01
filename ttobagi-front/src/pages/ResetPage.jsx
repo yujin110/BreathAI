@@ -11,6 +11,7 @@ function withFields(err, fallback) {
 }
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
+import Icon from "../components/Icon.jsx";
 
 // 새 비밀번호 규칙: 영문(대소문자)·숫자·특수문자를 각각 1개 이상 포함한 6~20자.
 // 특수문자는 키보드의 32개 모두 되고 공백·한글은 안 된다.
@@ -97,7 +98,7 @@ export default function ResetPage() {
     <div style={{ ...S.page, ...(isMobile ? S.pageMobile : {}) }}>
       {/* 설명 패널은 폰에서 접는다. 폼이 화면을 다 쓰게 한다 */}
       {!isMobile && <div style={S.left}>
-        <span style={{ fontSize: 52 }}>🚇</span>
+        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 52, height: 52, borderRadius: 16, background: "rgba(255,255,255,.14)", color: "#fff" }}><Icon name="train" size={28} strokeWidth={1.6} /></span>
         <h1 style={S.brand}>비밀번호 찾기</h1>
         <p style={S.tagline}>
           {step === "email"

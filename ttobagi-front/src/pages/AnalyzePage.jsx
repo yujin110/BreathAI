@@ -8,6 +8,7 @@ import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
+import Icon from "../components/Icon.jsx";
 
 // Spring의 spring.servlet.multipart.max-file-size=50MB 와 동일하게 맞춘다
 const HISTORY_SIZE = 10;
@@ -716,7 +717,7 @@ export default function AnalyzePage() {
                   onDragOver={(e) => { if (!isAdmin) return; e.preventDefault(); setDrag(true); }}
                   onDragLeave={() => setDrag(false)}
                   onDrop={(e) => { if (!isAdmin) return; e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); }}>
-                  <div style={{ fontSize: 36, marginBottom: 10 }}>📂</div>
+                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 48, height: 48, borderRadius: 14, background: "#EFF6FF", color: "#1565C0", marginBottom: 12 }}><Icon name="upload" size={22} /></span>
                   <div style={{ fontSize: 14, fontWeight: 500, color: "#374151", marginBottom: 4 }}>
                     {file ? file.name : "CSV 또는 엑셀 파일을 드래그하거나 클릭하여 선택"}
                   </div>
@@ -783,7 +784,7 @@ export default function AnalyzePage() {
                 )}
                 {uploadResult && (
                   <div style={S.successBox}>
-                    📊 파일 업로드 완료! AI 분석을 시작합니다.
+                    <Icon name="check" size={15} /> 파일 업로드 완료! AI 분석을 시작합니다.
                   </div>
                 )}
 
@@ -851,10 +852,10 @@ export default function AnalyzePage() {
                           <div style={{
                             width: 24, height: 24, borderRadius: "50%", display: "flex",
                             alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600,
-                            background: isDone ? "#D1FAE5" : isRun ? "#DBEAFE" : "#F3F4F6",
-                            color: isDone ? "#065F46" : isRun ? "#1D4ED8" : "#9CA3AF",
+                            background: isDone ? "#ECFDF5" : isRun ? "#EFF6FF" : "#F3F4F6",
+                            color: isDone ? "#047857" : isRun ? "#1D4ED8" : "#9CA3AF",
                           }}>
-                            {isDone ? "✓" : i + 1}
+                            {isDone ? <Icon name="check" size={13} strokeWidth={2.6} /> : i + 1}
                           </div>
                           <span style={{ color: isDone ? "#111827" : isRun ? "#1D4ED8" : "#9CA3AF", fontWeight: isDone || isRun ? 500 : 400 }}>
                             {s}
@@ -877,7 +878,7 @@ export default function AnalyzePage() {
                     )}
                     {done && (
                       <div style={{ ...S.successBox, marginTop: 8 }}>
-                        🎉 분석 완료! <strong>FAQ 추천</strong> 탭에서 결과를 확인하세요.
+                        <Icon name="check" size={15} /> 분석 완료! <strong>FAQ 추천</strong> 탭에서 결과를 확인하세요.
                       </div>
                     )}
                   </div>
@@ -939,7 +940,7 @@ export default function AnalyzePage() {
                           <button style={S.btnDeleteSm} disabled={deleting === r.analysisId}
                             title="내 이력에서 삭제"
                             onClick={(e) => { e.stopPropagation(); handleDeleteHistory(r); }}>
-                            {deleting === r.analysisId ? "…" : "✕"}
+                            {deleting === r.analysisId ? "…" : <Icon name="close" size={12} strokeWidth={2.2} />}
                           </button>
                         )}
                       </span>
@@ -1073,7 +1074,7 @@ export default function AnalyzePage() {
         <div>
           {candidates.length === 0 ? (
             <div style={{ ...S.card, ...S.cardBody, textAlign: "center", padding: 48, color: "#9CA3AF" }}>
-              <div style={{ fontSize: 36, marginBottom: 10 }}>🔍</div>
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 44, height: 44, borderRadius: "50%", background: "#F3F4F6", color: "#9CA3AF", marginBottom: 12 }}><Icon name="analyze" size={21} /></span>
               <div>분석을 먼저 실행해주세요.</div>
             </div>
           ) : (
@@ -1346,5 +1347,5 @@ const S = {
   btnAccept:   { padding: "6px 14px", background: "#ECFDF5", color: "#047857", border: "1px solid #A7F3D0", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
   btnReject:   { padding: "6px 14px", background: "#FFF1F2", color: "#BE123C", border: "1px solid #FECDD3", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
   runningBox:  { marginTop: 10, padding: "10px 14px", background: "#EFF8FF", border: "1px solid #BFDBFE", borderRadius: 8, fontSize: 12, color: "#1E40AF" },
-  successBox:  { marginTop: 10, padding: "10px 14px", background: "#D1FAE5", borderRadius: 8, fontSize: 13, color: "#065F46" },
+  successBox:  { marginTop: 10, padding: "10px 14px", background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 8, fontSize: 13, color: "#047857", display: "flex", alignItems: "center", gap: 8 },
 };

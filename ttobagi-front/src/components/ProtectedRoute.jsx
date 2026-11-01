@@ -3,6 +3,7 @@ import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
 import Sidebar from "./Sidebar.jsx";
+import Icon from "./Icon.jsx";
 
 export default function ProtectedRoute() {
   const { user, loading } = useAuth();
@@ -31,7 +32,7 @@ export default function ProtectedRoute() {
       }}>
         {isMobile && (
           <header style={S.topBar}>
-            <button style={S.hamburger} onClick={() => setNavOpen(true)} aria-label="메뉴 열기">☰</button>
+            <button style={S.hamburger} onClick={() => setNavOpen(true)} aria-label="메뉴 열기"><Icon name="menu" size={22} /></button>
             <span style={S.topTitle}>또타24 현행화 시스템</span>
           </header>
         )}
@@ -44,7 +45,7 @@ export default function ProtectedRoute() {
 const S = {
   topBar:    { position: "sticky", top: 0, zIndex: 90, display: "flex", alignItems: "center", gap: 12,
                height: 52, padding: "0 14px", background: "#0D3B7A", color: "#fff" },
-  hamburger: { background: "none", border: "none", color: "#fff", fontSize: 22, lineHeight: 1,
+  hamburger: { display: "flex", alignItems: "center", background: "none", border: "none", color: "#fff",
                cursor: "pointer", padding: "4px 6px", fontFamily: "inherit" },
   topTitle:  { fontSize: 14, fontWeight: 700 },
 };

@@ -4,6 +4,7 @@ import { authApi } from "../api/auth.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
+import Icon from "../components/Icon.jsx";
 
 export default function LoginPage() {
   const isMobile = useIsMobile();
@@ -66,7 +67,7 @@ export default function LoginPage() {
         <div style={S.cardRight}>
           {/* 로고 */}
           <div style={S.logoWrap}>
-            <span style={{ fontSize: 26 }}>🚇</span>
+            <Icon name="train" size={24} />
           </div>
 
           <div style={S.welcome}>반갑습니다!</div>
@@ -74,7 +75,7 @@ export default function LoginPage() {
 
           {/* 이메일 */}
           <div style={S.inputWrap}>
-            <span style={S.inputIcon}>✉️</span>
+            <span style={S.inputIcon}><Icon name="mail" size={17} /></span>
             <input style={S.input} type="email"
               placeholder="이메일 주소"
               value={email} onChange={(e) => setEmail(e.target.value)}
@@ -83,7 +84,7 @@ export default function LoginPage() {
 
           {/* 비밀번호 */}
           <div style={S.inputWrap}>
-            <span style={S.inputIcon}>🔒</span>
+            <span style={S.inputIcon}><Icon name="lock" size={17} /></span>
             <input style={S.input} type="password"
               placeholder="비밀번호"
               value={pw} onChange={(e) => setPw(e.target.value)}
@@ -205,7 +206,7 @@ const S = {
     padding: "0 14px",
     marginBottom: 12,
   },
-  inputIcon: { fontSize: 13, marginRight: 10, opacity: 0.4 },
+  inputIcon: { display: "flex", alignItems: "center", marginRight: 10, color: "#9CA3AF" },
   input: {
     flex: 1, height: 44, border: "none", outline: "none",
     fontSize: 13, fontFamily: "inherit",
