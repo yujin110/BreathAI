@@ -452,8 +452,12 @@ export default function FaqPage() {
           ) : (
             faqs.map((f) => (
               <div key={f.faqId} style={S.faqCard}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <div style={{ flex: 1 }}>
+                {/* 폰에서는 본문 옆에 버튼 3개가 붙으면 본문 폭이 거의 남지 않는다.
+                    위아래로 쌓아 본문이 폭을 다 쓰게 한다. */}
+                <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row",
+                              justifyContent: "space-between", alignItems: "flex-start",
+                              gap: isMobile ? 10 : 0 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
                       {f.category && <span style={S.categoryTag}>{f.category}</span>}
                       <span style={{ fontSize: 11, fontFamily: "monospace", color: "#C4C8CE" }}>#{f.faqId}</span>
@@ -471,7 +475,12 @@ export default function FaqPage() {
                       </div>
                     )}
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, marginLeft: 16 }}>
+                  <div style={{ display: "flex",
+                                flexDirection: isMobile ? "row" : "column",
+                                alignItems: isMobile ? "center" : "flex-end",
+                                justifyContent: isMobile ? "space-between" : undefined,
+                                gap: 8, marginLeft: isMobile ? 0 : 16,
+                                width: isMobile ? "100%" : undefined }}>
                     {f.createdAt && <span style={S.meta}>{f.createdAt} 등록</span>}
                     <div style={{ display: "flex", gap: 6 }}>
                       <button style={S.btnSm} onClick={() => openFaqHistory(f)}>이력</button>
@@ -977,8 +986,8 @@ const S = {
   matchedBox:  { marginTop: 10, padding: "10px 12px", background: "#F9FAFB", borderRadius: 8, border: "1px solid #F3F4F6" },
   infoBanner:  { background: "#EFF8FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "12px 16px", fontSize: 13, color: "#1E40AF", marginBottom: 16 },
   empty:       { background: "#fff", borderRadius: 12, padding: 48, textAlign: "center", color: "#9CA3AF", fontSize: 14 },
-  btnSm:       { padding: "6px 14px", background: "#F3F4F6", color: "#374151", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" },
-  btnSmDanger: { padding: "6px 14px", background: "#FDECEA", color: "#B91C1C", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" },
+  btnSm:       { padding: "6px 14px", background: "#F3F4F6", color: "#374151", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
+  btnSmDanger: { padding: "6px 14px", background: "#FDECEA", color: "#B91C1C", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
   btnAccept:   { padding: "6px 14px", background: "#D1FAE5", color: "#065F46", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   btnReject:   { padding: "6px 14px", background: "#FDECEA", color: "#B91C1C", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   input:       { width: "100%", height: 42, padding: "0 14px", border: "1.5px solid #D1D5DB", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" },
