@@ -44,7 +44,16 @@ public class AnalysisUploadReader {
     private static final DateTimeFormatter ISO_DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     // 정규화한 경우 CSV 각 레코드(머리글 포함)의 원본 파일 행 번호. 원문을 유지한 CSV면 null.
-    public record PipelineFile(String filename, byte[] content, List<Integer> rowNumbers) {}
+    // renamedColumns는 바꾼 칸 이름 → 파일의 원래 칸 이름 (오류 안내에 원래 이름을 쓴다)
+    public record PipelineFile(String filename, byte[] content, List<Integer> rowNumbers, Map<String, String> renamedColumns) {
+        public PipelineFile(String filename, byte[] content, List<Integer> rowNumbers) {
+            this(filename, content, rowNumbers, Map.of());
+        }
+    }
+
+    // 공사 미답변 엑셀의 답변확률은 키워드 매칭률(백분율 서식)이라 AI가 읽는 칸 이름으로 바꿔 보낸다
+    private static final String ANSWER_PROBABILITY = "답변확률";
+    private static final String MATCH_PERCENT = "keywordMatchPercent";
 
     public PipelineFile read(MultipartFile file) {
         if (file == null || file.isEmpty()) {
@@ -128,7 +137,7 @@ public class AnalysisUploadReader {
         if (records.isEmpty()) return file; // 기존 검증기가 파일 오류를 설명한다.
         List<String> header = new ArrayList<>();
         for (String name : records.get(0)) header.add(name.replace("\n", ""));
-        if (header.containsAll(Set.of("번호", "질문", "날짜"))) return file;
+        if (header.containsAll(Set.of("번호", "질문", "날짜"))) return renameAnswerProbability(file, text, records, header);
         if (!header.containsAll(Set.of("seq_num", "kind", "msg_m", "sysdate"))) {
             if (header.containsAll(Set.of("qa_date", "answer_cnt", "unanswer_cnt"))) {
                 throw inputError(null, null, "날짜별 집계 파일은 개별 질문이 없어 FAQ 분석에 사용할 수 없습니다. 대화 로그 파일을 업로드해 주세요.");
@@ -144,10 +153,7 @@ public class AnalysisUploadReader {
         Map<String, String> aliases = Map.of("seq_num", "번호", "msg_m", "질문", "sysdate", "날짜");
         List<String> normalizedHeader = header.stream().map(name -> aliases.getOrDefault(name, name)).toList();
         int kindIndex = header.lastIndexOf("kind");
-        var lineStarts = new ArrayList<Integer>();
-        lineStarts.add(0);
-        for (int i = 0; i < text.length(); i++) if (text.charAt(i) == '\n') lineStarts.add(i + 1);
-        int[] starts = lineStarts.stream().mapToInt(Integer::intValue).toArray();
+        int[] starts = lineStarts(text);
         var rowNumbers = new ArrayList<Integer>();
         var output = new StringWriter();
         try (var csv = new CSVPrinter(output, CSVFormat.DEFAULT)) {
@@ -164,6 +170,34 @@ public class AnalysisUploadReader {
             }
         }
         return new PipelineFile(file.filename(), output.toString().getBytes(StandardCharsets.UTF_8), rowNumbers);
+    }
+
+    // 매칭률 칸(keywordMatchPercent·ai_percent)이 없을 때만 답변확률을 keywordMatchPercent로 바꾼다
+    private static PipelineFile renameAnswerProbability(PipelineFile file, String text, List<CSVRecord> records,
+                                                        List<String> header) throws IOException {
+        if (!header.contains(ANSWER_PROBABILITY) || header.contains(MATCH_PERCENT) || header.contains("ai_percent")) {
+            return file;
+        }
+        int[] starts = lineStarts(text);
+        var rowNumbers = new ArrayList<Integer>();
+        var output = new StringWriter();
+        try (var csv = new CSVPrinter(output, CSVFormat.DEFAULT)) {
+            csv.printRecord(header.stream().map(name -> name.equals(ANSWER_PROBABILITY) ? MATCH_PERCENT : name).toList());
+            rowNumbers.add(originalRow(file, text, starts, records.get(0), 0));
+            for (int i = 1; i < records.size(); i++) {
+                csv.printRecord(records.get(i));
+                rowNumbers.add(originalRow(file, text, starts, records.get(i), i));
+            }
+        }
+        return new PipelineFile(file.filename(), output.toString().getBytes(StandardCharsets.UTF_8), rowNumbers,
+                Map.of(MATCH_PERCENT, ANSWER_PROBABILITY));
+    }
+
+    private static int[] lineStarts(String text) {
+        var lineStarts = new ArrayList<Integer>();
+        lineStarts.add(0);
+        for (int i = 0; i < text.length(); i++) if (text.charAt(i) == '\n') lineStarts.add(i + 1);
+        return lineStarts.stream().mapToInt(Integer::intValue).toArray();
     }
 
     private static int originalRow(PipelineFile file, String text, int[] starts, CSVRecord record, int index) {
