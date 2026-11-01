@@ -1074,8 +1074,9 @@ export default function AnalyzePage() {
               <div key={c.candidateId} style={{ ...S.card, marginBottom: 12, padding: isMobile ? 14 : 18 }}>
                 {/* 폰에서는 제목 옆에 버튼 3개가 들어갈 폭이 없어 글자가 세로로 쪼개진다.
                     위아래로 쌓고 버튼은 아래 줄에 모은다. */}
+                {/* stretch를 주면 "반려됨" 뱃지가 카드 폭만큼 늘어난다. 왼쪽에 붙여 둔다. */}
                 <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row",
-                              justifyContent: "space-between", alignItems: isMobile ? "stretch" : "flex-start",
+                              justifyContent: "space-between", alignItems: "flex-start",
                               gap: isMobile ? 10 : 0, marginBottom: 8 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginBottom: 4 }}>{c.standardQuestion}</div>
