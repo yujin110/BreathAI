@@ -97,19 +97,14 @@ export default function ResetPage() {
   return (
     <div style={{ ...S.page, ...(isMobile ? S.pageMobile : {}) }}>
       <div style={S.glow} />
-      {/* 설명 패널은 폰에서 접는다. 폼이 화면을 다 쓰게 한다 */}
-      {!isMobile && <div style={S.left}>
-        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 52, height: 52, borderRadius: 16, background: "rgba(255,255,255,.14)", color: "#fff" }}><Icon name="train" size={28} strokeWidth={1.6} /></span>
-        <h1 style={S.brand}>비밀번호 찾기</h1>
-        <p style={S.tagline}>
-          {step === "email"
-            ? "등록된 이메일로 인증 코드를 발송합니다."
-            : <>메일로 받은 6자리 인증 코드와<br />새 비밀번호를 입력하세요.</>}
-        </p>
-      </div>}
+      {/* 어디에 가입·접속하는지만 밝히고 설명은 두지 않는다 */}
+      <div style={S.stack}>
+        <div style={S.brandRow}>
+          <span style={S.brandMark}><Icon name="train" size={20} /></span>
+          <span style={S.brandName}>또타24 현행화 시스템</span>
+        </div>
 
-      <div style={{ ...S.right, ...(isMobile ? S.rightMobile : {}) }}>
-        <div style={S.box}>
+        <div style={{ ...S.card, ...(isMobile ? S.cardMobile : {}) }}>
           {step === "email" ? (
             <>
               <h2 style={S.title}>비밀번호 찾기</h2>
@@ -201,17 +196,22 @@ export default function ResetPage() {
 }
 
 const S = {
-  page: { display: "flex", minHeight: "100vh", background: "#081A33", position: "relative", overflow: "hidden" },
+  page: { minHeight: "100vh", background: "#081A33", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, position: "relative", overflow: "hidden" },
+  pageMobile: { padding: 16 },
   // 흩어진 도형 대신 넓게 번지는 빛으로 깊이만 준다 (로그인 화면과 같은 결)
-  glow: { position: "absolute", top: "-26%", left: "-12%", width: 780, height: 780,
-          background: "radial-gradient(circle, rgba(37,99,235,.34) 0%, rgba(37,99,235,0) 68%)", pointerEvents: "none" },
-  left: { flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", padding: "60px 56px", color: "#fff", position: "relative", zIndex: 1 },
-  brand: { fontSize: 30, fontWeight: 700, lineHeight: 1.35, letterSpacing: "-.035em", margin: "22px 0 14px" },
-  tagline: { fontSize: 14, color: "rgba(255,255,255,.62)", lineHeight: 1.85, wordBreak: "keep-all" },
-  pageMobile: { flexDirection: "column" },
-  rightMobile: { width: "100%", minHeight: "100vh", padding: "32px 20px" },
-  right: { width: 480, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 32px", position: "relative", zIndex: 1 },
-  box: { width: "100%", maxWidth: 380 },
+  glow: { position: "absolute", top: "-30%", left: "50%", transform: "translateX(-50%)", width: 900, height: 900,
+          background: "radial-gradient(circle, rgba(37,99,235,.32) 0%, rgba(37,99,235,0) 66%)", pointerEvents: "none" },
+
+  stack: { position: "relative", zIndex: 10, width: "100%", maxWidth: 400,
+           display: "flex", flexDirection: "column", alignItems: "center", gap: 22 },
+  brandRow:  { display: "flex", alignItems: "center", gap: 10 },
+  brandMark: { display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34,
+               borderRadius: 10, background: "rgba(255,255,255,.14)", color: "#fff" },
+  brandName: { fontSize: 15, fontWeight: 700, color: "#fff", letterSpacing: "-.02em" },
+
+  card: { width: "100%", background: "#fff", borderRadius: 18, padding: "38px 36px",
+          boxShadow: "0 28px 70px -24px rgba(2,8,23,.6)" },
+  cardMobile: { padding: "32px 22px", borderRadius: 16 },
   title: { fontSize: 23, fontWeight: 700, color: "#0F172A", letterSpacing: "-.03em", marginBottom: 6 },
   desc: { fontSize: 13, color: "#94A3B8", marginBottom: 28, lineHeight: 1.6 },
   label: { display: "block", fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 6 },

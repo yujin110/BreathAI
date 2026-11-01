@@ -37,7 +37,7 @@ export default function LoginPage() {
 
   const field = (key, { type, placeholder, icon, value, onChange }) => (
     <div style={{ ...S.inputWrap, ...(focused === key ? S.inputWrapOn : {}) }}>
-      <span style={{ ...S.inputIcon, ...(focused === key ? { color: "#0D3B7A" } : {}) }}>
+      <span style={{ ...S.inputIcon, ...(focused === key ? { color: NAVY } : {}) }}>
         <Icon name={icon} size={17} />
       </span>
       <input style={S.input} type={type} placeholder={placeholder}
@@ -53,33 +53,15 @@ export default function LoginPage() {
       <div style={S.glowTop} />
       <div style={S.glowBottom} />
 
-      <div style={{ ...S.card, ...(isMobile ? S.cardMobile : {}) }}>
-        {/* 왼쪽은 소개용이라 좁은 화면에서는 접고 폼에 폭을 넘긴다 */}
-        {!isMobile && (
-          <div style={S.cardLeft}>
-            <div style={S.brandRow}>
-              <span style={S.brandMark}><Icon name="train" size={18} /></span>
-              <span style={S.brandName}>또타24</span>
-            </div>
+      <div style={S.stack}>
+        {/* 어디에 로그인하는지만 밝히고 설명은 두지 않는다 */}
+        <div style={S.brandRow}>
+          <span style={S.brandMark}><Icon name="train" size={20} /></span>
+          <span style={S.brandName}>또타24 현행화 시스템</span>
+        </div>
 
-            <div>
-              <h1 style={S.leftTitle}>챗봇 학습데이터를<br />스스로 최신으로</h1>
-              <p style={S.leftSub}>
-                미답변 대화를 AI가 분석해 FAQ 후보를 제안하고,
-                담당자가 승인한 내용만 반영합니다.
-              </p>
-            </div>
-
-            <div style={S.leftFoot}>서울교통공사 · 정보운영센터</div>
-          </div>
-        )}
-
-        <div style={{ ...S.cardRight, ...(isMobile ? S.cardRightMobile : {}) }}>
-          {isMobile && (
-            <div style={S.logoWrap}><Icon name="train" size={22} /></div>
-          )}
-
-          <h2 style={S.welcome}>반갑습니다</h2>
+        <div style={{ ...S.card, ...(isMobile ? S.cardMobile : {}) }}>
+          <h1 style={S.title}>반갑습니다</h1>
           <p style={S.desc}>운영자 계정으로 로그인하세요.</p>
 
           <div style={S.fields}>
@@ -97,7 +79,7 @@ export default function LoginPage() {
             <label style={S.rememberLabel}>
               <input type="checkbox" checked={remember}
                 onChange={(e) => setRemember(e.target.checked)}
-                style={{ marginRight: 7, accentColor: "#0D3B7A", width: 14, height: 14 }} />
+                style={{ marginRight: 7, accentColor: NAVY, width: 14, height: 14 }} />
               로그인 상태 유지
             </label>
             <Link to="/reset" style={S.link}>비밀번호 찾기</Link>
@@ -129,7 +111,6 @@ export default function LoginPage() {
 const NAVY = "#0D3B7A";
 
 const S = {
-  // 밝은 파랑 그라데이션은 눈이 피로해, 짙은 남색에 빛만 얹는다
   page: {
     minHeight: "100vh",
     background: "#081A33",
@@ -139,65 +120,41 @@ const S = {
   pageMobile: { padding: 16 },
 
   glowTop: {
-    position: "absolute", top: "-28%", left: "-10%", width: 760, height: 760,
-    background: "radial-gradient(circle, rgba(37,99,235,.38) 0%, rgba(37,99,235,0) 68%)",
+    position: "absolute", top: "-30%", left: "50%", transform: "translateX(-50%)",
+    width: 900, height: 900,
+    background: "radial-gradient(circle, rgba(37,99,235,.34) 0%, rgba(37,99,235,0) 66%)",
     pointerEvents: "none",
   },
   glowBottom: {
-    position: "absolute", bottom: "-34%", right: "-14%", width: 820, height: 820,
-    background: "radial-gradient(circle, rgba(14,165,233,.26) 0%, rgba(14,165,233,0) 68%)",
+    position: "absolute", bottom: "-38%", right: "-16%", width: 780, height: 780,
+    background: "radial-gradient(circle, rgba(14,165,233,.22) 0%, rgba(14,165,233,0) 66%)",
     pointerEvents: "none",
   },
 
-  card: {
-    display: "flex", width: 880, minHeight: 540,
-    borderRadius: 20, overflow: "hidden", position: "relative", zIndex: 10,
-    background: "#fff",
-    boxShadow: "0 32px 80px -24px rgba(2,8,23,.55)",
+  // 브랜드와 카드를 한 덩어리로 세운다
+  stack: {
+    position: "relative", zIndex: 10,
+    width: "100%", maxWidth: 400,
+    display: "flex", flexDirection: "column", alignItems: "center", gap: 22,
   },
-  cardMobile: { width: "100%", maxWidth: 420, minHeight: 0, borderRadius: 18 },
 
-  // ── 왼쪽: 소개 ──
-  cardLeft: {
-    width: 360, flexShrink: 0,
-    background: `linear-gradient(170deg, ${NAVY} 0%, #0A2550 100%)`,
-    padding: "40px 38px",
-    display: "flex", flexDirection: "column", justifyContent: "space-between",
-  },
   brandRow:  { display: "flex", alignItems: "center", gap: 10 },
   brandMark: {
     display: "flex", alignItems: "center", justifyContent: "center",
-    width: 32, height: 32, borderRadius: 9,
+    width: 34, height: 34, borderRadius: 10,
     background: "rgba(255,255,255,.14)", color: "#fff",
   },
-  brandName: { fontSize: 15, fontWeight: 700, color: "#fff", letterSpacing: "-.01em" },
+  brandName: { fontSize: 15, fontWeight: 700, color: "#fff", letterSpacing: "-.02em" },
 
-  leftTitle: {
-    fontSize: 27, fontWeight: 700, color: "#fff",
-    lineHeight: 1.42, letterSpacing: "-.035em", margin: "0 0 14px",
+  card: {
+    width: "100%", background: "#fff",
+    borderRadius: 18, padding: "38px 36px",
+    boxShadow: "0 28px 70px -24px rgba(2,8,23,.6)",
   },
-  leftSub: {
-    fontSize: 13, color: "rgba(255,255,255,.62)", lineHeight: 1.85,
-    margin: 0, wordBreak: "keep-all",
-  },
-  leftFoot: { fontSize: 11, color: "rgba(255,255,255,.38)", letterSpacing: ".01em" },
+  cardMobile: { padding: "32px 22px", borderRadius: 16 },
 
-  // ── 오른쪽: 폼 ──
-  cardRight: {
-    flex: 1, background: "#fff", padding: "48px 44px",
-    display: "flex", flexDirection: "column", justifyContent: "center",
-  },
-  cardRightMobile: { padding: "36px 24px" },
-
-  logoWrap: {
-    width: 44, height: 44, borderRadius: 12,
-    background: "#EEF2F7", color: NAVY,
-    display: "flex", alignItems: "center", justifyContent: "center",
-    marginBottom: 18,
-  },
-
-  welcome: { fontSize: 22, fontWeight: 700, color: "#0F172A", letterSpacing: "-.03em", margin: "0 0 6px" },
-  desc:    { fontSize: 13, color: "#94A3B8", margin: "0 0 28px" },
+  title: { fontSize: 22, fontWeight: 700, color: "#0F172A", letterSpacing: "-.03em", margin: "0 0 6px" },
+  desc:  { fontSize: 13, color: "#94A3B8", margin: "0 0 26px" },
 
   fields: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 },
 
@@ -212,7 +169,7 @@ const S = {
   inputWrapOn: {
     background: "#fff",
     borderColor: NAVY,
-    boxShadow: `0 0 0 3px rgba(13,59,122,.1)`,
+    boxShadow: "0 0 0 3px rgba(13,59,122,.1)",
   },
   inputIcon: { display: "flex", alignItems: "center", marginRight: 10, color: "#94A3B8", transition: "color .15s" },
   input: {
