@@ -2,6 +2,11 @@ import { NavLink } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
 
+// 서랍은 본문 위, 모달 아래에 둔다.
+// 모달 배경이 AnalyzePage는 200, FaqPage·FaqVersionsPage는 1000이라
+// 서랍을 그보다 높이면 모달이 서랍에 가린다.
+const Z_DRAWER = 150;
+
 const NAV = [
   { to: "/dashboard", icon: "📊", label: "대시보드" },
   { to: "/analyze",   icon: "🔍", label: "신규 데이터 분석" },
@@ -21,7 +26,7 @@ export default function Sidebar({ open = false, onClose }) {
   const items = NAV.filter((n) => !n.adminOnly || isAdmin);
 
   const panel = isMobile
-    ? { ...S.sidebar, transform: open ? "translateX(0)" : "translateX(-100%)", transition: "transform .2s", zIndex: 201 }
+    ? { ...S.sidebar, transform: open ? "translateX(0)" : "translateX(-100%)", transition: "transform .2s", zIndex: Z_DRAWER + 1 }
     : S.sidebar;
 
   return (
@@ -58,7 +63,7 @@ export default function Sidebar({ open = false, onClose }) {
 
 const S = {
   sidebar:     { width: 220, minHeight: "100vh", background: "#0D3B7A", display: "flex", flexDirection: "column", position: "fixed", left: 0, top: 0, bottom: 0, zIndex: 100 },
-  backdrop:    { position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 200 },
+  backdrop:    { position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: Z_DRAWER },
   logo:        { display: "flex", alignItems: "center", gap: 10, padding: "18px 20px", borderBottom: "1px solid rgba(255,255,255,.1)" },
   logoText:    { fontSize: 14, fontWeight: 700, color: "#fff" },
   logoSub:     { fontSize: 10, color: "rgba(255,255,255,.5)" },
