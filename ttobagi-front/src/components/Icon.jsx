@@ -91,6 +91,7 @@ const PATHS = {
     </>
   ),
   check: <path d="m5 12.5 4.5 4.5L19 7" />,
+  chevronDown: <path d="m6 9.5 6 6 6-6" />,
   close: (
     <>
       <path d="m6 6 12 12" />
