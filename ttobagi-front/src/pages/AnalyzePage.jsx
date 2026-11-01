@@ -46,11 +46,19 @@ function StatusChip({ status }) {
   );
 }
 
-// 백엔드 AnalysisJob.Status 5종에 맞춘 색. 진행 중은 파랑, 완료 초록, 실패 빨강.
-function statusStyle(status) {
-  if (status === "COMPLETED") return { background: "#D1FAE5", color: "#065F46" };
-  if (status === "FAIL")      return { background: "#FDECEA", color: "#B91C1C" };
-  return { background: "#DBEAFE", color: "#1E40AF" };
+// 백엔드 AnalysisJob.Status 5종. 진행 중은 파랑, 완료 초록, 실패 빨강.
+// 영문 원문을 그대로 보여주면 읽는 사람이 어느 단계인지 알기 어려워 한글 이름을 붙인다.
+const JOB_STATUS = {
+  PENDING:       { label: "대기 중",   background: "#DBEAFE", color: "#1E40AF" },
+  PREPROCESSING: { label: "전처리 중", background: "#DBEAFE", color: "#1E40AF" },
+  ANALYZING:     { label: "분석 중",   background: "#DBEAFE", color: "#1E40AF" },
+  COMPLETED:     { label: "완료",      background: "#D1FAE5", color: "#065F46" },
+  FAIL:          { label: "실패",      background: "#FDECEA", color: "#B91C1C" },
+};
+
+// 모르는 상태가 와도 글자는 그대로 보여 준다. 숨기면 무슨 일인지 알 수 없다.
+function jobStatus(status) {
+  return JOB_STATUS[status] || { label: status, background: "#DBEAFE", color: "#1E40AF" };
 }
 
 // requestedAt은 백엔드가 'Z'를 붙여 UTC로 보낸다(AnalyzeHistoryResponse @JsonFormat,
@@ -166,6 +174,9 @@ export default function AnalyzePage() {
   const [uploading, setUploading]   = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [uploadErrors, setUploadErrors] = useState(null); // 업로드 400의 행별 오류
+  // 업로드 영역에 보여 줄 파일 이름. 새로 고른 파일이 없을 때 쓴다.
+  // 이력에서 연 분석의 파일을 여기에 담아, 왼쪽(업로드)과 오른쪽(이력)이 같은 분석을 가리키게 한다.
+  const [openedFileName, setOpenedFileName] = useState(null);
   const [running, setRunning]       = useState(false);
   const [step, setStep]             = useState(-1);
   const [done, setDone]             = useState(false);
@@ -237,6 +248,8 @@ export default function AnalyzePage() {
       setStep(4);
       setDone(true);
       setRunning(false);
+      // 끝난 파일을 들고 있을 이유가 없다. 비워야 다음 파일을 고를 때 걸리지 않는다.
+      setFile(null);
       faqApi.getCandidates(id).then((r) => {
         if (r.data?.recommendations) setCandidates(r.data.recommendations);
       }).catch((err) => toast.error(err.message || "FAQ 후보를 불러오지 못했습니다."));
@@ -251,6 +264,12 @@ export default function AnalyzePage() {
       if (status === "PENDING")       setStep(-1);
       if (status === "PREPROCESSING") setStep(0);
       if (status === "ANALYZING")     setStep(2);
+
+      // 이력 목록의 상태는 목록을 불러온 시점 값이라 그대로 두면 PENDING에 머문다.
+      // 전처리·분석으로 넘어가도 뱃지가 안 따라가 "HDBSCAN이 도는데 대기 중"으로 보인다.
+      // 목록 전체를 다시 부르면 보던 자리가 튀므로, 이 분석의 줄만 상태를 갈아 끼운다.
+      setHistory((rows) => rows.map((row) =>
+        row.analysisId === id && row.status !== status ? { ...row, status } : row));
 
       if (status !== "COMPLETED" && status !== "FAIL") return false;
 
@@ -380,6 +399,14 @@ export default function AnalyzePage() {
     setAnalyzeResult(null);
     setCandidates([]);
 
+    // 업로드 영역은 "지금 보고 있는 분석"을 가리켜야 한다.
+    // 치우지 않으면 아까 올린 파일이 그대로 남아, 이력에서 다른 분석을 열어도
+    // 왼쪽에는 엉뚱한 파일 이름이 붙어 있다.
+    setFile(null);
+    setUploadResult(null);
+    setUploadErrors(null);
+    setOpenedFileName(item.fileName || null);
+
     // 목록의 status는 이력을 불러온 시점 값이라, 그 뒤에 끝난 분석도 진행 중으로 남아 있다.
     // COMPLETED·FAIL은 되돌아가지 않으므로 그대로 믿고, 진행 중으로 적혀 있을 때만
     // 서버에 현재 상태를 물어본다. 묻지 않고 "진행 중입니다"를 띄우면
@@ -496,6 +523,10 @@ export default function AnalyzePage() {
     }
     setFile(f);
     setUploadErrors(null);
+    // 앞선 업로드 결과가 남아 있으면 "업로드 시작" 버튼이 가려져 다시 올릴 수가 없다.
+    // 새 파일을 고른 순간이 새 작업의 시작이므로 앞 결과를 치운다.
+    setUploadResult(null);
+    setOpenedFileName(null);
   };
 
   const doUpload = async () => {
@@ -537,6 +568,8 @@ export default function AnalyzePage() {
       });
       setUploading(false);
       setUploadResult(res.data);
+      // 분석이 끝나면 file을 비우므로, 이름은 따로 담아 둬야 계속 보인다
+      setOpenedFileName(file.name);
       const analysisId = res.data?.analysisId;
       if (!analysisId) throw new Error("서버가 분석 ID를 반환하지 않았습니다.");
       setAnalysisId(analysisId);
@@ -727,7 +760,7 @@ export default function AnalyzePage() {
                   onDrop={(e) => { if (!isAdmin) return; e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); }}>
                   <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 48, height: 48, borderRadius: 14, background: "#EFF6FF", color: "#1565C0", marginBottom: 12 }}><Icon name="upload" size={22} /></span>
                   <div style={{ fontSize: 14, fontWeight: 500, color: "#374151", marginBottom: 4 }}>
-                    {file ? file.name : "CSV 또는 엑셀 파일을 드래그하거나 클릭하여 선택"}
+                    {file?.name || openedFileName || "CSV 또는 엑셀 파일을 드래그하거나 클릭하여 선택"}
                   </div>
                   <div style={{ fontSize: 12, color: "#9CA3AF" }}>.csv 또는 .xlsx, 최대 {MAX_UPLOAD_MB}MB</div>
                   <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>원본 대화 로그와 기존 분석 양식을 그대로 업로드할 수 있습니다.</div>
@@ -791,10 +824,22 @@ export default function AnalyzePage() {
                     {uploading ? "업로드 중..." : "업로드 시작"}
                   </button>
                 )}
-                {uploadResult && (
-                  <div style={S.successBox}>
-                    <Icon name="check" size={15} /> 파일 업로드 완료! AI 분석을 시작합니다.
-                  </div>
+                {/* 한 줄이 상태를 따라가야 한다. 분석이 끝난 뒤에도 "지금부터 시작합니다"가
+                    남아 있으면 읽는 사람이 어느 단계인지 알 수 없다. */}
+                {(uploadResult || openedFileName) && !uploading && (
+                  done ? (
+                    <div style={S.successBox}>
+                      <Icon name="check" size={15} /> 분석 완료! 아래 탭에서 결과를 확인하세요.
+                    </div>
+                  ) : running ? (
+                    <div style={S.runningBox}>
+                      분석이 진행 중입니다. 끝나면 결과가 자동으로 열립니다.
+                    </div>
+                  ) : uploadResult ? (
+                    <div style={S.successBox}>
+                      <Icon name="check" size={15} /> 파일 업로드 완료! AI 분석을 시작합니다.
+                    </div>
+                  ) : null
                 )}
 
                 {/* 파일 내용 오류 — 400 응답의 data { totalErrors, errors[{row, column, reason}] }.
@@ -944,7 +989,9 @@ export default function AnalyzePage() {
                         #{r.analysisId}{isOpen && <span style={S.nowTag}>보는 중</span>}
                       </span>
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ ...S.statusTag, ...statusStyle(r.status) }}>{r.status}</span>
+                        <span style={{ ...S.statusTag, background: jobStatus(r.status).background, color: jobStatus(r.status).color }}>
+                          {jobStatus(r.status).label}
+                        </span>
                         {r.isMine && (
                           <button style={S.btnDeleteSm} disabled={deleting === r.analysisId}
                             title="내 이력에서 삭제"
