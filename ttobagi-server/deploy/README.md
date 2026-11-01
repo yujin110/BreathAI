@@ -72,6 +72,7 @@ chmod 600 .env
 | `TTOBAGI_STORAGE_ENABLED` | `true`면 업로드 원본을 Object Storage에 보관 (아래 7번) |
 | `TTOBAGI_STORAGE_ACCESS_KEY`, `TTOBAGI_STORAGE_SECRET_KEY` | Object Storage 권한만 있는 Sub Account의 API 인증키 |
 | `TTOBAGI_STORAGE_UPLOAD_BUCKET`, `TTOBAGI_STORAGE_BACKUP_BUCKET` | `breathai-uploads`, `breathai-backup` |
+| `TTOBAGI_EXTRA_ALLOWED_EMAILS` | 공사 메일 외에 가입·로그인을 허용할 주소(쉼표 구분). 비우면 공사 메일만. 바꾼 뒤에는 `$C up -d --force-recreate app`으로 앱만 다시 띄운다(재빌드 불필요) |
 
 키는 화면과 명령 기록에 남지 않게 입력받아 넣는다.
 
