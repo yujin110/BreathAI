@@ -13,16 +13,28 @@ import { useIsMobile } from "../hooks/useIsMobile.js";
 const HISTORY_SIZE = 10;
 
 // 백엔드 ReviewStatus: PENDING / ACCEPTED / REJECTED / APPLIED
-function statusLabel(status) {
-  if (status === "REJECTED") return "❌ 반려됨";
-  if (status === "APPLIED")  return "✅ 반영됨";
-  if (status === "ACCEPTED") return "✅ 승인됨";
-  return "대기";
-}
-function statusChip(status) {
-  if (status === "REJECTED") return { background: "#FDECEA", color: "#B91C1C" };
-  if (status === "PENDING")  return { background: "#DBEAFE", color: "#1E40AF" };
-  return { background: "#D1FAE5", color: "#065F46" };
+const REVIEW_STATUS = {
+  APPLIED:  { label: "반영됨", text: "#047857", dot: "#10B981", bg: "#ECFDF5", border: "#A7F3D0" },
+  ACCEPTED: { label: "승인됨", text: "#1D4ED8", dot: "#3B82F6", bg: "#EFF6FF", border: "#BFDBFE" },
+  REJECTED: { label: "반려됨", text: "#BE123C", dot: "#F43F5E", bg: "#FFF1F2", border: "#FECDD3" },
+  PENDING:  { label: "대기",   text: "#475569", dot: "#94A3B8", bg: "#F8FAFC", border: "#E2E8F0" },
+};
+
+// 이모지 대신 작은 점으로 상태를 구분한다. 색이 뜻을 전하고 글자는 그대로 읽힌다.
+function StatusChip({ status }) {
+  const s = REVIEW_STATUS[status] || REVIEW_STATUS.PENDING;
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      fontSize: 11, fontWeight: 600, letterSpacing: "-.01em",
+      padding: "4px 10px", borderRadius: 999,
+      background: s.bg, color: s.text, border: `1px solid ${s.border}`,
+      whiteSpace: "nowrap",
+    }}>
+      <span style={{ width: 5, height: 5, borderRadius: "50%", background: s.dot, flexShrink: 0 }} />
+      {s.label}
+    </span>
+  );
 }
 
 // 백엔드 AnalysisJob.Status 5종에 맞춘 색. 진행 중은 파랑, 완료 초록, 실패 빨강.
@@ -1101,20 +1113,15 @@ export default function AnalyzePage() {
                     <div style={{ display: "flex", gap: 6 }}>
                       <button style={S.btnAccept} disabled={reviewing === c.candidateId}
                         onClick={() => handleAccept(c.candidateId)}>
-                        {reviewing === c.candidateId ? "처리 중..." : "✓ 승인"}
+                        {reviewing === c.candidateId ? "처리 중..." : "승인"}
                       </button>
                       <button style={S.btnSm} disabled={reviewing === c.candidateId}
                         onClick={() => setEditTarget(c)}>수정</button>
                       <button style={S.btnReject} disabled={reviewing === c.candidateId}
-                        onClick={() => { setRejectReason(""); setRejectTarget(c); }}>✗ 반려</button>
+                        onClick={() => { setRejectReason(""); setRejectTarget(c); }}>반려</button>
                     </div>
                   ) : (
-                    <span style={{
-                      fontSize: 12, fontWeight: 500, padding: "4px 12px", borderRadius: 20,
-                      ...statusChip(c.reviewStatus),
-                    }}>
-                      {statusLabel(c.reviewStatus)}
-                    </span>
+                    <StatusChip status={c.reviewStatus} />
                   )}
                 </div>
                 <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.6, marginBottom: 10 }}>{toPlainText(c.answerDraft)}</div>
@@ -1336,8 +1343,8 @@ const S = {
   dropzoneDisabled: { opacity: 0.5, cursor: "not-allowed", background: "#F9FAFB" },
   permissionNotice: { padding: "10px 12px", background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: 8, fontSize: 12, color: "#92400E", marginBottom: 10 },
   btnPrimary:  { padding: "10px 20px", background: "#1565C0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
-  btnAccept:   { padding: "6px 14px", background: "#D1FAE5", color: "#065F46", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
-  btnReject:   { padding: "6px 14px", background: "#FDECEA", color: "#B91C1C", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
+  btnAccept:   { padding: "6px 14px", background: "#ECFDF5", color: "#047857", border: "1px solid #A7F3D0", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
+  btnReject:   { padding: "6px 14px", background: "#FFF1F2", color: "#BE123C", border: "1px solid #FECDD3", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
   runningBox:  { marginTop: 10, padding: "10px 14px", background: "#EFF8FF", border: "1px solid #BFDBFE", borderRadius: 8, fontSize: 12, color: "#1E40AF" },
   successBox:  { marginTop: 10, padding: "10px 14px", background: "#D1FAE5", borderRadius: 8, fontSize: 13, color: "#065F46" },
 };
