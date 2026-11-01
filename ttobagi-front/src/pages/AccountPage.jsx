@@ -105,8 +105,9 @@ export default function AccountPage() {
                   <div style={{ fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 4 }}>
                     {user?.email || "admin@seoulmetro.co.kr"}
                   </div>
-                  <span style={S.roleBadge}>
-                    {user?.role === "ADMIN" ? "👑 관리자" : "🔧 운영자"}
+                  <span style={{ ...S.roleBadge, ...(user?.role === "ADMIN" ? S.roleAdmin : S.roleUser) }}>
+                    <span style={{ ...S.roleDot, background: user?.role === "ADMIN" ? "#3B82F6" : "#94A3B8" }} />
+                    {user?.role === "ADMIN" ? "관리자" : "운영자"}
                   </span>
                 </div>
               </div>
@@ -185,9 +186,9 @@ export default function AccountPage() {
           </div>
 
           {/* 회원 탈퇴 */}
-          <div style={{ ...S.card, marginTop: 16, border: "1px solid #FECACA" }}>
-            <div style={{ ...S.cardHeader, borderBottom: "1px solid #FECACA" }}>
-              <span style={{ ...S.cardTitle, color: "#E53935" }}>⚠️ 회원 탈퇴</span>
+          <div style={{ ...S.card, marginTop: 16, border: "1px solid #FECDD3" }}>
+            <div style={{ ...S.cardHeader, borderBottom: "1px solid #FECDD3" }}>
+              <span style={{ ...S.cardTitle, color: "#BE123C" }}>회원 탈퇴</span>
             </div>
             <div style={S.cardBody}>
               <p style={{ fontSize: 13, color: "#6B7280", marginBottom: 16 }}>
@@ -228,7 +229,10 @@ const S = {
   cardTitle:  { fontSize: 14, fontWeight: 600, color: "#111827" },
   cardBody:   { padding: 24 },
   avatar:     { width: 56, height: 56, borderRadius: "50%", background: "#1565C0", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 700, flexShrink: 0 },
-  roleBadge:  { fontSize: 11, fontWeight: 500, padding: "3px 10px", borderRadius: 12, background: "#DBEAFE", color: "#1E40AF" },
+  roleBadge:  { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, letterSpacing: "-.01em", padding: "4px 10px", borderRadius: 999 },
+  roleAdmin:  { background: "#EFF6FF", color: "#1D4ED8", border: "1px solid #BFDBFE" },
+  roleUser:   { background: "#F8FAFC", color: "#475569", border: "1px solid #E2E8F0" },
+  roleDot:    { width: 5, height: 5, borderRadius: "50%", flexShrink: 0 },
   infoRow:    { display: "flex", alignItems: "center", padding: "12px 0", borderBottom: "1px solid #F3F4F6" },
   infoLabel:  { width: 100, fontSize: 12, color: "#6B7280", flexShrink: 0 },
   infoValue:  { fontSize: 13, color: "#111827", fontWeight: 500 },

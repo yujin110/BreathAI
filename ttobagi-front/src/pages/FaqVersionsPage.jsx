@@ -6,6 +6,8 @@ import { useToast } from "../hooks/useToast.js";
 import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
+import Icon from "../components/Icon.jsx";
+import FitSelect from "../components/FitSelect.jsx";
 
 const PAGE_SIZE = 10;
 
@@ -211,27 +213,23 @@ export default function FaqVersionsPage() {
       </div>
 
       {/* 버전 비교 — 비교 대상을 비우면 현재 운영 FAQ와 비교한다 */}
-      <div style={S.compareBar}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>버전 비교</span>
-        <select style={S.compareSelect} value={baseId} onChange={(e) => setBaseId(e.target.value)}>
-          <option value="">기준 버전</option>
-          {versions.map((v) => (
-            <option key={v.versionId} value={v.versionId}>{v.versionName || `#${v.versionId}`}</option>
-          ))}
-        </select>
+      <div style={{ ...S.compareBar, ...(isMobile ? S.compareBarMobile : {}) }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "#374151", ...(isMobile ? { width: "100%" } : {}) }}>버전 비교</span>
+        <FitSelect style={{ ...S.compareSelect, ...(isMobile ? S.compareSelectMobile : {}) }}
+          value={baseId} onChange={(e) => setBaseId(e.target.value)}
+          options={[{ value: "", label: "기준 버전" },
+                    ...versions.map((v) => ({ value: v.versionId, label: v.versionName || `#${v.versionId}` }))]} />
         <span style={{ color: "#9CA3AF" }}>→</span>
-        <select style={S.compareSelect} value={targetId} onChange={(e) => setTargetId(e.target.value)}>
-          <option value="">현재 운영 FAQ</option>
-          {versions.map((v) => (
-            <option key={v.versionId} value={v.versionId}>{v.versionName || `#${v.versionId}`}</option>
-          ))}
-        </select>
+        <FitSelect style={{ ...S.compareSelect, ...(isMobile ? S.compareSelectMobile : {}) }}
+          value={targetId} onChange={(e) => setTargetId(e.target.value)}
+          options={[{ value: "", label: "현재 운영 FAQ" },
+                    ...versions.map((v) => ({ value: v.versionId, label: v.versionName || `#${v.versionId}` }))]} />
         <button style={S.btnSm} onClick={runCompare}>비교</button>
       </div>
 
       {versions.length === 0 ? (
         <div style={S.empty}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>🗂️</div>
+          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 44, height: 44, borderRadius: "50%", background: "#F3F4F6", color: "#9CA3AF", marginBottom: 12 }}><Icon name="versions" size={21} /></span>
           <div>아직 버전이 없습니다.</div>
           <div style={{ fontSize: 12, marginTop: 6 }}>CSV를 내려받거나 버전 만들기를 누르면 생성됩니다. FAQ 파일을 일괄 업로드해도 생깁니다.</div>
         </div>
@@ -449,7 +447,10 @@ export default function FaqVersionsPage() {
 const S = {
   btnOutline:   { padding: "9px 16px", fontSize: 13, fontWeight: 600, border: "1.5px solid #1565C0", borderRadius: 8, background: "#fff", color: "#1565C0", cursor: "pointer", fontFamily: "inherit" },
   compareBar:   { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 14px", marginBottom: 16, background: "#F9FAFB", border: "1px solid #F3F4F6", borderRadius: 10 },
-  compareSelect:{ padding: "6px 10px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, background: "#fff", color: "#374151", cursor: "pointer", maxWidth: 220 },
+  compareSelect:{ padding: "6px 10px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, background: "#fff", color: "#374151", cursor: "pointer", maxWidth: "100%" },
+  compareBarMobile:   { rowGap: 10 },
+  // 드롭다운 두 개가 남는 폭을 나눠 갖게 한다. 내용이 길어도 줄을 넘지 않는다.
+  compareSelectMobile:{ flex: "1 1 120px", minWidth: 0 },
   diffSection:  { marginTop: 14 },
   diffHead:     { fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 },
   diffItem:     { padding: "8px 0", borderBottom: "1px solid #F3F4F6", fontSize: 12, color: "#374151" },

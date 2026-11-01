@@ -3,6 +3,7 @@ import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
 import Sidebar from "./Sidebar.jsx";
+import Icon from "./Icon.jsx";
 
 export default function ProtectedRoute() {
   const { user, loading } = useAuth();
@@ -28,23 +29,31 @@ export default function ProtectedRoute() {
         minWidth: 0,          // 자식이 넘쳐도 flex 칸이 늘어나지 않게 한다
         minHeight: "100vh",
         background: "#F9FAFB",
+        // 어딘가 폭을 넘겨도 화면이 좌우로 밀리지 않게 잘라 둔다.
+        // hidden이 아니라 clip이어야 상단 바의 sticky가 살아 있다.
+        ...(isMobile ? { overflowX: "clip" } : {}),
       }}>
         {isMobile && (
           <header style={S.topBar}>
-            <button style={S.hamburger} onClick={() => setNavOpen(true)} aria-label="메뉴 열기">☰</button>
+            <button style={S.hamburger} onClick={() => setNavOpen(true)} aria-label="메뉴 열기"><Icon name="menu" size={22} /></button>
             <span style={S.topTitle}>또타24 현행화 시스템</span>
           </header>
         )}
-        <Outlet />
+        {/* 넓은 모니터에서 본문이 끝까지 늘어나면 글줄이 지나치게 길어져 읽기 어렵다.
+            바탕은 그대로 꽉 채우고 내용만 가운데로 묶는다. */}
+        <div style={S.content}>
+          <Outlet />
+        </div>
       </div>
     </div>
   );
 }
 
 const S = {
+  content:   { width: "100%", maxWidth: 1320, margin: "0 auto" },
   topBar:    { position: "sticky", top: 0, zIndex: 90, display: "flex", alignItems: "center", gap: 12,
                height: 52, padding: "0 14px", background: "#0D3B7A", color: "#fff" },
-  hamburger: { background: "none", border: "none", color: "#fff", fontSize: 22, lineHeight: 1,
+  hamburger: { display: "flex", alignItems: "center", background: "none", border: "none", color: "#fff",
                cursor: "pointer", padding: "4px 6px", fontFamily: "inherit" },
   topTitle:  { fontSize: 14, fontWeight: 700 },
 };

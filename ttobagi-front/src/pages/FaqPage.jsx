@@ -6,6 +6,8 @@ import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
+import Icon from "../components/Icon.jsx";
+import FitSelect from "../components/FitSelect.jsx";
 
 const PAGE_SIZE = 10;
 // 백엔드 spring.servlet.multipart.max-file-size=50MB 와 같게 맞춘다
@@ -364,23 +366,22 @@ export default function FaqPage() {
       {tab === "list" && (
         <div>
           <div style={{ marginBottom: 14, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <input style={S.searchInput} placeholder="질문·답변·키워드 검색"
+            <input style={{ ...S.searchInput, ...(isMobile ? { width: "100%" } : {}) }} placeholder="질문·답변·키워드 검색"
               value={keywordInput}
               onChange={(e) => setKeywordInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") runSearch(0, { keyword: keywordInput.trim(), category: categoryInput.trim() }); }} />
             {/* 어느 쪽이든 명세서 GET /api/v1/faq 의 category(표시명 문자열)를 그대로 보낸다.
                 선택지를 받아오면 드롭다운, 못 받아오면 입력창이다. */}
             {categories ? (
-              <select style={{ ...S.searchInput, width: 180, cursor: "pointer" }}
+              <FitSelect style={{ ...S.searchInput, cursor: "pointer" }}
                 value={categoryInput}
+                options={[{ value: "", label: "전체 카테고리" },
+                          ...categories.map((c) => ({ value: c.name, label: c.name }))]}
                 onChange={(e) => {
                   const next = e.target.value;
                   setCategoryInput(next);
                   runSearch(0, { keyword: keywordInput.trim(), category: next });
-                }}>
-                <option value="">전체 카테고리</option>
-                {categories.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-              </select>
+                }} />
             ) : (
               <input style={{ ...S.searchInput, width: 160 }} placeholder="카테고리명"
                 value={categoryInput}
@@ -411,22 +412,22 @@ export default function FaqPage() {
           {/* 키워드만 내려받기 · FAQ 파일 일괄 업로드 */}
           <div style={S.toolRow}>
             <span style={S.toolLabel}>키워드 다운로드</span>
-            <select style={{ ...S.searchInput, width: 220, cursor: "pointer" }}
-              value={sinceVersionId} onChange={(e) => setSinceVersionId(e.target.value)}>
-              <option value="">현재 전체</option>
-              {versions.map((v) => (
-                <option key={v.versionId} value={v.versionId}>
-                  {v.versionName || `버전 #${v.versionId}`} 이후 새 키워드
-                </option>
-              ))}
-            </select>
+            <FitSelect style={{ ...S.searchInput, cursor: "pointer" }}
+              value={sinceVersionId} onChange={(e) => setSinceVersionId(e.target.value)}
+              options={[{ value: "", label: "현재 전체" },
+                        ...versions.map((v) => ({
+                          value: v.versionId,
+                          label: `${v.versionName || `버전 #${v.versionId}`} 이후`,
+                        }))]} />
             <button style={S.btnSm} disabled={downloadingKeywords} onClick={handleKeywordDownload}>
               {downloadingKeywords ? "내려받는 중..." : "CSV 받기"}
             </button>
 
             {isAdmin && (
               <>
-                <span style={{ ...S.toolLabel, marginLeft: 12 }}>FAQ 파일 업로드</span>
+                {/* 두 기능이 한 줄에 있어 구분선을 둔다 */}
+                <span style={S.toolDivider} />
+                <span style={S.toolLabel}>FAQ 파일 업로드</span>
                 <input type="file" accept=".csv,.xlsx" id="faqImportInput"
                   style={{ display: "none" }} disabled={importing}
                   onChange={(e) => { handleImport(e.target.files[0]); e.target.value = ""; }} />
@@ -434,26 +435,34 @@ export default function FaqPage() {
                   onClick={() => document.getElementById("faqImportInput").click()}>
                   {importing ? "반영 중..." : "엑셀 업로드"}
                 </button>
-                {/* 바로 왼쪽이 "키워드 다운로드"라 어느 파일인지 헷갈린다.
-                    키워드 CSV에는 답변 열이 없어 올리면 "필수 열이 없습니다"로 거부된다. */}
-                <span style={{ fontSize: 11, color: "#9CA3AF" }}>
-                  FAQ 버전 관리의 CSV 양식(ID·카테고리·질문·답변·키워드·유사어)으로 올려주세요.
-                  .csv·.xlsx, 최대 {IMPORT_MAX_MB}MB
-                </span>
+
               </>
             )}
           </div>
 
+          {/* 바로 위 "키워드 다운로드"와 헷갈리기 쉬워 어느 양식인지 따로 적는다.
+              키워드 CSV에는 답변 열이 없어 올리면 "필수 열이 없습니다"로 거부된다. */}
+          {isAdmin && (
+            <div style={S.toolHint}>
+              엑셀 업로드는 <strong>FAQ 버전 관리</strong>의 CSV 양식(ID·카테고리·질문·답변·키워드·유사어)으로 올려주세요.
+              .csv·.xlsx, 최대 {IMPORT_MAX_MB}MB
+            </div>
+          )}
+
           {faqs.length === 0 ? (
             <div style={S.empty}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 44, height: 44, borderRadius: "50%", background: "#F3F4F6", color: "#9CA3AF", marginBottom: 12 }}><Icon name="analyze" size={21} /></span>
               <div>{query.keyword || query.category ? "검색 결과가 없습니다." : "등록된 FAQ가 없습니다."}</div>
             </div>
           ) : (
             faqs.map((f) => (
               <div key={f.faqId} style={S.faqCard}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <div style={{ flex: 1 }}>
+                {/* 폰에서는 본문 옆에 버튼 3개가 붙으면 본문 폭이 거의 남지 않는다.
+                    위아래로 쌓아 본문이 폭을 다 쓰게 한다. */}
+                <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row",
+                              justifyContent: "space-between", alignItems: "flex-start",
+                              gap: isMobile ? 10 : 0 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
                       {f.category && <span style={S.categoryTag}>{f.category}</span>}
                       <span style={{ fontSize: 11, fontFamily: "monospace", color: "#C4C8CE" }}>#{f.faqId}</span>
@@ -471,7 +480,12 @@ export default function FaqPage() {
                       </div>
                     )}
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, marginLeft: 16 }}>
+                  <div style={{ display: "flex",
+                                flexDirection: isMobile ? "row" : "column",
+                                alignItems: isMobile ? "center" : "flex-end",
+                                justifyContent: isMobile ? "space-between" : undefined,
+                                gap: 8, marginLeft: isMobile ? 0 : 16,
+                                width: isMobile ? "100%" : undefined }}>
                     {f.createdAt && <span style={S.meta}>{f.createdAt} 등록</span>}
                     <div style={{ display: "flex", gap: 6 }}>
                       <button style={S.btnSm} onClick={() => openFaqHistory(f)}>이력</button>
@@ -516,7 +530,7 @@ export default function FaqPage() {
           </div>
 
           {histories.length === 0 ? (
-            <div style={S.empty}><div style={{ fontSize: 32, marginBottom: 8 }}>🗒️</div><div>변경 이력이 없습니다.</div></div>
+            <div style={S.empty}><span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 44, height: 44, borderRadius: "50%", background: "#F3F4F6", color: "#9CA3AF", marginBottom: 12 }}><Icon name="audit" size={21} /></span><div>변경 이력이 없습니다.</div></div>
           ) : (
             histories.map((h) => (
               <div key={h.historyId} style={S.faqCard}>
@@ -940,6 +954,8 @@ function EditFaqForm({ faq, categories, isAdmin, onCategoryCreated, onSave, onCl
 const S = {
   toolRow:     { marginBottom: 14, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", paddingTop: 12, borderTop: "1px solid #F3F4F6" },
   toolLabel:   { fontSize: 12, fontWeight: 600, color: "#374151" },
+  toolHint:    { fontSize: 11.5, color: "#9CA3AF", lineHeight: 1.6, margin: "-4px 0 14px" },
+  toolDivider: { width: 1, height: 20, background: "#E5E7EB", margin: "0 6px" },
   statBox:     { flex: 1, minWidth: 96, background: "#F9FAFB", borderRadius: 8, padding: "10px 12px", textAlign: "center" },
   resultLine:  { fontSize: 12, color: "#374151", marginBottom: 6 },
   resultBlock: { marginTop: 12, paddingTop: 12, borderTop: "1px solid #F3F4F6" },
@@ -963,7 +979,8 @@ const S = {
   tabs:        { display: "flex", gap: 2, background: "#F3F4F6", borderRadius: 10, padding: 4, width: "fit-content", marginBottom: 20 },
   tab:         { padding: "8px 20px", borderRadius: 8, fontSize: 13, cursor: "pointer", color: "#6B7280" },
   tabActive:   { background: "#fff", color: "#1565C0", fontWeight: 600, boxShadow: "0 1px 3px rgba(0,0,0,.08)" },
-  searchInput: { height: 38, padding: "0 14px", border: "1.5px solid #D1D5DB", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", width: 280, boxSizing: "border-box" },
+  // maxWidth 100%가 있어야 좁은 화면에서 고정 폭이 화면을 넘지 않는다. 넓은 화면은 그대로다.
+  searchInput: { height: 38, padding: "0 14px", border: "1.5px solid #D1D5DB", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", width: 280, maxWidth: "100%", boxSizing: "border-box" },
   btnSearch:   { height: 38, padding: "0 18px", background: "#1565C0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   filterChip:  { padding: "5px 14px", background: "#F3F4F6", color: "#6B7280", border: "none", borderRadius: 20, fontSize: 12, cursor: "pointer", fontFamily: "inherit" },
   filterChipActive: { background: "#1565C0", color: "#fff", fontWeight: 600 },
@@ -977,8 +994,8 @@ const S = {
   matchedBox:  { marginTop: 10, padding: "10px 12px", background: "#F9FAFB", borderRadius: 8, border: "1px solid #F3F4F6" },
   infoBanner:  { background: "#EFF8FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "12px 16px", fontSize: 13, color: "#1E40AF", marginBottom: 16 },
   empty:       { background: "#fff", borderRadius: 12, padding: 48, textAlign: "center", color: "#9CA3AF", fontSize: 14 },
-  btnSm:       { padding: "6px 14px", background: "#F3F4F6", color: "#374151", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" },
-  btnSmDanger: { padding: "6px 14px", background: "#FDECEA", color: "#B91C1C", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" },
+  btnSm:       { padding: "6px 14px", background: "#F3F4F6", color: "#374151", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
+  btnSmDanger: { padding: "6px 14px", background: "#FDECEA", color: "#B91C1C", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
   btnAccept:   { padding: "6px 14px", background: "#D1FAE5", color: "#065F46", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   btnReject:   { padding: "6px 14px", background: "#FDECEA", color: "#B91C1C", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   input:       { width: "100%", height: 42, padding: "0 14px", border: "1.5px solid #D1D5DB", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" },

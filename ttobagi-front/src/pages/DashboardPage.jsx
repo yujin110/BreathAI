@@ -3,6 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, Cart
 import { dashApi } from "../api/dashboard.js";
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
+import FitSelect from "../components/FitSelect.jsx";
 
 export default function DashboardPage() {
   const isMobile = useIsMobile();
@@ -119,15 +120,13 @@ export default function DashboardPage() {
       </div>
 
       <div style={S.scopeRow}>
-        <select style={S.pickerSelect} value={picked}
-          onChange={(e) => changePicked(e.target.value)}>
-          <option value="">최신 분석</option>
-          {options.map((o) => (
-            <option key={o.analysisId} value={o.analysisId}>
-              #{o.analysisId} · {o.fileName}{o.period ? ` · ${o.period}` : ""}
-            </option>
-          ))}
-        </select>
+        <FitSelect style={{ ...S.pickerSelect, ...(isMobile ? S.pickerSelectMobile : {}) }}
+          value={picked} onChange={(e) => changePicked(e.target.value)}
+          options={[{ value: "", label: "최신 분석" },
+                    ...options.map((o) => ({
+                      value: o.analysisId,
+                      label: `#${o.analysisId} · ${o.fileName}${o.period ? ` · ${o.period}` : ""}`,
+                    }))]} />
         <div style={S.segment}>
           {[{ key: "mine", label: "내 분석" }, { key: "all", label: "전체 분석" }].map((t) => (
             <button key={t.key}
@@ -287,6 +286,8 @@ const S = {
   newTag:     { fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#DBEAFE", color: "#1E40AF", border: "1px solid #BFDBFE" },
   scopeRow:    { display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" },
   pickerSelect:{ maxWidth: 420, padding: "6px 10px", fontSize: 12, border: "1px solid #E5E7EB", borderRadius: 8, background: "#fff", color: "#374151", cursor: "pointer" },
+  // maxWidth 420은 폰 폭(여백 빼면 약 358)을 넘어 오른쪽이 잘린다. 폭에 맞춘다.
+  pickerSelectMobile: { width: "100%", maxWidth: "100%", minWidth: 0 },
   segment:     { display: "flex", border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" },
   segmentBtn:  { padding: "5px 14px", fontSize: 12, background: "#fff", border: "none", cursor: "pointer", color: "#6B7280" },
   segmentBtnOn:{ background: "#1565C0", color: "#fff", fontWeight: 600 },

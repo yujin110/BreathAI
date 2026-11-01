@@ -8,21 +8,34 @@ import { toPlainText } from "../utils/text.js";
 import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
+import Icon from "../components/Icon.jsx";
 
 // Spring의 spring.servlet.multipart.max-file-size=50MB 와 동일하게 맞춘다
 const HISTORY_SIZE = 10;
 
 // 백엔드 ReviewStatus: PENDING / ACCEPTED / REJECTED / APPLIED
-function statusLabel(status) {
-  if (status === "REJECTED") return "❌ 반려됨";
-  if (status === "APPLIED")  return "✅ 반영됨";
-  if (status === "ACCEPTED") return "✅ 승인됨";
-  return "대기";
-}
-function statusChip(status) {
-  if (status === "REJECTED") return { background: "#FDECEA", color: "#B91C1C" };
-  if (status === "PENDING")  return { background: "#DBEAFE", color: "#1E40AF" };
-  return { background: "#D1FAE5", color: "#065F46" };
+const REVIEW_STATUS = {
+  APPLIED:  { label: "반영됨", text: "#047857", dot: "#10B981", bg: "#ECFDF5", border: "#A7F3D0" },
+  ACCEPTED: { label: "승인됨", text: "#1D4ED8", dot: "#3B82F6", bg: "#EFF6FF", border: "#BFDBFE" },
+  REJECTED: { label: "반려됨", text: "#BE123C", dot: "#F43F5E", bg: "#FFF1F2", border: "#FECDD3" },
+  PENDING:  { label: "대기",   text: "#475569", dot: "#94A3B8", bg: "#F8FAFC", border: "#E2E8F0" },
+};
+
+// 이모지 대신 작은 점으로 상태를 구분한다. 색이 뜻을 전하고 글자는 그대로 읽힌다.
+function StatusChip({ status }) {
+  const s = REVIEW_STATUS[status] || REVIEW_STATUS.PENDING;
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      fontSize: 11, fontWeight: 600, letterSpacing: "-.01em",
+      padding: "4px 10px", borderRadius: 999,
+      background: s.bg, color: s.text, border: `1px solid ${s.border}`,
+      whiteSpace: "nowrap",
+    }}>
+      <span style={{ width: 5, height: 5, borderRadius: "50%", background: s.dot, flexShrink: 0 }} />
+      {s.label}
+    </span>
+  );
 }
 
 // 백엔드 AnalysisJob.Status 5종에 맞춘 색. 진행 중은 파랑, 완료 초록, 실패 빨강.
@@ -659,13 +672,13 @@ export default function AnalyzePage() {
       <div style={S.pageSub}>미답변 로그를 업로드하고 AI 분석을 실행합니다.</div>
 
       {/* 탭 */}
-      <div style={S.tabs}>
+      <div style={{ ...S.tabs, ...(isMobile ? S.tabsMobile : {}) }}>
         {[
           { key: "upload",    label: "① 업로드 · 분석" },
           { key: "visual",    label: "② 시각화 · 비교" },
           { key: "recommend", label: `③ FAQ 추천 ${candidates.length > 0 ? `(${candidates.filter(c => c.reviewStatus === "PENDING").length})` : ""}` },
         ].map((t) => (
-          <div key={t.key} style={{ ...S.tab, ...(tab === t.key ? S.tabActive : {}) }}
+          <div key={t.key} style={{ ...S.tab, ...(isMobile ? S.tabMobile : {}), ...(tab === t.key ? S.tabActive : {}) }}
             onClick={() => setTab(t.key)}>{t.label}</div>
         ))}
       </div>
@@ -704,7 +717,7 @@ export default function AnalyzePage() {
                   onDragOver={(e) => { if (!isAdmin) return; e.preventDefault(); setDrag(true); }}
                   onDragLeave={() => setDrag(false)}
                   onDrop={(e) => { if (!isAdmin) return; e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); }}>
-                  <div style={{ fontSize: 36, marginBottom: 10 }}>📂</div>
+                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 48, height: 48, borderRadius: 14, background: "#EFF6FF", color: "#1565C0", marginBottom: 12 }}><Icon name="upload" size={22} /></span>
                   <div style={{ fontSize: 14, fontWeight: 500, color: "#374151", marginBottom: 4 }}>
                     {file ? file.name : "CSV 또는 엑셀 파일을 드래그하거나 클릭하여 선택"}
                   </div>
@@ -713,20 +726,20 @@ export default function AnalyzePage() {
                 <div style={S.optionBox}>
                   <div style={S.optionTitle}>분석 옵션</div>
 
-                  <div style={S.optionRow}>
+                  <div style={{ ...S.optionRow, ...(isMobile ? S.optionRowMobile : {}) }}>
                     <label style={S.optionLabel}>분석 기간</label>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <input type="date" style={S.optionInput}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, ...(isMobile ? S.optionFieldsMobile : {}) }}>
+                      <input type="date" style={{ ...S.optionInput, ...(isMobile ? S.optionInputMobile : {}) }}
                         value={options.periodStartDate} onChange={setOption("periodStartDate")} />
                       <span style={{ color: "#9CA3AF", fontSize: 12 }}>~</span>
-                      <input type="date" style={S.optionInput}
+                      <input type="date" style={{ ...S.optionInput, ...(isMobile ? S.optionInputMobile : {}) }}
                         value={options.periodEndDate} onChange={setOption("periodEndDate")} />
                     </div>
                   </div>
 
-                  <div style={S.optionRow}>
+                  <div style={{ ...S.optionRow, ...(isMobile ? S.optionRowMobile : {}) }}>
                     <label style={S.optionLabel}>전처리</label>
-                    <div style={{ display: "flex", gap: 14 }}>
+                    <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
                       <label style={S.checkLabel}>
                         <input type="checkbox" checked={options.isMaskingEnabled}
                           onChange={setOption("isMaskingEnabled")} />
@@ -743,14 +756,14 @@ export default function AnalyzePage() {
                   {/* HDBSCAN은 클러스터 개수를 직접 지정할 수 없어 min_cluster_size로 조절한다.
                       값을 올리면 클러스터가 적고 커지며, 낮추면 많고 작아진다.
                       백엔드가 AI 서버로 그대로 전달하며, 범위를 벗어나면 400이 된다. */}
-                  <div style={{ ...S.optionRow, borderBottom: "none", paddingBottom: 0 }}>
+                  <div style={{ ...S.optionRow, ...(isMobile ? S.optionRowMobile : {}), borderBottom: "none", paddingBottom: 0 }}>
                     <label style={S.optionLabel}>군집화</label>
-                    <div style={{ display: "flex", gap: 8 }}>
+                    <div style={{ display: "flex", gap: 8, ...(isMobile ? S.optionFieldsMobile : {}) }}>
                       <input type="number" min="2" step="1" placeholder="최소 클러스터 크기 (2 이상)"
-                        style={S.optionInput}
+                        style={{ ...S.optionInput, ...(isMobile ? S.optionInputMobile : {}) }}
                         value={options.minClusterSize} onChange={setOption("minClusterSize")} />
                       <input type="number" min="1" step="1" placeholder="최소 샘플 수 (1 이상)"
-                        style={S.optionInput}
+                        style={{ ...S.optionInput, ...(isMobile ? S.optionInputMobile : {}) }}
                         value={options.minSamples} onChange={setOption("minSamples")} />
                     </div>
                   </div>
@@ -771,7 +784,7 @@ export default function AnalyzePage() {
                 )}
                 {uploadResult && (
                   <div style={S.successBox}>
-                    📊 파일 업로드 완료! AI 분석을 시작합니다.
+                    <Icon name="check" size={15} /> 파일 업로드 완료! AI 분석을 시작합니다.
                   </div>
                 )}
 
@@ -839,10 +852,10 @@ export default function AnalyzePage() {
                           <div style={{
                             width: 24, height: 24, borderRadius: "50%", display: "flex",
                             alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600,
-                            background: isDone ? "#D1FAE5" : isRun ? "#DBEAFE" : "#F3F4F6",
-                            color: isDone ? "#065F46" : isRun ? "#1D4ED8" : "#9CA3AF",
+                            background: isDone ? "#ECFDF5" : isRun ? "#EFF6FF" : "#F3F4F6",
+                            color: isDone ? "#047857" : isRun ? "#1D4ED8" : "#9CA3AF",
                           }}>
-                            {isDone ? "✓" : i + 1}
+                            {isDone ? <Icon name="check" size={13} strokeWidth={2.6} /> : i + 1}
                           </div>
                           <span style={{ color: isDone ? "#111827" : isRun ? "#1D4ED8" : "#9CA3AF", fontWeight: isDone || isRun ? 500 : 400 }}>
                             {s}
@@ -865,7 +878,7 @@ export default function AnalyzePage() {
                     )}
                     {done && (
                       <div style={{ ...S.successBox, marginTop: 8 }}>
-                        🎉 분석 완료! <strong>FAQ 추천</strong> 탭에서 결과를 확인하세요.
+                        <Icon name="check" size={15} /> 분석 완료! <strong>FAQ 추천</strong> 탭에서 결과를 확인하세요.
                       </div>
                     )}
                   </div>
@@ -927,7 +940,7 @@ export default function AnalyzePage() {
                           <button style={S.btnDeleteSm} disabled={deleting === r.analysisId}
                             title="내 이력에서 삭제"
                             onClick={(e) => { e.stopPropagation(); handleDeleteHistory(r); }}>
-                            {deleting === r.analysisId ? "…" : "✕"}
+                            {deleting === r.analysisId ? "…" : <Icon name="close" size={12} strokeWidth={2.2} />}
                           </button>
                         )}
                       </span>
@@ -1061,7 +1074,7 @@ export default function AnalyzePage() {
         <div>
           {candidates.length === 0 ? (
             <div style={{ ...S.card, ...S.cardBody, textAlign: "center", padding: 48, color: "#9CA3AF" }}>
-              <div style={{ fontSize: 36, marginBottom: 10 }}>🔍</div>
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 44, height: 44, borderRadius: "50%", background: "#F3F4F6", color: "#9CA3AF", marginBottom: 12 }}><Icon name="analyze" size={21} /></span>
               <div>분석을 먼저 실행해주세요.</div>
             </div>
           ) : (
@@ -1071,9 +1084,14 @@ export default function AnalyzePage() {
               const canExpand = Boolean(clusterPoints?.length) && typeof c.clusterLabel === "number";
               const questions = isOpen ? questionsOf(c.clusterLabel) : [];
               return (
-              <div key={c.candidateId} style={{ ...S.card, marginBottom: 12, padding: 18 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                  <div>
+              <div key={c.candidateId} style={{ ...S.card, marginBottom: 12, padding: isMobile ? 14 : 18 }}>
+                {/* 폰에서는 제목 옆에 버튼 3개가 들어갈 폭이 없어 글자가 세로로 쪼개진다.
+                    위아래로 쌓고 버튼은 아래 줄에 모은다. */}
+                {/* stretch를 주면 "반려됨" 뱃지가 카드 폭만큼 늘어난다. 왼쪽에 붙여 둔다. */}
+                <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row",
+                              justifyContent: "space-between", alignItems: "flex-start",
+                              gap: isMobile ? 10 : 0, marginBottom: 8 }}>
+                  <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginBottom: 4 }}>{c.standardQuestion}</div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
                       {canExpand ? (
@@ -1096,20 +1114,15 @@ export default function AnalyzePage() {
                     <div style={{ display: "flex", gap: 6 }}>
                       <button style={S.btnAccept} disabled={reviewing === c.candidateId}
                         onClick={() => handleAccept(c.candidateId)}>
-                        {reviewing === c.candidateId ? "처리 중..." : "✓ 승인"}
+                        {reviewing === c.candidateId ? "처리 중..." : "승인"}
                       </button>
                       <button style={S.btnSm} disabled={reviewing === c.candidateId}
                         onClick={() => setEditTarget(c)}>수정</button>
                       <button style={S.btnReject} disabled={reviewing === c.candidateId}
-                        onClick={() => { setRejectReason(""); setRejectTarget(c); }}>✗ 반려</button>
+                        onClick={() => { setRejectReason(""); setRejectTarget(c); }}>반려</button>
                     </div>
                   ) : (
-                    <span style={{
-                      fontSize: 12, fontWeight: 500, padding: "4px 12px", borderRadius: 20,
-                      ...statusChip(c.reviewStatus),
-                    }}>
-                      {statusLabel(c.reviewStatus)}
-                    </span>
+                    <StatusChip status={c.reviewStatus} />
                   )}
                 </div>
                 <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.6, marginBottom: 10 }}>{toPlainText(c.answerDraft)}</div>
@@ -1277,13 +1290,16 @@ const S = {
   modalLabel:  { display: "block", fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 5 },
   modalActions:{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 },
   input:       { width: "100%", minHeight: 40, padding: "9px 12px", border: "1.5px solid #D1D5DB", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" },
-  btnSm:       { padding: "7px 14px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, background: "#fff", color: "#374151", cursor: "pointer", fontFamily: "inherit" },
+  btnSm:       { padding: "7px 14px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, background: "#fff", color: "#374151", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
 
   page:        { padding: 28 },
   pageMobile:  { padding: 16 },
   pageTitle:   { fontSize: 20, fontWeight: 700, color: "#111827", marginBottom: 4 },
   pageSub:     { fontSize: 13, color: "#6B7280", marginBottom: 20 },
   tabs:        { display: "flex", gap: 2, background: "#F3F4F6", borderRadius: 10, padding: 4, width: "fit-content", marginBottom: 20 },
+  // 폰에서는 탭 글자가 줄바꿈되며 뭉개져, 폭을 꽉 채우고 넘치면 옆으로 민다
+  tabsMobile:  { width: "100%", overflowX: "auto", WebkitOverflowScrolling: "touch" },
+  tabMobile:   { whiteSpace: "nowrap", padding: "8px 14px" },
   tab:         { padding: "8px 20px", borderRadius: 8, fontSize: 13, cursor: "pointer", color: "#6B7280" },
   tabActive:   { background: "#fff", color: "#1565C0", fontWeight: 600, boxShadow: "0 1px 3px rgba(0,0,0,.08)" },
   historyFilters: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 16px", borderBottom: "1px solid #F3F4F6", flexWrap: "wrap" },
@@ -1310,7 +1326,12 @@ const S = {
   optionBox:   { marginTop: 14, padding: "14px 16px", background: "#F9FAFB", borderRadius: 10, border: "1px solid #F3F4F6" },
   optionTitle: { fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 10 },
   optionRow:   { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid #F3F4F6" },
-  optionLabel: { fontSize: 12, color: "#6B7280", display: "flex", alignItems: "center", gap: 6 },
+  // 폰에서는 라벨과 입력이 한 줄에 안 들어가 라벨 글자가 세로로 쪼개진다. 위아래로 쌓는다.
+  optionRowMobile: { flexDirection: "column", alignItems: "stretch", gap: 8 },
+  optionInputMobile: { width: "100%", minWidth: 0, flex: 1 },
+  // 입력 두 개가 나란히 있는 묶음. 폭을 넘지 않게 반반 나눠 준다.
+  optionFieldsMobile: { width: "100%", minWidth: 0 },
+  optionLabel: { fontSize: 12, color: "#6B7280", display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", flexShrink: 0 },
   optionInput: { height: 32, padding: "0 10px", border: "1px solid #D1D5DB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", width: 132 },
   matchToggle: { background: "none", border: "none", padding: 0, fontSize: 12, color: "#1565C0", fontWeight: 500, cursor: "pointer", fontFamily: "inherit" },
   questionBox: { marginTop: 12, paddingTop: 12, borderTop: "1px solid #F3F4F6" },
@@ -1318,13 +1339,13 @@ const S = {
   questionList:{ maxHeight: 260, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 },
   questionRow: { display: "flex", gap: 8, fontSize: 12, color: "#374151", lineHeight: 1.5 },
   questionNo:  { flexShrink: 0, fontFamily: "monospace", color: "#9CA3AF" },
-  checkLabel:  { fontSize: 12, color: "#374151", display: "flex", alignItems: "center", gap: 5, cursor: "pointer" },
+  checkLabel:  { fontSize: 12, color: "#374151", display: "flex", alignItems: "center", gap: 5, cursor: "pointer", whiteSpace: "nowrap" },
   dropzoneDrag:{ borderColor: "#1565C0", background: "#EFF8FF" },
   dropzoneDisabled: { opacity: 0.5, cursor: "not-allowed", background: "#F9FAFB" },
   permissionNotice: { padding: "10px 12px", background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: 8, fontSize: 12, color: "#92400E", marginBottom: 10 },
   btnPrimary:  { padding: "10px 20px", background: "#1565C0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
-  btnAccept:   { padding: "6px 14px", background: "#D1FAE5", color: "#065F46", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
-  btnReject:   { padding: "6px 14px", background: "#FDECEA", color: "#B91C1C", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  btnAccept:   { padding: "6px 14px", background: "#ECFDF5", color: "#047857", border: "1px solid #A7F3D0", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
+  btnReject:   { padding: "6px 14px", background: "#FFF1F2", color: "#BE123C", border: "1px solid #FECDD3", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
   runningBox:  { marginTop: 10, padding: "10px 14px", background: "#EFF8FF", border: "1px solid #BFDBFE", borderRadius: 8, fontSize: 12, color: "#1E40AF" },
-  successBox:  { marginTop: 10, padding: "10px 14px", background: "#D1FAE5", borderRadius: 8, fontSize: 13, color: "#065F46" },
+  successBox:  { marginTop: 10, padding: "10px 14px", background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 8, fontSize: 13, color: "#047857", display: "flex", alignItems: "center", gap: 8 },
 };
