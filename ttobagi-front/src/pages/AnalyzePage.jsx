@@ -495,14 +495,10 @@ export default function AnalyzePage() {
       } catch {
         /* 카테고리 API가 없거나 실패해도 수정 자체는 가능하다 */
       }
-      // 완료된 내 분석 중 가장 최근 것을 불러온다. 맨 위가 실패·진행 중이어도 화면이 비지 않는다.
-      try {
-        const r = await dashApi.getAnalysisHistory({ page: 0, size: 1, scope: "mine", status: "COMPLETED" });
-        const latest = r.data?.history?.[0];
-        if (!cancelled && latest) openAnalysis(latest);
-      } catch {
-        /* 완료된 분석이 없으면 빈 화면 안내를 그대로 둔다 */
-      }
+      // 지난 분석을 자동으로 열지 않는다.
+      // 이 화면은 새 로그를 올리러 들어오는 자리인데, 전에 돌린 분석이 열려 있으면
+      // 업로드 칸에 남의 파일 이름이 붙고 ②③ 탭에도 지난 결과가 차 있어
+      // 방금 돌린 것으로 잘못 읽힌다. 지난 결과는 오른쪽 이력에서 골라 연다.
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
