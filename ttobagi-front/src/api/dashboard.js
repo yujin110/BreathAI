@@ -63,19 +63,8 @@ export const dashApi = {
 
   // PATCH /api/v1/dashboard/analyze/{analysisId}/cancel
   //
-  // 아직 백엔드에 없는 엔드포인트다. 화면을 먼저 만들어 두고, 서버가 준비되면
-  // 그대로 붙는다. 지금 호출하면 404가 오고, 화면은 그 경우를 따로 안내한다.
-  //
-  // 취소는 돌고 있는 작업을 실제로 멈추는 일이라 백엔드와 AI 서버가 함께 받아야 한다.
-  // 프론트에서 구독만 끊으면 서버는 계속 돌기 때문에 취소가 아니다.
-  //
-  // 서버에 요청한 동작:
-  //   권한   관리자, 자기가 요청한 분석만
-  //   200    진행 중(PENDING·PREPROCESSING·ANALYZING)을 멈췄을 때
-  //   409    이미 COMPLETED·FAIL·CANCELED 인 분석
-  //   404    없는 분석이거나 남의 분석
-  // 함께 필요한 것: AnalysisJob.Status 에 CANCELED 추가,
-  //   AI 서버(FastAPI)의 작업 중단, 취소된 analysisId 의 콜백 무시.
+  // 분석을 시작한 사용자만 취소 가능하다. AI 중단 확인 후 성공한다.
+  // 403 권한 없음 / 404 없는 분석 / 409 종료된 분석 / 503 취소 확인 대기.
   cancelAnalysis: (analysisId) =>
     request("PATCH", `/api/v1/dashboard/analyze/${analysisId}/cancel`),
 
@@ -85,8 +74,8 @@ export const dashApi = {
   // 방법이 없으므로(항상 익명 → 403), fetch + ReadableStream으로 SSE를 직접 파싱해
   // 실제 Authorization 헤더를 싣는다. 백엔드는 SseEmitter.event().name("status")로
   // 이름 있는 이벤트만 보낸다.
-  // onEnd: 종료 상태(COMPLETED/FAIL)를 받지 못한 채 스트림이 끊겼을 때 호출된다.
-  // 백엔드 SseEmitterManager는 COMPLETED/FAIL에서 emitter.complete()로 연결을 닫지만,
+  // onEnd: 종료 상태(COMPLETED/FAIL/CANCELED) 없이 스트림이 끊겼을 때 호출된다.
+  // 백엔드 SseEmitterManager는 종료 상태에서 emitter.complete()로 연결을 닫지만,
   // 1시간 타임아웃이나 네트워크 단절로도 똑같이 "정상 종료"로 보인다. 그 경우 예외가
   // 발생하지 않아 onError도 안 타므로, 호출부가 폴링으로 넘어갈 수 있게 따로 알린다.
   streamAnalysisStatus: (analysisId, onMessage, onError, onEnd) => {
@@ -127,7 +116,7 @@ export const dashApi = {
               // 종료 상태를 미리 가려내 스트림이 끊겼을 때의 처리를 구분한다
               try {
                 const status = JSON.parse(raw).status;
-                if (status === "COMPLETED" || status === "FAIL") closedByServer = true;
+                if (["COMPLETED", "FAIL", "CANCELED"].includes(status)) closedByServer = true;
               } catch {
                 /* 파싱 실패는 onMessage에서 처리 */
               }
