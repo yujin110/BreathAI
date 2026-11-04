@@ -64,11 +64,18 @@ export const dashApi = {
   // PATCH /api/v1/dashboard/analyze/{analysisId}/cancel
   //
   // 아직 백엔드에 없는 엔드포인트다. 화면을 먼저 만들어 두고, 서버가 준비되면
-  // 그대로 붙는다. 요청 내용은 docs/backend-api-requests.md 에 적어 두었다.
-  // 지금 호출하면 404가 오고, 화면은 그 경우를 따로 안내한다.
+  // 그대로 붙는다. 지금 호출하면 404가 오고, 화면은 그 경우를 따로 안내한다.
   //
   // 취소는 돌고 있는 작업을 실제로 멈추는 일이라 백엔드와 AI 서버가 함께 받아야 한다.
   // 프론트에서 구독만 끊으면 서버는 계속 돌기 때문에 취소가 아니다.
+  //
+  // 서버에 요청한 동작:
+  //   권한   관리자, 자기가 요청한 분석만
+  //   200    진행 중(PENDING·PREPROCESSING·ANALYZING)을 멈췄을 때
+  //   409    이미 COMPLETED·FAIL·CANCELED 인 분석
+  //   404    없는 분석이거나 남의 분석
+  // 함께 필요한 것: AnalysisJob.Status 에 CANCELED 추가,
+  //   AI 서버(FastAPI)의 작업 중단, 취소된 analysisId 의 콜백 무시.
   cancelAnalysis: (analysisId) =>
     request("PATCH", `/api/v1/dashboard/analyze/${analysisId}/cancel`),
 
