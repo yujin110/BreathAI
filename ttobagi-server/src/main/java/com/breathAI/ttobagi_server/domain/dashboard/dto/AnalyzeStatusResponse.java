@@ -19,6 +19,8 @@ public class AnalyzeStatusResponse {
     private String status;
     private Integer progress;
     private String message;
+    // 내가 시작했고 아직 진행 중이면 true, 취소 버튼 표시용
+    private boolean cancelable;
 
     @JsonFormat(
         shape = JsonFormat.Shape.STRING,

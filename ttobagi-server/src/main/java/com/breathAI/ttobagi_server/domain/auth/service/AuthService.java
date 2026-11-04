@@ -11,6 +11,7 @@ import com.breathAI.ttobagi_server.domain.auth.repository.UserRepository;
 import com.breathAI.ttobagi_server.domain.auth.repository.PasswordResetTokenRepository;
 import com.breathAI.ttobagi_server.domain.auth.repository.SignupVerificationRepository;
 import com.breathAI.ttobagi_server.domain.dashboard.repository.AnalysisHistoryRepository;
+import com.breathAI.ttobagi_server.domain.dashboard.repository.AnalysisJobRepository;
 import com.breathAI.ttobagi_server.domain.dashboard.repository.UploadFileRepository;
 import com.breathAI.ttobagi_server.domain.faq.repository.FaqActionLogRepository;    
 import com.breathAI.ttobagi_server.domain.faq.repository.FaqCandidateRepository;
@@ -52,6 +53,7 @@ public class AuthService {
     // 회원 탈퇴 시 연관 데이터 정리를 위한 타 도메인 리포지토리
     private final UploadFileRepository uploadFileRepository;
     private final AnalysisHistoryRepository analysisHistoryRepository;
+    private final AnalysisJobRepository analysisJobRepository;
     private final FaqActionLogRepository faqActionLogRepository;
     private final FaqCandidateRepository faqCandidateRepository;
     private final FaqEditHistoryRepository faqEditHistoryRepository;
@@ -320,6 +322,7 @@ public class AuthService {
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
         uploadFileRepository.findByUploadedBy(user)
                 .forEach(file -> file.clearUploadedBy());
+        analysisJobRepository.clearRequestedBy(user);
         // 요청 이력은 그 사람의 목록일 뿐이라 지우고, 분석 데이터는 남긴다
         analysisHistoryRepository.deleteByUser(user);
         faqActionLogRepository.clearActedBy(user);

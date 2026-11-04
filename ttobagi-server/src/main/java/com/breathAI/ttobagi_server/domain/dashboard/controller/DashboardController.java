@@ -86,10 +86,22 @@ public class DashboardController {
     @GetMapping("/analyze/{analysisId}")
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
     public ResponseEntity<ApiResponse<AnalyzeStatusResponse>> getAnalysisStatus(
-            @PathVariable Long analysisId) {
+            @PathVariable Long analysisId,
+            @AuthenticationPrincipal String email) {
         return ResponseEntity.ok(ApiResponse.success(
-                dashboardService.getAnalysisStatus(analysisId),
+                dashboardService.getAnalysisStatus(analysisId, email),
                 "현재 분석 진행 상태를 조회합니다."));
+    }
+
+    // 진행 중인 분석 취소, 분석을 시작한 사람만 가능
+    @PatchMapping("/analyze/{analysisId}/cancel")
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<AnalyzeStatusResponse>> cancelAnalysis(
+            @PathVariable Long analysisId,
+            @AuthenticationPrincipal String email) {
+        return ResponseEntity.ok(ApiResponse.success(
+                dashboardService.cancelAnalysis(analysisId, email),
+                "분석이 취소되었습니다."));
     }
 
     // 분석 이력 목록 조회, scope=mine(기본)은 내 이력만, all은 모든 사람의 이력

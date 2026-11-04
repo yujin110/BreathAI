@@ -6,8 +6,11 @@ import com.breathAI.ttobagi_server.domain.dashboard.entity.UploadFile;
 import com.breathAI.ttobagi_server.domain.dashboard.entity.AnalysisJob.Status;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import jakarta.persistence.LockModeType;
 import java.time.LocalDate;
 
 import org.springframework.data.domain.Page;
@@ -18,6 +21,16 @@ import java.util.Optional;
 
 // 분석 작업 리포지토리, 조회 시 업로드 파일을 함께 로딩
 public interface AnalysisJobRepository extends JpaRepository<AnalysisJob, Long> {
+
+    // 상태를 바꾸기 전에 행을 잠근다, 취소와 AI 콜백이 동시에 와도 하나씩 처리된다
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT a FROM AnalysisJob a WHERE a.analysisId = :analysisId")
+    Optional<AnalysisJob> findByIdForUpdate(@Param("analysisId") Long analysisId);
+
+    // 회원 탈퇴 시 사용자 참조 해제
+    @Modifying
+    @Query("UPDATE AnalysisJob a SET a.requestedBy = null WHERE a.requestedBy = :user")
+    void clearRequestedBy(@Param("user") User user);
     
     @EntityGraph(attributePaths = {"uploadFile"})
     Optional<AnalysisJob> findByUploadFileUploadId(String uploadId);

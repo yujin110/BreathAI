@@ -1,5 +1,6 @@
 package com.breathAI.ttobagi_server.domain.dashboard.entity;
 
+import com.breathAI.ttobagi_server.domain.auth.entity.User;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -33,8 +34,13 @@ public class AnalysisJob {
     @JoinColumn(name = "upload_id", nullable = false, foreignKey = @ForeignKey(name = "fk_analysis_upload_id"))
     private UploadFile uploadFile;
 
+    // 이 분석을 시작한 사람, 취소 권한 판단에 쓴다. 예전 분석과 탈퇴한 사람은 비어 있다
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "requested_by", nullable = true, foreignKey = @ForeignKey(name = "fk_analysis_requested_by"))
+    private User requestedBy;
+
     @Column(name = "status", nullable = false, length = 20, 
-            columnDefinition = "VARCHAR(20) COMMENT 'PENDING, PREPROCESSING, ANALYZING, COMPLETED, FAIL'")
+            columnDefinition = "VARCHAR(20) COMMENT 'PENDING, PREPROCESSING, ANALYZING, COMPLETED, FAIL, CANCELED'")
     @Enumerated(EnumType.STRING)
     private Status status;
 
@@ -98,7 +104,12 @@ public class AnalysisJob {
     private Integer resolvedCountByAi;
 
     public enum Status {
-        PENDING, PREPROCESSING, ANALYZING, COMPLETED, FAIL
+        PENDING, PREPROCESSING, ANALYZING, COMPLETED, FAIL, CANCELED;
+
+        // 완료·실패·취소는 더 바뀌지 않는다
+        public boolean isFinished() {
+            return this == COMPLETED || this == FAIL || this == CANCELED;
+        }
     }
 
     @PrePersist
@@ -110,11 +121,12 @@ public class AnalysisJob {
     }
 
     @Builder
-    public AnalysisJob(UploadFile uploadFile, String fileName,
+    public AnalysisJob(UploadFile uploadFile, User requestedBy, String fileName,
                        Boolean isMaskingEnabled, Boolean isTranslationEnabled,
                        LocalDate periodStartDate, LocalDate periodEndDate,
                        Integer minClusterSize, Integer minSamples) {
         this.uploadFile = uploadFile;
+        this.requestedBy = requestedBy;
         this.fileName = fileName;
         this.isMaskingEnabled = isMaskingEnabled != null ? isMaskingEnabled : false;
         this.isTranslationEnabled = isTranslationEnabled != null ? isTranslationEnabled : false;
@@ -159,6 +171,17 @@ public class AnalysisJob {
         this.status = Status.FAIL;
         this.errorMessage = errorMessage;
         this.finishedAt = LocalDateTime.now();
+    }
+
+    // 시작한 사람의 취소 처리, 이후 AI 콜백은 무시한다
+    public void cancel() {
+        this.status = Status.CANCELED;
+        this.finishedAt = LocalDateTime.now();
+    }
+
+    // 분석을 시작한 사람인지 확인, 비어 있으면 아무도 아니다
+    public boolean isRequestedBy(User user) {
+        return requestedBy != null && user != null && Objects.equals(requestedBy.getUserId(), user.getUserId());
     }
 
     // AI가 보낸 파일별 요약값 기록, 다시 계산하지 않고 받은 값을 그대로 둔다

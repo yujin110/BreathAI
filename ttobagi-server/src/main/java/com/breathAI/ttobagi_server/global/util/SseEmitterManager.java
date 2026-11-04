@@ -62,7 +62,7 @@ public class SseEmitterManager {
             emitter.send(SseEmitter.event()
                     .name("status")
                     .data("{\"status\":\"" + status + "\",\"message\":\"" + message + "\"}"));
-            if ("COMPLETED".equals(status) || "FAIL".equals(status)) {
+            if ("COMPLETED".equals(status) || "FAIL".equals(status) || "CANCELED".equals(status)) {
                 emitter.complete();
             }
         } catch (Exception e) {
