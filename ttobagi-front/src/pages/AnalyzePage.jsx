@@ -912,22 +912,16 @@ export default function AnalyzePage() {
               </div>
             </div>
 
+            {/* 분석이 시작되기 전에는 보여 줄 것이 없다.
+                머리글만 남은 빈 상자를 두면 무언가 비어 있는 것처럼 보인다.
+                분석을 시작하는 버튼은 ①의 "업로드 시작" 하나뿐이라 여기서 할 일도 없다. */}
+            {(running || done) && (
             <div style={S.card}>
               <div style={S.cardHeader}>
                 <span style={S.cardTitle}>② AI 분석 실행</span>
                 {done && <span style={{ ...S.badge, background: "#D1FAE5", color: "#065F46" }}>완료</span>}
               </div>
               <div style={S.cardBody}>
-                {!running && !done && (
-                  <>
-                    <p style={{ fontSize: 13, color: "#6B7280", marginBottom: 16 }}>
-                      파일 업로드 시 자동으로 분석이 시작됩니다.
-                    </p>
-                    <button style={{ ...S.btnPrimary, opacity: 0.5 }} disabled>
-                      업로드 후 자동 시작
-                    </button>
-                  </>
-                )}
                 {(running || done) && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {STEPS.map((s, i) => {
@@ -979,6 +973,7 @@ export default function AnalyzePage() {
                 )}
               </div>
             </div>
+            )}
           </div>
 
           <div style={S.card}>
