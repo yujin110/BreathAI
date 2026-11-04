@@ -434,13 +434,14 @@ public class DashboardService {
         UploadFile uploadFile;
         Optional<UploadFile> existingUpload = uploadFileRepository.findByFileHash(fileHash);
         if (existingUpload.isPresent()) {
-                // 옵션이 같은 분석 중 가장 최근 것이 실패가 아니면 재사용한다
+                // 옵션이 같은 분석 중 가장 최근 것이 실패·취소가 아니면 재사용한다
                 Optional<AnalysisJob> existingJob = analysisJobRepository
                         .findByUploadFileOrderByCreatedAtDesc(existingUpload.get()).stream()
                         .filter(job -> job.hasSameOptions(parsedStartDate, parsedEndDate,
                                 isMaskingEnabled, isTranslationEnabled, minClusterSize, minSamples))
                         .findFirst();
-                if (existingJob.isPresent() && existingJob.get().getStatus() != AnalysisJob.Status.FAIL) {
+                if (existingJob.isPresent() && existingJob.get().getStatus() != AnalysisJob.Status.FAIL
+                        && existingJob.get().getStatus() != AnalysisJob.Status.CANCELED) {
                 AnalysisJob job = existingJob.get();
                 recordHistory(user, job);
                 log.info("중복 파일 감지 - 기존 분석 결과 반환: analysisId={}", job.getAnalysisId());
@@ -455,7 +456,7 @@ public class DashboardService {
                 }
                 // 해시로 업로드 기록을 하나만 찾으므로, 새로 만들지 않고 기존 기록을 다시 쓴다
                 uploadFile = existingUpload.get();
-                log.info("같은 옵션의 분석이 없거나 실패한 파일 재분석: uploadId={}", uploadFile.getUploadId());
+                log.info("같은 옵션의 분석이 없거나 실패·취소된 파일 재분석: uploadId={}", uploadFile.getUploadId());
         } else {
             String newUploadId = UUID.randomUUID().toString();
             uploadFile = UploadFile.builder()
@@ -473,6 +474,7 @@ public class DashboardService {
 
         AnalysisJob analysisJob = AnalysisJob.builder()
                 .uploadFile(uploadFile)
+                .requestedBy(user)
                 .fileName(originalFileName)
                 .isMaskingEnabled(isMaskingEnabled)
                 .isTranslationEnabled(isTranslationEnabled)
@@ -535,16 +537,50 @@ public class DashboardService {
     }
 
     // 분석 진행 상태 조회, SSE 끊김 시 폴링 용도
+    // cancelable은 내가 시작했고 아직 진행 중인 분석일 때만 true다
     @Transactional(readOnly = true)
-    public AnalyzeStatusResponse getAnalysisStatus(Long analysisId) {
+    public AnalyzeStatusResponse getAnalysisStatus(Long analysisId, String email) {
         AnalysisJob analysisJob = analysisJobRepository.findById(analysisId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ANALYSIS_NOT_FOUND));
+        User user = userRepository.findByEmail(email).orElse(null);
 
+        return toStatusResponse(analysisJob, user);
+    }
+
+    // 진행 중인 분석 취소, 분석을 시작한 사람만 할 수 있다
+    // AI에는 알리지 않으므로 AI는 끝까지 분석하고, 그 뒤 오는 콜백은 무시한다
+    @Transactional
+    public AnalyzeStatusResponse cancelAnalysis(Long analysisId, String email) {
+        User user = findUser(email);
+        AnalysisJob analysisJob = analysisJobRepository.findByIdForUpdate(analysisId)
+                .orElseThrow(() -> new CustomException(ErrorCode.ANALYSIS_NOT_FOUND));
+        if (!analysisJob.isRequestedBy(user)) {
+            throw new CustomException(ErrorCode.ACCESS_DENIED);
+        }
+        if (analysisJob.getStatus().isFinished()) {
+            throw new CustomException(ErrorCode.ANALYSIS_NOT_CANCELABLE);
+        }
+
+        analysisJob.cancel();
+        log.info("분석 취소: analysisId={}", analysisId);
+        // 커밋 뒤에 알려야 화면이 다시 조회했을 때 취소 상태가 보인다
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                sseEmitterManager.send(analysisId, AnalysisJob.Status.CANCELED.name(),
+                        getStatusMessage(AnalysisJob.Status.CANCELED));
+            }
+        });
+        return toStatusResponse(analysisJob, user);
+    }
+
+    private AnalyzeStatusResponse toStatusResponse(AnalysisJob analysisJob, User user) {
         return AnalyzeStatusResponse.builder()
                 .uploadId(analysisJob.getUploadFile().getUploadId())
                 .analysisId(analysisJob.getAnalysisId())
                 .status(analysisJob.getStatus().name())
                 .message(getStatusMessage(analysisJob.getStatus()))
+                .cancelable(!analysisJob.getStatus().isFinished() && analysisJob.isRequestedBy(user))
                 .updatedAt(analysisJob.getStartedAt() != null
                         ? analysisJob.getStartedAt()
                         : analysisJob.getCreatedAt())
@@ -646,13 +682,13 @@ public class DashboardService {
     // 중간 상태(PREPROCESSING, ANALYZING)와 실패는 상태만 갱신하고 종료한다
     @Transactional
     public void handleAnalysisCallback(Long analysisId, AnalysisCallbackRequest request) {
-        AnalysisJob analysisJob = analysisJobRepository.findById(analysisId)
+        // 취소와 동시에 와도 하나씩 처리되도록 행을 잠그고 읽는다
+        AnalysisJob analysisJob = analysisJobRepository.findByIdForUpdate(analysisId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ANALYSIS_NOT_FOUND));
 
-        // 이미 끝난 분석에 온 콜백은 다시 저장하지 않는다
+        // 이미 끝난(완료·실패·취소) 분석에 온 콜백은 저장하지 않는다
         // AI 서버가 재전송으로 판단하지 않도록 오류 없이 정상 응답한다
-        if (analysisJob.getStatus() == AnalysisJob.Status.COMPLETED
-                || analysisJob.getStatus() == AnalysisJob.Status.FAIL) {
+        if (analysisJob.getStatus().isFinished()) {
             log.warn("이미 종료된 분석의 콜백 무시: analysisId={}, 현재 상태={}, 수신 상태={}",
                     analysisId, analysisJob.getStatus(), request.getStatus());
             return;
@@ -965,6 +1001,7 @@ public class DashboardService {
             case ANALYZING -> "현재 AI 클러스터링을 진행 중입니다. 잠시만 기다려 주세요.";
             case COMPLETED -> "분석이 완료되었습니다.";
             case FAIL -> "분석에 실패했습니다.";
+            case CANCELED -> "분석이 취소되었습니다.";
         };
     }
 

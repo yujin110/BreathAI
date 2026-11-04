@@ -37,6 +37,7 @@ public final class AuditActionCatalog {
 
             // 분석
             entry("POST", "/api/v1/dashboard/analyze/upload", "분석 파일 업로드", ANALYSIS),
+            entry("PATCH", "/api/v1/dashboard/analyze/{analysisId}/cancel", "분석 취소", ANALYSIS, "analysisId", "분석"),
             entry("DELETE", "/api/v1/dashboard/analyze/history/{analysisId}", "분석 이력 삭제", ANALYSIS, "analysisId", "분석"),
             entry("GET", "/api/v1/dashboard/usage", "사용량 조회", READ),
             entry("GET", "/api/v1/dashboard/analyze/result", "대시보드 조회", READ),
