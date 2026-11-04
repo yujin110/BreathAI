@@ -199,6 +199,9 @@ export default function AnalyzePage() {
   const [openQuestions, setOpenQuestions] = useState(() => new Set());
   // 후보 수정의 카테고리 선택지. GET /faq/categories 가 없으면 빈 배열로 둔다.
   const [categories, setCategories]     = useState([]);
+  // 취소 확인 창을 띄울지, 취소 요청을 보내는 중인지
+  const [cancelAsking, setCancelAsking] = useState(false);
+  const [cancelling, setCancelling]     = useState(false);
   const [startedAt, setStartedAt]   = useState(null); // 분석 시작 시각
   const [elapsed, setElapsed]       = useState(0);    // 경과 초
   const [options, setOptions]       = useState({
@@ -456,6 +459,39 @@ export default function AnalyzePage() {
   }, []);
 
   // 내 이력에서만 삭제한다. 분석 결과·후보·반영된 FAQ는 그대로 남는다.
+  // 돌고 있는 분석을 멈춘다.
+  // 서버가 작업을 실제로 중단해야 하는 일이라 백엔드 응답을 받고 나서 화면을 정리한다.
+  // 먼저 끊고 성공으로 보여 주면, 실패했을 때 사용자는 멈춘 줄 알지만 서버는 계속 돈다.
+  const handleCancel = async () => {
+    if (!analysisId) return;
+    setCancelling(true);
+    try {
+      await dashApi.cancelAnalysis(analysisId);
+      streamRef.current?.close();
+      stopPolling();
+      setRunning(false);
+      setDone(false);
+      setStep(-1);
+      setCancelAsking(false);
+      toast.success("분석을 취소했습니다.");
+      refreshHistoryRef.current?.();
+    } catch (err) {
+      // 서버에 아직 취소가 없으면 404가 온다. 그때 "취소됐다"고 하면 거짓말이 된다.
+      if (err?.status === 404 || err?.status === 405) {
+        toast.error("서버에 취소 기능이 아직 없습니다. 분석은 계속 진행됩니다.");
+      } else if (err?.status === 409) {
+        // 누르는 사이에 끝났거나 이미 취소된 분석
+        toast.info("이미 끝난 분석입니다.");
+        refreshHistoryRef.current?.();
+      } else {
+        toast.error(err.message || "분석을 취소하지 못했습니다.");
+      }
+      setCancelAsking(false);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   const handleDeleteHistory = async (item) => {
     if (!window.confirm("내 이력에서 삭제합니다. 분석 결과와 반영된 FAQ는 그대로 남습니다.")) return;
     setDeleting(item.analysisId);
@@ -876,22 +912,16 @@ export default function AnalyzePage() {
               </div>
             </div>
 
+            {/* 분석이 시작되기 전에는 보여 줄 것이 없다.
+                머리글만 남은 빈 상자를 두면 무언가 비어 있는 것처럼 보인다.
+                분석을 시작하는 버튼은 ①의 "업로드 시작" 하나뿐이라 여기서 할 일도 없다. */}
+            {(running || done) && (
             <div style={S.card}>
               <div style={S.cardHeader}>
                 <span style={S.cardTitle}>② AI 분석 실행</span>
                 {done && <span style={{ ...S.badge, background: "#D1FAE5", color: "#065F46" }}>완료</span>}
               </div>
               <div style={S.cardBody}>
-                {!running && !done && (
-                  <>
-                    <p style={{ fontSize: 13, color: "#6B7280", marginBottom: 16 }}>
-                      파일 업로드 시 자동으로 분석이 시작됩니다.
-                    </p>
-                    <button style={{ ...S.btnPrimary, opacity: 0.5 }} disabled>
-                      업로드 후 자동 시작
-                    </button>
-                  </>
-                )}
                 {(running || done) && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {STEPS.map((s, i) => {
@@ -924,6 +954,14 @@ export default function AnalyzePage() {
                           AI 서버가 중간 단계를 보고하지 않아 완료 전까지 위 단계 표시가 갱신되지 않을 수 있습니다.
                           화면을 벗어나도 분석은 계속되며, 돌아오면 이력에서 결과를 확인할 수 있습니다.
                         </div>
+                        {/* 잘못 올렸거나 오래 걸릴 때 중간에 멈춘다. 되돌릴 수 없어 한 번 묻는다. */}
+                        {isAdmin && (
+                          <button type="button" style={S.btnCancel}
+                            disabled={cancelling}
+                            onClick={() => setCancelAsking(true)}>
+                            분석 취소
+                          </button>
+                        )}
                       </div>
                     )}
                     {done && (
@@ -935,6 +973,7 @@ export default function AnalyzePage() {
                 )}
               </div>
             </div>
+            )}
           </div>
 
           <div style={S.card}>
@@ -1227,6 +1266,29 @@ export default function AnalyzePage() {
       )}
 
       {/* 반려 사유 입력 — 본문 { reason }은 선택이라 비워 두고 보내도 된다 */}
+      {/* 분석 취소 확인 — 되돌릴 수 없으므로 무엇이 사라지는지 적어 둔다 */}
+      {cancelAsking && (
+        <div style={S.modalBg} onClick={() => !cancelling && setCancelAsking(false)}>
+          <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalTitle}>분석을 취소할까요?</div>
+            <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, marginBottom: 6 }}>
+              지금까지 진행한 분석이 버려지고 결과는 남지 않습니다.
+              다시 분석하려면 파일을 처음부터 올려야 합니다.
+            </div>
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 14 }}>
+              분석 #{analysisId} · {formatElapsed(elapsed)}
+            </div>
+            <div style={S.modalActions}>
+              <button style={S.btnSm} disabled={cancelling}
+                onClick={() => setCancelAsking(false)}>계속 진행</button>
+              <button style={S.btnReject} disabled={cancelling} onClick={handleCancel}>
+                {cancelling ? "취소하는 중..." : "분석 취소"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {rejectTarget && (
         <div style={S.modalBg} onClick={() => setRejectTarget(null)}>
           <div style={S.modal} onClick={(e) => e.stopPropagation()}>
@@ -1397,6 +1459,9 @@ const S = {
   btnPrimary:  { padding: "10px 20px", background: "#1565C0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   btnAccept:   { padding: "6px 14px", background: "#ECFDF5", color: "#047857", border: "1px solid #A7F3D0", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
   btnReject:   { padding: "6px 14px", background: "#FFF1F2", color: "#BE123C", border: "1px solid #FECDD3", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
+  // 진행 중 상자 안에 들어간다. 같이 쓰이는 파란 글씨보다 눈에 덜 띄어야
+  // 기다리는 것이 기본이고 취소가 예외라는 것이 드러난다.
+  btnCancel:   { marginTop: 10, padding: "6px 12px", background: "#fff", color: "#BE123C", border: "1px solid #FECDD3", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   runningBox:  { marginTop: 10, padding: "10px 14px", background: "#EFF8FF", border: "1px solid #BFDBFE", borderRadius: 8, fontSize: 12, color: "#1E40AF" },
   successBox:  { marginTop: 10, padding: "10px 14px", background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 8, fontSize: 13, color: "#047857", display: "flex", alignItems: "center", gap: 8 },
 };
