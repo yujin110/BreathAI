@@ -1,6 +1,6 @@
 # BreathAI
 
-Built with Llama. AI 서버의 현재 기본 LLM은 `meta-llama/Llama-3.1-8B-Instruct`입니다.
+Built with Llama. 이 브랜치의 기본 LLM은 `meta-llama/Llama-3.1-8B-Instruct`이며 서버 배포 검증은 아직 남아 있습니다.
 설정·배포·복구 및 검증 범위는 [Llama 전환 기록](docs/llama-migration-20261031.md)을 참고하세요.
 승인 후 공식 8B 실행 결과와 남은 사실성 문제는 [실행·호환성 검증](docs/llama31-8b-execution-20261031.md)에 기록했습니다.
 최신 답변 생성 방식과 참고용 20문항 결과는 [근거 외 생성 원인·수정 기록](docs/grounding-fix-reference-twenty-20261031.md)을 참고하세요.
