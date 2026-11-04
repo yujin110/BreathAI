@@ -143,20 +143,23 @@ def build_refine_prompt(cluster: dict, tag_cfg: dict, shared: dict,
 
     feedback = (
         '\n\n[REFINE 컨텍스트 — 반드시 반영]\n'
+        '이전 답변과 평가 코멘트는 사실의 근거가 아닙니다. 위 검색 근거와 대조하여 '
+        '확인되지 않는 시간·연락처·정책·절차·약속은 삭제하고 새 사실을 추가하지 마세요.\n'
         f'(1) 이전 답변:\n{prev_answer}\n\n'
         f'(2) 이전 답변의 평가 코멘트: {comment}\n\n'
         f'(3) 보완이 필요한 축 (1~5 점수):\n{weak_block}\n\n'
         f'(4) needs_review 사유: {reasons}\n\n'
         '[지시]\n'
         '- 이전 답변의 약점을 위 축 기준으로 직접 해결할 것\n'
-        '- 특히 actionability가 낮으면 사용자가 즉시 취할 행동을 단계별로 명시'
-        ' (예: "1) 역무실 인터폰 호출 → 2) 1577-1234로 위치/열차번호 안내")\n'
-        '- essential_info가 낮으면 연락처/링크/시간 등 누락 정보를 보강\n'
+        '- 행동 안내는 검색 근거 또는 승인된 고정 안내에 명시된 내용만 사용할 것\n'
+        '- 연락처/링크/시간이 근거에 없으면 추가하지 말고 확인 불가로 안내\n'
         '- accuracy가 낮으면 표준질문 의도에 직접 응답\n'
         '- 한국어로만 답변 (한자/중국어/일본어 금지)\n'
         '- 답변 한 통을 자연스럽게 통합하여 출력 (인사~마무리)\n'
     )
-    return base + feedback
+    contract = AR.GA.read_contract(base)
+    contract['review_feedback'] = review_reasons
+    return AR.GA.append_contract(base + feedback, contract)
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +181,8 @@ def main() -> None:
     _log(f'refine 대상 (needsReview): {len(targets)}건')
 
     # 모델 로드 (1회)
-    tok, mdl = AE.load_llm()
+    from services.llm_runtime import load_pipeline_models
+    tok, mdl, judge_tok, judge_mdl = load_pipeline_models(AR.load_model, AE.load_llm)
     ce = AE.load_ce()
 
     OUTPUT_JSONL.write_text('', encoding='utf-8')
@@ -231,7 +235,7 @@ def main() -> None:
         # 3) 새 답변 평가
         e2 = AE.e2_score(ce, new_q, best_body) if new_q else None
         cluster_for_eval = {**c, 'standardQuestion': new_q, 'answerDraft': best_body}
-        judge, judge_raw = AE.llm_judge(tok, mdl, cluster_for_eval)
+        judge, judge_raw = AE.llm_judge(judge_tok, judge_mdl, cluster_for_eval)
         llm_mean = (
             round(sum(judge[k] for k in ('accuracy', 'politeness',
                                          'actionability', 'essential_info')) / 4.0, 2)

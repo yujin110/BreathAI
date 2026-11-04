@@ -22,6 +22,14 @@ def load_source(name, filename, dependencies):
 
 
 class PipelineRetrievalTest(unittest.TestCase):
+    def test_fallback_does_not_reuse_unsupported_model_claims(self):
+        torch = types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: False))
+        ar = load_source('_test_grounding_fallback', 'answer_regenerator.py', {'torch': torch})
+        out = ar.assemble_answer_fallback('근거 없이 1시간 이내 무료 수리를 보장합니다.',
+                                          {'prefix': '또타24입니다.', 'suffix': '감사합니다.'})
+        self.assertNotIn('무료 수리', out)
+        self.assertIn('확인할 수 없습니다', out)
+
     def test_empty_kb_stops_before_expensive_generation(self):
         names = ['answer_regenerator', 'answer_evaluator', 'answer_refiner', 'oos_refresher',
                  'preprocess', 'clustering', 'faq_generator', 'retriever']

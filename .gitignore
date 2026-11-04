@@ -55,6 +55,10 @@ dataset/counselling_info.csv
 dataset/일반상담.xlsx
 
 # Temporary files
+# Local inference outputs and hardware logs (preserve on disk, exclude from commits)
+/evaluation/results/
+# Frozen evaluation fixture containing local KB content
+/evaluation/llama_reference_twenty.json
 tmp/
 temp/
 *.tmp
