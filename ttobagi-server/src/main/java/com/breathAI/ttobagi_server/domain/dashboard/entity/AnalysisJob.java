@@ -39,6 +39,17 @@ public class AnalysisJob {
     @JoinColumn(name = "requested_by", nullable = true, foreignKey = @ForeignKey(name = "fk_analysis_requested_by"))
     private User requestedBy;
 
+    @Column(name = "cancel_requested_at")
+    private LocalDateTime cancelRequestedAt;
+
+    @Column(name = "ai_submission_state", nullable = false, length = 20)
+    private String aiSubmissionState = "PENDING";
+
+    public void requestCancellation() { this.cancelRequestedAt = LocalDateTime.now(); }
+    public void clearCancellation() { this.cancelRequestedAt = null; }
+    public boolean isCancellationRequested() { return cancelRequestedAt != null; }
+    public void submissionState(String state) { this.aiSubmissionState = state; }
+
     @Column(name = "status", nullable = false, length = 20, 
             columnDefinition = "VARCHAR(20) COMMENT 'PENDING, PREPROCESSING, ANALYZING, COMPLETED, FAIL, CANCELED'")
     @Enumerated(EnumType.STRING)

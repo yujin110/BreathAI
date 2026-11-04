@@ -29,8 +29,10 @@ class ContainerEntrypointTest(unittest.TestCase):
         child = Mock(pid=12345)
         child.wait.side_effect = [subprocess.TimeoutExpired('worker', 0), 0]
         with patch('services.container_entrypoint.os.name', 'posix'), \
+                patch('services.container_entrypoint.psutil.Process') as process, \
                 patch('services.container_entrypoint.os.killpg', create=True) as kill, \
                 patch('services.container_entrypoint.signal.SIGKILL', 9, create=True):
+            process.return_value.children.return_value = []
             stop_children([child], grace=0)
         self.assertEqual(kill.call_count, 2)  # TERM then KILL, covering GPU descendants.
         child.kill.assert_not_called()

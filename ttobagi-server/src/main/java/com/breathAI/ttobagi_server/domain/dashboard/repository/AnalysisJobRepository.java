@@ -21,6 +21,8 @@ import java.util.Optional;
 
 // 분석 작업 리포지토리, 조회 시 업로드 파일을 함께 로딩
 public interface AnalysisJobRepository extends JpaRepository<AnalysisJob, Long> {
+    @Query("SELECT a.analysisId FROM AnalysisJob a WHERE a.cancelRequestedAt IS NOT NULL AND a.status NOT IN :terminal")
+    List<Long> findCancellationPendingIds(@Param("terminal") List<Status> terminal);
 
     // 상태를 바꾸기 전에 행을 잠근다, 취소와 AI 콜백이 동시에 와도 하나씩 처리된다
     @Lock(LockModeType.PESSIMISTIC_WRITE)

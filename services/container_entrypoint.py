@@ -5,6 +5,8 @@ import signal
 import subprocess
 import sys
 import time
+import psutil
+from pathlib import Path
 
 
 def commands(mode):
@@ -15,6 +17,19 @@ def commands(mode):
 
 
 def stop_children(children, grace=30):
+    # Jobs now own separate sessions. Capture descendants before stopping their
+    # worker parent so those sessions do not become untracked GPU orphans.
+    descendants = []
+    for child in children:
+        try:
+            descendants.extend(psutil.Process(child.pid).children(recursive=True))
+        except psutil.NoSuchProcess:
+            pass
+    for process in descendants:
+        try:
+            process.terminate()
+        except psutil.NoSuchProcess:
+            pass
     # Signal the worker's process group too: its GPU subprocess must not survive.
     for child in children:
         if os.name == "posix":
@@ -37,6 +52,32 @@ def stop_children(children, grace=30):
             else:
                 child.kill()
             child.wait()
+    _, alive = psutil.wait_procs(descendants, timeout=max(0, deadline - time.monotonic()))
+    for process in alive:
+        try:
+            process.kill()
+        except psutil.NoSuchProcess:
+            pass
+    psutil.wait_procs(alive, timeout=5)
+
+
+def stop_job_sessions():
+    """The worker may have died before its children could be enumerated."""
+    from services.job_store import JobStore
+    from services.job_control import job_lock, stop_execution
+    root = Path(os.environ.get('TTOBAGI_JOB_ROOT', '/data/jobs'))
+    if not (root / 'jobs.sqlite3').is_file():
+        return
+    store = JobStore(root)
+    with store.connect() as db:
+        ids = [row[0] for row in db.execute(
+            "SELECT id FROM jobs WHERE state IN ('RUNNING','CANCELLING') AND process_pid IS NOT NULL")]
+    for analysis_id in ids:
+        try:
+            with job_lock(root, analysis_id):
+                stop_execution(store.get(analysis_id), grace=1, deadline=time.monotonic() + 5)
+        except Exception as exc:
+            print(f'analysis={analysis_id} shutdown errorType={type(exc).__name__}', flush=True)
 
 
 def supervise(mode):
@@ -66,6 +107,8 @@ def supervise(mode):
         return 0
     finally:
         stop_children(children)
+        if mode != 'api':
+            stop_job_sessions()
         for sig, handler in previous.items():
             signal.signal(sig, handler)
 

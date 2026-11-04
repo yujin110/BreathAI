@@ -1,6 +1,12 @@
 # For a Linux Docker host/VM with NVIDIA Container Toolkit, not nested Docker on Vast.
 services:
   api:
+    # Cancellation must see the worker's process IDs, not unrelated API-container PIDs.
+    pid: "service:worker"
+    depends_on:
+      worker:
+        condition: service_started
+        restart: true
     image: ${AI_API_IMAGE:-breathai-api:local}
     build:
       context: .

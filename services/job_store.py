@@ -16,6 +16,7 @@ class JobStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self.path = self.root / "jobs.sqlite3"
         with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
             db.execute("""CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL,
                 metadata TEXT NOT NULL, input_path TEXT NOT NULL,
@@ -25,6 +26,45 @@ class JobStore:
             db.execute("""CREATE TABLE IF NOT EXISTS progress_callbacks (
                 job_id INTEGER NOT NULL, status TEXT NOT NULL, delivery TEXT NOT NULL,
                 updated REAL NOT NULL, PRIMARY KEY(job_id,status))""")
+            columns = {row[1] for row in db.execute('PRAGMA table_info(jobs)')}
+            for name, kind in (('process_pid', 'INTEGER'), ('process_started', 'REAL'),
+                               ('process_namespace', 'TEXT'), ('execution_managed', 'INTEGER NOT NULL DEFAULT 0'),
+                               ('cancel_requested', 'REAL'), ('cancel_completed', 'REAL'),
+                               ('cleanup_error', 'TEXT')):
+                if name not in columns:
+                    db.execute(f'ALTER TABLE jobs ADD COLUMN {name} {kind}')
+
+    def set_process(self, analysis_id, pid, started):
+        from services.job_control import process_namespace
+        with self.connect() as db:
+            db.execute('UPDATE jobs SET process_pid=?,process_started=?,process_namespace=? WHERE id=? AND state=\'RUNNING\'',
+                       (pid, started, process_namespace(), analysis_id))
+
+    def request_cancel(self, analysis_id):
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT state FROM jobs WHERE id=?', (analysis_id,)).fetchone()
+            if row is None:
+                raise KeyError(analysis_id)
+            if row[0] not in {'QUEUED', 'RUNNING', 'CANCELLING'}:
+                raise Conflict('Job already finished')
+            db.execute("UPDATE jobs SET state='CANCELLING',cancel_requested=COALESCE(cancel_requested,?),"
+                       "payload=NULL,delivery='SUPPRESSED',updated=? WHERE id=? AND state IN ('QUEUED','RUNNING')",
+                       (time.time(), time.time(), analysis_id))
+            db.execute("UPDATE progress_callbacks SET delivery='SUPPRESSED' WHERE job_id=?", (analysis_id,))
+
+    def complete_cancel(self, analysis_id):
+        with self.connect() as db:
+            db.execute("UPDATE jobs SET state='CANCELED',cancel_completed=?,cleanup_error=NULL,updated=? "
+                       "WHERE id=? AND state='CANCELLING'", (time.time(), time.time(), analysis_id))
+
+    def cancel_error(self, analysis_id, error):
+        with self.connect() as db:
+            db.execute('UPDATE jobs SET cleanup_error=?,updated=? WHERE id=?', (error, time.time(), analysis_id))
+
+    def cancelling(self):
+        with self.connect() as db:
+            return [row[0] for row in db.execute("SELECT id FROM jobs WHERE state='CANCELLING'")]
 
     def claim_progress(self, analysis_id, status):
         with self.connect() as db:
@@ -76,14 +116,16 @@ class JobStore:
             db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM jobs WHERE state='RUNNING'").fetchone():
                 raise RuntimeError("Interrupted/running job requires operator reconciliation")
+            if db.execute("SELECT 1 FROM jobs WHERE state='CANCELLING'").fetchone():
+                return None
             row = db.execute("SELECT id FROM jobs WHERE state='QUEUED' ORDER BY updated,id LIMIT 1").fetchone()
             if row:
-                db.execute("UPDATE jobs SET state='RUNNING',updated=? WHERE id=?", (time.time(), row[0]))
+                db.execute("UPDATE jobs SET state='RUNNING',execution_managed=1,updated=? WHERE id=?", (time.time(), row[0]))
         return self.get(row[0]) if row else None
 
     def finish(self, analysis_id, payload):
         with self.connect() as db:
-            db.execute("UPDATE jobs SET state=?,payload=?,delivery='PENDING',updated=? WHERE id=?",
+            db.execute("UPDATE jobs SET state=?,payload=?,delivery='PENDING',updated=? WHERE id=? AND state='RUNNING'",
                        (payload["status"], json.dumps(payload, ensure_ascii=False, allow_nan=False), time.time(), analysis_id))
 
     def pending_callback(self):

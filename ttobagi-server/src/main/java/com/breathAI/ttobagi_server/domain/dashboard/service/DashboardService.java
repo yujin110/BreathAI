@@ -74,6 +74,8 @@ public class DashboardService {
     private final SseEmitterManager sseEmitterManager;
     private final UploadArchiveService uploadArchiveService;
     private final AnalysisHistoryRepository analysisHistoryRepository;
+    private final AnalysisCancellationService analysisCancellationService;
+    private final AnalysisSubmissionService analysisSubmissionService;
 
     // 월 단위 챗봇 사용량 조회, 전월 대비 증가율 포함
     @Transactional(readOnly = true)
@@ -527,13 +529,7 @@ public class DashboardService {
     // AI 서버에 분석 요청을 보내지 못했을 때 대기 중인 분석을 실패로 바꾸고 알린다
     // 요청 스레드 밖에서 실행되므로 저장소 메서드 단위 트랜잭션으로 처리한다
     private void markPipelineRequestFailed(Long analysisId, String reason) {
-        analysisJobRepository.findById(analysisId).ifPresent(job -> {
-            // 그 사이 AI 콜백으로 진행된 분석은 건드리지 않는다
-            if (job.getStatus() != AnalysisJob.Status.PENDING) return;
-            job.fail(reason);
-            analysisJobRepository.save(job);
-            sseEmitterManager.send(analysisId, "FAIL", "분석에 실패했습니다.");
-        });
+        analysisSubmissionService.markRequestFailed(analysisId, reason);
     }
 
     // 분석 진행 상태 조회, SSE 끊김 시 폴링 용도
@@ -548,30 +544,9 @@ public class DashboardService {
     }
 
     // 진행 중인 분석 취소, 분석을 시작한 사람만 할 수 있다
-    // AI에는 알리지 않으므로 AI는 끝까지 분석하고, 그 뒤 오는 콜백은 무시한다
-    @Transactional
+    // 취소 의도를 커밋한 뒤 AI를 호출한다. HTTP 호출 중 DB 행 잠금을 잡지 않는다.
     public AnalyzeStatusResponse cancelAnalysis(Long analysisId, String email) {
-        User user = findUser(email);
-        AnalysisJob analysisJob = analysisJobRepository.findByIdForUpdate(analysisId)
-                .orElseThrow(() -> new CustomException(ErrorCode.ANALYSIS_NOT_FOUND));
-        if (!analysisJob.isRequestedBy(user)) {
-            throw new CustomException(ErrorCode.ACCESS_DENIED);
-        }
-        if (analysisJob.getStatus().isFinished()) {
-            throw new CustomException(ErrorCode.ANALYSIS_NOT_CANCELABLE);
-        }
-
-        analysisJob.cancel();
-        log.info("분석 취소: analysisId={}", analysisId);
-        // 커밋 뒤에 알려야 화면이 다시 조회했을 때 취소 상태가 보인다
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                sseEmitterManager.send(analysisId, AnalysisJob.Status.CANCELED.name(),
-                        getStatusMessage(AnalysisJob.Status.CANCELED));
-            }
-        });
-        return toStatusResponse(analysisJob, user);
+        return analysisCancellationService.cancel(analysisId, email);
     }
 
     private AnalyzeStatusResponse toStatusResponse(AnalysisJob analysisJob, User user) {
@@ -693,6 +668,12 @@ public class DashboardService {
                     analysisId, analysisJob.getStatus(), request.getStatus());
             return;
         }
+
+        // An AI terminal callback means AI completion already won its atomic race
+        // with cancellation; its cancel API will return 409. Preserve that result.
+        // Progress arriving during cancellation must not regress the visible state.
+        if (analysisJob.isCancellationRequested()
+                && ("PREPROCESSING".equals(request.getStatus()) || "ANALYZING".equals(request.getStatus()))) return;
 
         // 중간 상태 콜백 (PREPROCESSING, ANALYZING)
         if ("PREPROCESSING".equals(request.getStatus())) {

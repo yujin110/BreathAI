@@ -26,6 +26,9 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.*;
+import com.breathAI.ttobagi_server.domain.dashboard.service.AnalysisCancellationService;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -43,9 +46,45 @@ class AnalysisCancelIntegrationTest {
 
     @Autowired private MockMvc mvc;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private AnalysisCancellationService cancellations;
 
     @MockitoBean private WebClientUtil webClientUtil;
     @MockitoBean private EmailService emailService;
+
+    @Test
+    @DisplayName("AI 취소 실패는 503이며 취소 의도를 보존하고 복구 후에만 CANCELED가 된다")
+    void aiCancellationFailureIsRecovered() throws Exception {
+        String admin = adminToken();
+        Long id = upload(admin, content(), Map.of());
+        jdbcTemplate.update("UPDATE gold_analysis_job SET ai_submission_state='ACCEPTED' WHERE analysis_id=?", id);
+        doThrow(new WebClientResponseException(503, "busy", null, null, null)).when(webClientUtil).cancelJob(id);
+        cancel(admin, id).andExpect(status().isServiceUnavailable());
+        checkStatus(admin, id).andExpect(jsonPath("$.data.status").value("PENDING"));
+        callback(id, "{\"status\":\"ANALYZING\"}");
+        checkStatus(admin, id).andExpect(jsonPath("$.data.status").value("PENDING"));
+        assertThat(jdbcTemplate.queryForObject("SELECT cancel_requested_at FROM gold_analysis_job WHERE analysis_id=?",
+                java.sql.Timestamp.class, id)).isNotNull();
+        doNothing().when(webClientUtil).cancelJob(id);
+        cancellations.recover();
+        checkStatus(admin, id).andExpect(jsonPath("$.data.status").value("CANCELED"));
+    }
+
+    @Test
+    @DisplayName("AI 완료가 먼저 확정되면 결과 콜백을 보존하고 취소는 409를 반환한다")
+    void terminalCallbackWinsBeforeAiCancellation() throws Exception {
+        String admin = adminToken();
+        Long id = upload(admin, content(), Map.of());
+        jdbcTemplate.update("UPDATE gold_analysis_job SET ai_submission_state='ACCEPTED' WHERE analysis_id=?", id);
+        doAnswer(inv -> {
+            callback(id, summaryCallback(1));
+            throw new WebClientResponseException(409, "completed", null, null, null);
+        }).when(webClientUtil).cancelJob(id);
+        when(webClientUtil.jobStatus(id)).thenReturn("COMPLETED");
+        cancel(admin, id).andExpect(status().isConflict());
+        checkStatus(admin, id).andExpect(jsonPath("$.data.status").value("COMPLETED"));
+        assertThat(jdbcTemplate.queryForObject("SELECT total_log_count FROM gold_analysis_job WHERE analysis_id=?",
+                Integer.class, id)).isEqualTo(1);
+    }
 
     @Test
     @DisplayName("시작한 사람이 진행 중인 분석을 취소하면 CANCELED가 되고, 다시 취소하면 409이다")

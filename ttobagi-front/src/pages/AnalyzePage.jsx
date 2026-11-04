@@ -54,6 +54,7 @@ const JOB_STATUS = {
   ANALYZING:     { label: "분석 중",   background: "#DBEAFE", color: "#1E40AF" },
   COMPLETED:     { label: "완료",      background: "#D1FAE5", color: "#065F46" },
   FAIL:          { label: "실패",      background: "#FDECEA", color: "#B91C1C" },
+  CANCELED:      { label: "취소됨",    background: "#F1F5F9", color: "#475569" },
 };
 
 // 모르는 상태가 와도 글자는 그대로 보여 준다. 숨기면 무슨 일인지 알 수 없다.
@@ -202,6 +203,7 @@ export default function AnalyzePage() {
   // 취소 확인 창을 띄울지, 취소 요청을 보내는 중인지
   const [cancelAsking, setCancelAsking] = useState(false);
   const [cancelling, setCancelling]     = useState(false);
+  const [cancelable, setCancelable]     = useState(false);
   const [startedAt, setStartedAt]   = useState(null); // 분석 시작 시각
   const [elapsed, setElapsed]       = useState(0);    // 경과 초
   const [options, setOptions]       = useState({
@@ -219,6 +221,7 @@ export default function AnalyzePage() {
   // 정리하지 않으면 다른 메뉴로 이동한 뒤에도 스트림과 setInterval이 계속 살아남는다.
   const streamRef = useRef(null);
   const pollRef = useRef(null);
+  const activeAnalysisRef = useRef(null);
 
   // 이력 목록을 "마지막에 불러온 조건 그대로" 다시 부르는 함수.
   // watchAnalysis가 loadHistory보다 먼저 선언돼 있어 직접 참조할 수 없고,
@@ -236,6 +239,7 @@ export default function AnalyzePage() {
   }, []);
 
   useEffect(() => () => {
+    activeAnalysisRef.current = null;
     streamRef.current?.close();
     stopPolling();
   }, [stopPolling]);
@@ -243,8 +247,15 @@ export default function AnalyzePage() {
   // 분석 진행 감시. 업로드 직후와, 이력에서 진행 중인 분석을 열었을 때 모두 쓴다.
   // SSE를 먼저 붙이고 끊기면 폴링으로 이어받는다.
   const watchAnalysis = useCallback((id) => {
+    activeAnalysisRef.current = id;
     streamRef.current?.close();
     stopPolling();
+    setCancelable(false);
+    // SSE contains status only; ownership comes from the authenticated status API.
+    dashApi.getAnalysisStatus(id).then((r) => {
+      if (activeAnalysisRef.current === id && terminalDoneRef.current !== id)
+        setCancelable(r.data?.cancelable === true);
+    }).catch(() => {});
 
     const loadResults = () => {
       stopPolling();
@@ -264,6 +275,7 @@ export default function AnalyzePage() {
     // 백엔드 AnalysisJob.Status는 PENDING / PREPROCESSING / ANALYZING / COMPLETED / FAIL이고,
     // 구독 즉시 현재 상태를 한 번 보내준다. 화면 단계는 5개인데 상태는 3개뿐이라 대표 지점만 찍는다.
     const applyStatus = (status) => {
+      if (activeAnalysisRef.current !== id) return true;
       if (status === "PENDING")       setStep(-1);
       if (status === "PREPROCESSING") setStep(0);
       if (status === "ANALYZING")     setStep(2);
@@ -274,15 +286,21 @@ export default function AnalyzePage() {
       setHistory((rows) => rows.map((row) =>
         row.analysisId === id && row.status !== status ? { ...row, status } : row));
 
-      if (status !== "COMPLETED" && status !== "FAIL") return false;
+      if (!["COMPLETED", "FAIL", "CANCELED"].includes(status)) return false;
 
       // 종료는 한 번만 처리한다. SSE가 같은 상태를 다시 보내거나
       // 폴링과 겹쳐도 결과 조회·알림이 두 번 나가지 않게 한다.
       if (terminalDoneRef.current === id) return true;
       terminalDoneRef.current = id;
+      setCancelable(false);
+      stopPolling();
+      streamRef.current?.close();
 
       if (status === "COMPLETED") {
         loadResults();
+      } else if (status === "CANCELED") {
+        setRunning(false); setDone(false); setStep(-1);
+        setAnalyzeResult(null); setCandidates([]);
       } else {
         setRunning(false);
         toast.error("분석에 실패했습니다.");
@@ -296,12 +314,17 @@ export default function AnalyzePage() {
 
     // SSE가 끊기면 폴링으로 이어받는다. 중복 시작을 막아야 interval이 여러 개 돌지 않는다.
     const startPolling = () => {
+      if (activeAnalysisRef.current !== id) return;
+      if (terminalDoneRef.current === id) return;
       if (pollRef.current) return;
       pollRef.current = setInterval(async () => {
         try {
           const statusRes = await dashApi.getAnalysisStatus(id);
+          if (activeAnalysisRef.current !== id) return;
+          setCancelable(statusRes.data?.cancelable === true);
           if (applyStatus(statusRes.data?.status)) stopPolling();
         } catch (err) {
+          if (activeAnalysisRef.current !== id) return;
           stopPolling();
           setRunning(false);
           toast.error(err.message || "분석 상태 조회에 실패했습니다.");
@@ -398,6 +421,10 @@ export default function AnalyzePage() {
   const openAnalysis = useCallback(async (item) => {
     if (!item?.analysisId) return;
     const id = item.analysisId;
+    activeAnalysisRef.current = id;
+    streamRef.current?.close();
+    stopPolling();
+    setCancelable(false);
     setAnalysisId(id);
     setAnalyzeResult(null);
     setCandidates([]);
@@ -415,7 +442,7 @@ export default function AnalyzePage() {
     // 서버에 현재 상태를 물어본다. 묻지 않고 "진행 중입니다"를 띄우면
     // 곧이어 SSE가 FAIL을 전해 알림이 겹친다.
     let status = item.status;
-    if (status !== "COMPLETED" && status !== "FAIL") {
+    if (!["COMPLETED", "FAIL", "CANCELED"].includes(status)) {
       try {
         status = (await dashApi.getAnalysisStatus(id)).data?.status || status;
       } catch {
@@ -426,6 +453,15 @@ export default function AnalyzePage() {
     }
     // 목록이 낡아 있었으면(적힌 상태와 실제가 다르면) 목록도 맞춰 둔다.
     const staleRow = status && status !== item.status;
+    if (activeAnalysisRef.current !== id) return;
+
+    if (status === "CANCELED") {
+      setCancelable(false);
+      setDone(false); setRunning(false); setStep(-1);
+      toast.info("취소된 분석입니다.");
+      if (staleRow) refreshHistoryRef.current?.();
+      return;
+    }
 
     if (status === "FAIL") {
       setDone(false); setRunning(false); setStep(-1);
@@ -451,12 +487,13 @@ export default function AnalyzePage() {
       dashApi.getFileAnalyzeResult(id),
       faqApi.getCandidates(id),
     ]);
+    if (activeAnalysisRef.current !== id) return;
     if (resultRes.status === "fulfilled" && resultRes.value?.data) setAnalyzeResult(resultRes.value.data);
     if (candRes.status === "fulfilled" && candRes.value?.data?.recommendations) {
       setCandidates(candRes.value.data.recommendations);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [stopPolling]);
 
   // 내 이력에서만 삭제한다. 분석 결과·후보·반영된 FAQ는 그대로 남는다.
   // 돌고 있는 분석을 멈춘다.
@@ -467,18 +504,27 @@ export default function AnalyzePage() {
     setCancelling(true);
     try {
       await dashApi.cancelAnalysis(analysisId);
+      if (activeAnalysisRef.current !== analysisId) {
+        setCancelAsking(false);
+        toast.success("분석을 취소했습니다.");
+        refreshHistoryRef.current?.();
+        return;
+      }
+      terminalDoneRef.current = analysisId;
+      setCancelable(false);
       streamRef.current?.close();
       stopPolling();
       setRunning(false);
       setDone(false);
       setStep(-1);
+      setAnalyzeResult(null); setCandidates([]);
       setCancelAsking(false);
       toast.success("분석을 취소했습니다.");
       refreshHistoryRef.current?.();
     } catch (err) {
-      // 서버에 아직 취소가 없으면 404가 온다. 그때 "취소됐다"고 하면 거짓말이 된다.
-      if (err?.status === 404 || err?.status === 405) {
-        toast.error("서버에 취소 기능이 아직 없습니다. 분석은 계속 진행됩니다.");
+      // 완료 확인 실패를 성공으로 표시하지 않는다. 구독은 유지한다.
+      if (err?.status === 404) {
+        toast.error("분석을 찾을 수 없습니다.");
       } else if (err?.status === 409) {
         // 누르는 사이에 끝났거나 이미 취소된 분석
         toast.info("이미 끝난 분석입니다.");
@@ -578,6 +624,8 @@ export default function AnalyzePage() {
     }
 
     // 이전 분석의 구독이 남아 있으면 단계 표시가 섞이므로 먼저 정리한다
+    activeAnalysisRef.current = null;
+    setCancelable(false);
     streamRef.current?.close();
     stopPolling();
     setUploading(true);
@@ -955,7 +1003,7 @@ export default function AnalyzePage() {
                           화면을 벗어나도 분석은 계속되며, 돌아오면 이력에서 결과를 확인할 수 있습니다.
                         </div>
                         {/* 잘못 올렸거나 오래 걸릴 때 중간에 멈춘다. 되돌릴 수 없어 한 번 묻는다. */}
-                        {isAdmin && (
+                        {cancelable && (
                           <button type="button" style={S.btnCancel}
                             disabled={cancelling}
                             onClick={() => setCancelAsking(true)}>
