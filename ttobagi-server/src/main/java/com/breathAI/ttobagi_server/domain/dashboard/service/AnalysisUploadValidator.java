@@ -91,6 +91,7 @@ public class AnalysisUploadValidator {
 
         Integer logTypeColumn = columns.get("logType");
         Integer percentColumn = columns.get("keywordMatchPercent");
+        String percentLabel = file.renamedColumns().getOrDefault("keywordMatchPercent", "keywordMatchPercent");
         Map<BigInteger, Integer> seenNumbers = new HashMap<>();
         for (int i = 1; i < records.size(); i++) {
             CSVRecord record = records.get(i);
@@ -130,7 +131,7 @@ public class AnalysisUploadValidator {
                 if (percentColumn != null) {
                     String percent = cell(record, percentColumn);
                     if (!isPercent(percent)) {
-                        report.add(row, "keywordMatchPercent", "키워드 매칭률은 0~100의 백분율이어야 합니다(예: 30 또는 30%).");
+                        report.add(row, percentLabel, "키워드 매칭률은 0~100의 백분율이어야 합니다(예: 30 또는 30%).");
                     }
                 } else if (columns.containsKey("ai_percent")) {
                     String raw = cell(record, columns.get("ai_percent"));

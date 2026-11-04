@@ -13,6 +13,14 @@ import Icon from "../components/Icon.jsx";
 // Spring의 spring.servlet.multipart.max-file-size=50MB 와 동일하게 맞춘다
 const HISTORY_SIZE = 10;
 
+// 동의어 종류별 색. 색 하나가 뜻 하나를 맡아야 글자를 읽지 않고도 구분된다.
+// FAQ 관리 목록의 키워드(파랑)·유사어(보라)와 같은 규칙을 쓴다.
+const SYNONYM_KIND = {
+  SYNONYM: { label: "유사어", background: "#F5F3FF", color: "#5B21B6", border: "#DDD6FE" },
+  TYPO:    { label: "오타",   background: "#FEF3C7", color: "#92400E", border: "#FDE68A" },
+  ABBR:    { label: "약어",   background: "#ECFEFF", color: "#0E7490", border: "#A5F3FC" },
+};
+
 // 백엔드 ReviewStatus: PENDING / ACCEPTED / REJECTED / APPLIED
 const REVIEW_STATUS = {
   APPLIED:  { label: "반영됨", text: "#047857", dot: "#10B981", bg: "#ECFDF5", border: "#A7F3D0" },
@@ -38,11 +46,19 @@ function StatusChip({ status }) {
   );
 }
 
-// 백엔드 AnalysisJob.Status 5종에 맞춘 색. 진행 중은 파랑, 완료 초록, 실패 빨강.
-function statusStyle(status) {
-  if (status === "COMPLETED") return { background: "#D1FAE5", color: "#065F46" };
-  if (status === "FAIL")      return { background: "#FDECEA", color: "#B91C1C" };
-  return { background: "#DBEAFE", color: "#1E40AF" };
+// 백엔드 AnalysisJob.Status 5종. 진행 중은 파랑, 완료 초록, 실패 빨강.
+// 영문 원문을 그대로 보여주면 읽는 사람이 어느 단계인지 알기 어려워 한글 이름을 붙인다.
+const JOB_STATUS = {
+  PENDING:       { label: "대기 중",   background: "#DBEAFE", color: "#1E40AF" },
+  PREPROCESSING: { label: "전처리 중", background: "#DBEAFE", color: "#1E40AF" },
+  ANALYZING:     { label: "분석 중",   background: "#DBEAFE", color: "#1E40AF" },
+  COMPLETED:     { label: "완료",      background: "#D1FAE5", color: "#065F46" },
+  FAIL:          { label: "실패",      background: "#FDECEA", color: "#B91C1C" },
+};
+
+// 모르는 상태가 와도 글자는 그대로 보여 준다. 숨기면 무슨 일인지 알 수 없다.
+function jobStatus(status) {
+  return JOB_STATUS[status] || { label: status, background: "#DBEAFE", color: "#1E40AF" };
 }
 
 // requestedAt은 백엔드가 'Z'를 붙여 UTC로 보낸다(AnalyzeHistoryResponse @JsonFormat,
@@ -158,6 +174,9 @@ export default function AnalyzePage() {
   const [uploading, setUploading]   = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [uploadErrors, setUploadErrors] = useState(null); // 업로드 400의 행별 오류
+  // 업로드 영역에 보여 줄 파일 이름. 새로 고른 파일이 없을 때 쓴다.
+  // 이력에서 연 분석의 파일을 여기에 담아, 왼쪽(업로드)과 오른쪽(이력)이 같은 분석을 가리키게 한다.
+  const [openedFileName, setOpenedFileName] = useState(null);
   const [running, setRunning]       = useState(false);
   const [step, setStep]             = useState(-1);
   const [done, setDone]             = useState(false);
@@ -180,6 +199,9 @@ export default function AnalyzePage() {
   const [openQuestions, setOpenQuestions] = useState(() => new Set());
   // 후보 수정의 카테고리 선택지. GET /faq/categories 가 없으면 빈 배열로 둔다.
   const [categories, setCategories]     = useState([]);
+  // 취소 확인 창을 띄울지, 취소 요청을 보내는 중인지
+  const [cancelAsking, setCancelAsking] = useState(false);
+  const [cancelling, setCancelling]     = useState(false);
   const [startedAt, setStartedAt]   = useState(null); // 분석 시작 시각
   const [elapsed, setElapsed]       = useState(0);    // 경과 초
   const [options, setOptions]       = useState({
@@ -229,6 +251,8 @@ export default function AnalyzePage() {
       setStep(4);
       setDone(true);
       setRunning(false);
+      // 끝난 파일을 들고 있을 이유가 없다. 비워야 다음 파일을 고를 때 걸리지 않는다.
+      setFile(null);
       faqApi.getCandidates(id).then((r) => {
         if (r.data?.recommendations) setCandidates(r.data.recommendations);
       }).catch((err) => toast.error(err.message || "FAQ 후보를 불러오지 못했습니다."));
@@ -243,6 +267,12 @@ export default function AnalyzePage() {
       if (status === "PENDING")       setStep(-1);
       if (status === "PREPROCESSING") setStep(0);
       if (status === "ANALYZING")     setStep(2);
+
+      // 이력 목록의 상태는 목록을 불러온 시점 값이라 그대로 두면 PENDING에 머문다.
+      // 전처리·분석으로 넘어가도 뱃지가 안 따라가 "HDBSCAN이 도는데 대기 중"으로 보인다.
+      // 목록 전체를 다시 부르면 보던 자리가 튀므로, 이 분석의 줄만 상태를 갈아 끼운다.
+      setHistory((rows) => rows.map((row) =>
+        row.analysisId === id && row.status !== status ? { ...row, status } : row));
 
       if (status !== "COMPLETED" && status !== "FAIL") return false;
 
@@ -372,6 +402,14 @@ export default function AnalyzePage() {
     setAnalyzeResult(null);
     setCandidates([]);
 
+    // 업로드 영역은 "지금 보고 있는 분석"을 가리켜야 한다.
+    // 치우지 않으면 아까 올린 파일이 그대로 남아, 이력에서 다른 분석을 열어도
+    // 왼쪽에는 엉뚱한 파일 이름이 붙어 있다.
+    setFile(null);
+    setUploadResult(null);
+    setUploadErrors(null);
+    setOpenedFileName(item.fileName || null);
+
     // 목록의 status는 이력을 불러온 시점 값이라, 그 뒤에 끝난 분석도 진행 중으로 남아 있다.
     // COMPLETED·FAIL은 되돌아가지 않으므로 그대로 믿고, 진행 중으로 적혀 있을 때만
     // 서버에 현재 상태를 물어본다. 묻지 않고 "진행 중입니다"를 띄우면
@@ -421,6 +459,39 @@ export default function AnalyzePage() {
   }, []);
 
   // 내 이력에서만 삭제한다. 분석 결과·후보·반영된 FAQ는 그대로 남는다.
+  // 돌고 있는 분석을 멈춘다.
+  // 서버가 작업을 실제로 중단해야 하는 일이라 백엔드 응답을 받고 나서 화면을 정리한다.
+  // 먼저 끊고 성공으로 보여 주면, 실패했을 때 사용자는 멈춘 줄 알지만 서버는 계속 돈다.
+  const handleCancel = async () => {
+    if (!analysisId) return;
+    setCancelling(true);
+    try {
+      await dashApi.cancelAnalysis(analysisId);
+      streamRef.current?.close();
+      stopPolling();
+      setRunning(false);
+      setDone(false);
+      setStep(-1);
+      setCancelAsking(false);
+      toast.success("분석을 취소했습니다.");
+      refreshHistoryRef.current?.();
+    } catch (err) {
+      // 서버에 아직 취소가 없으면 404가 온다. 그때 "취소됐다"고 하면 거짓말이 된다.
+      if (err?.status === 404 || err?.status === 405) {
+        toast.error("서버에 취소 기능이 아직 없습니다. 분석은 계속 진행됩니다.");
+      } else if (err?.status === 409) {
+        // 누르는 사이에 끝났거나 이미 취소된 분석
+        toast.info("이미 끝난 분석입니다.");
+        refreshHistoryRef.current?.();
+      } else {
+        toast.error(err.message || "분석을 취소하지 못했습니다.");
+      }
+      setCancelAsking(false);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   const handleDeleteHistory = async (item) => {
     if (!window.confirm("내 이력에서 삭제합니다. 분석 결과와 반영된 FAQ는 그대로 남습니다.")) return;
     setDeleting(item.analysisId);
@@ -460,14 +531,10 @@ export default function AnalyzePage() {
       } catch {
         /* 카테고리 API가 없거나 실패해도 수정 자체는 가능하다 */
       }
-      // 완료된 내 분석 중 가장 최근 것을 불러온다. 맨 위가 실패·진행 중이어도 화면이 비지 않는다.
-      try {
-        const r = await dashApi.getAnalysisHistory({ page: 0, size: 1, scope: "mine", status: "COMPLETED" });
-        const latest = r.data?.history?.[0];
-        if (!cancelled && latest) openAnalysis(latest);
-      } catch {
-        /* 완료된 분석이 없으면 빈 화면 안내를 그대로 둔다 */
-      }
+      // 지난 분석을 자동으로 열지 않는다.
+      // 이 화면은 새 로그를 올리러 들어오는 자리인데, 전에 돌린 분석이 열려 있으면
+      // 업로드 칸에 남의 파일 이름이 붙고 ②③ 탭에도 지난 결과가 차 있어
+      // 방금 돌린 것으로 잘못 읽힌다. 지난 결과는 오른쪽 이력에서 골라 연다.
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -488,6 +555,10 @@ export default function AnalyzePage() {
     }
     setFile(f);
     setUploadErrors(null);
+    // 앞선 업로드 결과가 남아 있으면 "업로드 시작" 버튼이 가려져 다시 올릴 수가 없다.
+    // 새 파일을 고른 순간이 새 작업의 시작이므로 앞 결과를 치운다.
+    setUploadResult(null);
+    setOpenedFileName(null);
   };
 
   const doUpload = async () => {
@@ -529,6 +600,8 @@ export default function AnalyzePage() {
       });
       setUploading(false);
       setUploadResult(res.data);
+      // 분석이 끝나면 file을 비우므로, 이름은 따로 담아 둬야 계속 보인다
+      setOpenedFileName(file.name);
       const analysisId = res.data?.analysisId;
       if (!analysisId) throw new Error("서버가 분석 ID를 반환하지 않았습니다.");
       setAnalysisId(analysisId);
@@ -719,7 +792,7 @@ export default function AnalyzePage() {
                   onDrop={(e) => { if (!isAdmin) return; e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); }}>
                   <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 48, height: 48, borderRadius: 14, background: "#EFF6FF", color: "#1565C0", marginBottom: 12 }}><Icon name="upload" size={22} /></span>
                   <div style={{ fontSize: 14, fontWeight: 500, color: "#374151", marginBottom: 4 }}>
-                    {file ? file.name : "CSV 또는 엑셀 파일을 드래그하거나 클릭하여 선택"}
+                    {file?.name || openedFileName || "CSV 또는 엑셀 파일을 드래그하거나 클릭하여 선택"}
                   </div>
                   <div style={{ fontSize: 12, color: "#9CA3AF" }}>.csv 또는 .xlsx, 최대 {MAX_UPLOAD_MB}MB</div>
                   <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>원본 대화 로그와 기존 분석 양식을 그대로 업로드할 수 있습니다.</div>
@@ -783,10 +856,22 @@ export default function AnalyzePage() {
                     {uploading ? "업로드 중..." : "업로드 시작"}
                   </button>
                 )}
-                {uploadResult && (
-                  <div style={S.successBox}>
-                    <Icon name="check" size={15} /> 파일 업로드 완료! AI 분석을 시작합니다.
-                  </div>
+                {/* 한 줄이 상태를 따라가야 한다. 분석이 끝난 뒤에도 "지금부터 시작합니다"가
+                    남아 있으면 읽는 사람이 어느 단계인지 알 수 없다. */}
+                {(uploadResult || openedFileName) && !uploading && (
+                  done ? (
+                    <div style={S.successBox}>
+                      <Icon name="check" size={15} /> 분석 완료! 아래 탭에서 결과를 확인하세요.
+                    </div>
+                  ) : running ? (
+                    <div style={S.runningBox}>
+                      분석이 진행 중입니다. 끝나면 결과가 자동으로 열립니다.
+                    </div>
+                  ) : uploadResult ? (
+                    <div style={S.successBox}>
+                      <Icon name="check" size={15} /> 파일 업로드 완료! AI 분석을 시작합니다.
+                    </div>
+                  ) : null
                 )}
 
                 {/* 파일 내용 오류 — 400 응답의 data { totalErrors, errors[{row, column, reason}] }.
@@ -827,22 +912,16 @@ export default function AnalyzePage() {
               </div>
             </div>
 
+            {/* 분석이 시작되기 전에는 보여 줄 것이 없다.
+                머리글만 남은 빈 상자를 두면 무언가 비어 있는 것처럼 보인다.
+                분석을 시작하는 버튼은 ①의 "업로드 시작" 하나뿐이라 여기서 할 일도 없다. */}
+            {(running || done) && (
             <div style={S.card}>
               <div style={S.cardHeader}>
                 <span style={S.cardTitle}>② AI 분석 실행</span>
                 {done && <span style={{ ...S.badge, background: "#D1FAE5", color: "#065F46" }}>완료</span>}
               </div>
               <div style={S.cardBody}>
-                {!running && !done && (
-                  <>
-                    <p style={{ fontSize: 13, color: "#6B7280", marginBottom: 16 }}>
-                      파일 업로드 시 자동으로 분석이 시작됩니다.
-                    </p>
-                    <button style={{ ...S.btnPrimary, opacity: 0.5 }} disabled>
-                      업로드 후 자동 시작
-                    </button>
-                  </>
-                )}
                 {(running || done) && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {STEPS.map((s, i) => {
@@ -875,6 +954,14 @@ export default function AnalyzePage() {
                           AI 서버가 중간 단계를 보고하지 않아 완료 전까지 위 단계 표시가 갱신되지 않을 수 있습니다.
                           화면을 벗어나도 분석은 계속되며, 돌아오면 이력에서 결과를 확인할 수 있습니다.
                         </div>
+                        {/* 잘못 올렸거나 오래 걸릴 때 중간에 멈춘다. 되돌릴 수 없어 한 번 묻는다. */}
+                        {isAdmin && (
+                          <button type="button" style={S.btnCancel}
+                            disabled={cancelling}
+                            onClick={() => setCancelAsking(true)}>
+                            분석 취소
+                          </button>
+                        )}
                       </div>
                     )}
                     {done && (
@@ -886,6 +973,7 @@ export default function AnalyzePage() {
                 )}
               </div>
             </div>
+            )}
           </div>
 
           <div style={S.card}>
@@ -936,7 +1024,9 @@ export default function AnalyzePage() {
                         #{r.analysisId}{isOpen && <span style={S.nowTag}>보는 중</span>}
                       </span>
                       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ ...S.statusTag, ...statusStyle(r.status) }}>{r.status}</span>
+                        <span style={{ ...S.statusTag, background: jobStatus(r.status).background, color: jobStatus(r.status).color }}>
+                          {jobStatus(r.status).label}
+                        </span>
                         {r.isMine && (
                           <button style={S.btnDeleteSm} disabled={deleting === r.analysisId}
                             title="내 이력에서 삭제"
@@ -1128,20 +1218,19 @@ export default function AnalyzePage() {
                 </div>
                 <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.6, marginBottom: 10 }}>{toPlainText(c.answerDraft)}</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                  {(c.synonyms || []).map((s, i) => (
-                    <span key={i} style={{
-                      fontSize: 11, padding: "2px 8px",
-                      background: s.type === "TYPO" ? "#FEF3C7" : "#EFF8FF",
-                      color: s.type === "TYPO" ? "#92400E" : "#1565C0",
-                      borderRadius: 12,
-                      border: `1px solid ${s.type === "TYPO" ? "#FDE68A" : "#BFDBFE"}`,
-                    }}>
-                      {s.text}
-                      <span style={{ fontSize: 9, marginLeft: 3, opacity: 0.6 }}>
-                        {s.type === "TYPO" ? "오타" : s.type === "ABBR" ? "약어" : "유사어"}
+                  {(c.synonyms || []).map((s, i) => {
+                    const kind = SYNONYM_KIND[s.type] || SYNONYM_KIND.SYNONYM;
+                    return (
+                      <span key={i} style={{
+                        fontSize: 11, padding: "2px 8px", borderRadius: 12,
+                        background: kind.background, color: kind.color,
+                        border: `1px solid ${kind.border}`,
+                      }}>
+                        {s.text}
+                        <span style={{ fontSize: 9, marginLeft: 3, opacity: 0.6 }}>{kind.label}</span>
                       </span>
-                    </span>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {/* 이 후보로 묶인 실제 질문들. 목록이 길어도 카드가 늘어나지 않게 안에서 스크롤한다. */}
@@ -1177,6 +1266,29 @@ export default function AnalyzePage() {
       )}
 
       {/* 반려 사유 입력 — 본문 { reason }은 선택이라 비워 두고 보내도 된다 */}
+      {/* 분석 취소 확인 — 되돌릴 수 없으므로 무엇이 사라지는지 적어 둔다 */}
+      {cancelAsking && (
+        <div style={S.modalBg} onClick={() => !cancelling && setCancelAsking(false)}>
+          <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalTitle}>분석을 취소할까요?</div>
+            <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, marginBottom: 6 }}>
+              지금까지 진행한 분석이 버려지고 결과는 남지 않습니다.
+              다시 분석하려면 파일을 처음부터 올려야 합니다.
+            </div>
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 14 }}>
+              분석 #{analysisId} · {formatElapsed(elapsed)}
+            </div>
+            <div style={S.modalActions}>
+              <button style={S.btnSm} disabled={cancelling}
+                onClick={() => setCancelAsking(false)}>계속 진행</button>
+              <button style={S.btnReject} disabled={cancelling} onClick={handleCancel}>
+                {cancelling ? "취소하는 중..." : "분석 취소"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {rejectTarget && (
         <div style={S.modalBg} onClick={() => setRejectTarget(null)}>
           <div style={S.modal} onClick={(e) => e.stopPropagation()}>
@@ -1347,6 +1459,9 @@ const S = {
   btnPrimary:  { padding: "10px 20px", background: "#1565C0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   btnAccept:   { padding: "6px 14px", background: "#ECFDF5", color: "#047857", border: "1px solid #A7F3D0", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
   btnReject:   { padding: "6px 14px", background: "#FFF1F2", color: "#BE123C", border: "1px solid #FECDD3", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
+  // 진행 중 상자 안에 들어간다. 같이 쓰이는 파란 글씨보다 눈에 덜 띄어야
+  // 기다리는 것이 기본이고 취소가 예외라는 것이 드러난다.
+  btnCancel:   { marginTop: 10, padding: "6px 12px", background: "#fff", color: "#BE123C", border: "1px solid #FECDD3", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   runningBox:  { marginTop: 10, padding: "10px 14px", background: "#EFF8FF", border: "1px solid #BFDBFE", borderRadius: 8, fontSize: 12, color: "#1E40AF" },
   successBox:  { marginTop: 10, padding: "10px 14px", background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 8, fontSize: 13, color: "#047857", display: "flex", alignItems: "center", gap: 8 },
 };
