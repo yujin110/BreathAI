@@ -61,6 +61,17 @@ export const dashApi = {
   deleteAnalysisHistory: (analysisId) =>
     request("DELETE", `/api/v1/dashboard/analyze/history/${analysisId}`),
 
+  // PATCH /api/v1/dashboard/analyze/{analysisId}/cancel
+  //
+  // 아직 백엔드에 없는 엔드포인트다. 화면을 먼저 만들어 두고, 서버가 준비되면
+  // 그대로 붙는다. 요청 내용은 docs/backend-api-requests.md 에 적어 두었다.
+  // 지금 호출하면 404가 오고, 화면은 그 경우를 따로 안내한다.
+  //
+  // 취소는 돌고 있는 작업을 실제로 멈추는 일이라 백엔드와 AI 서버가 함께 받아야 한다.
+  // 프론트에서 구독만 끊으면 서버는 계속 돌기 때문에 취소가 아니다.
+  cancelAnalysis: (analysisId) =>
+    request("PATCH", `/api/v1/dashboard/analyze/${analysisId}/cancel`),
+
   // GET /api/v1/dashboard/analyze/stream/{analysisId} (SSE)
   // 이 백엔드의 JwtAuthenticationFilter는 Authorization 헤더만 읽고 쿼리 파라미터 토큰은
   // 전혀 확인하지 않는다. EventSource는 커스텀 헤더를 보낼 수 없어 이 엔드포인트를 인증할
