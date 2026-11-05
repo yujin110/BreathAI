@@ -9,7 +9,7 @@ import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
 import Icon from "../components/Icon.jsx";
-import { scopeSentence, scopeCaption, legacyDefaultNotice } from "../utils/analysisScope.js";
+import { scopeSentence, scopeCaption, legacyDefaultNotice, completionNotice } from "../utils/analysisScope.js";
 
 // Spring의 spring.servlet.multipart.max-file-size=50MB 와 동일하게 맞춘다
 const HISTORY_SIZE = 10;
@@ -70,6 +70,29 @@ function ScopeNotice({ result }) {
     <div style={S.scopeNotice}>
       <div>{sentence}</div>
       {legacy && <div style={{ marginTop: 4, opacity: 0.8 }}>{legacy}</div>}
+    </div>
+  );
+}
+
+// 결과가 비어 있을 때 무슨 일이 있었는지 알린다.
+//
+// 대상 0건·짧은 문장뿐·소량·묶이지 않음은 모두 정상 완료다(계약 3절).
+// "분석을 먼저 실행해주세요"를 띄우면 분석을 안 한 것처럼 보이고,
+// 오류처럼 적으면 멀쩡한 파일을 다시 올리게 만든다.
+function EmptyResult({ result, icon = "analyze" }) {
+  const notice = result ? completionNotice(result) : null;
+  const title = notice ? notice.title : "분석을 먼저 실행해주세요.";
+  return (
+    <div style={{ ...S.card, ...S.cardBody, textAlign: "center", padding: 48, color: "#9CA3AF" }}>
+      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 44, height: 44, borderRadius: "50%", background: "#F3F4F6", color: "#9CA3AF", marginBottom: 12 }}>
+        <Icon name={icon} size={21} />
+      </span>
+      <div style={{ color: "#374151", fontWeight: 500 }}>{title}</div>
+      {notice && (
+        <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6, maxWidth: 460, marginLeft: "auto", marginRight: "auto" }}>
+          {notice.body}
+        </div>
+      )}
     </div>
   );
 }
@@ -1148,10 +1171,17 @@ export default function AnalyzePage() {
               )}
             </div>
             <div style={S.cardBody}>
+              {/* 결과가 아예 없을 때와, 분석은 끝났는데 좌표가 없을 때는 다른 이야기다.
+                  뒤쪽은 정상 완료이므로 왜 비었는지 밝힌다. */}
               {!analyzeResult ? (
                 <div style={{ textAlign: "center", color: "#9CA3AF", padding: 40 }}>
                   분석을 먼저 실행해주세요.
                 </div>
+              ) : !(analyzeResult.clusteringView?.points || []).length ? (
+                <>
+                  <ScopeNotice result={analyzeResult} />
+                  <EmptyResult result={analyzeResult} icon="empty" />
+                </>
               ) : (
                 <>
                   <ScopeNotice result={analyzeResult} />
@@ -1237,10 +1267,7 @@ export default function AnalyzePage() {
       {tab === "recommend" && (
         <div>
           {candidates.length === 0 ? (
-            <div style={{ ...S.card, ...S.cardBody, textAlign: "center", padding: 48, color: "#9CA3AF" }}>
-              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 44, height: 44, borderRadius: "50%", background: "#F3F4F6", color: "#9CA3AF", marginBottom: 12 }}><Icon name="analyze" size={21} /></span>
-              <div>분석을 먼저 실행해주세요.</div>
-            </div>
+            <EmptyResult result={analyzeResult} />
           ) : (
             candidates.map((c) => {
               const isOpen = openQuestions.has(c.candidateId);

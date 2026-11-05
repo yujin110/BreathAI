@@ -73,3 +73,41 @@ export function legacyDefaultNotice(result) {
 export function isLegacyResult(result) {
   return !result?.analysisScope;
 }
+
+// 분석이 왜 빈 결과로 끝났는지. 계약 v3 3절의 completionReason 다섯 가지다.
+//
+// 이 다섯은 모두 정상 완료다. 실패가 아니다.
+// 빈 화면에 "분석을 먼저 실행해주세요"를 띄우면 분석을 안 한 것처럼 보이고,
+// 오류로 적으면 다시 올리게 만든다. 둘 다 사실과 다르다.
+//
+// 설명과 함께 다음에 무엇을 하면 되는지까지 적는다.
+export function completionNotice(result) {
+  const reason = result?.completionReason;
+  if (!reason || reason === "RESULTS_GENERATED") return null;
+
+  switch (reason) {
+    case "NO_TARGET_LOGS":
+      return {
+        title: emptyTargetSentence(result),
+        body: "올린 질문에 분석할 유형이 없어 군집화를 하지 않았습니다. 분석은 정상적으로 끝났고, 위 통계는 올린 전체 기준으로 그대로 볼 수 있습니다.",
+      };
+    case "NO_ELIGIBLE_TEXT":
+      return {
+        title: "분석할 수 있는 문장이 없습니다.",
+        body: "대상 질문은 있었지만 글자가 너무 짧아 모두 빠졌습니다. 한두 글자짜리 입력만 있는 경우입니다.",
+      };
+    case "INSUFFICIENT_TARGET_LOGS":
+      return {
+        title: "질문이 적어 군집화를 하지 않았습니다.",
+        body: "비슷한 질문을 묶으려면 어느 정도 양이 필요합니다. 기간을 넓히거나 로그를 더 모아 다시 올려 주세요.",
+      };
+    case "NO_FAQ_CLUSTERS":
+      return {
+        title: "FAQ로 만들 만한 묶음이 없습니다.",
+        body: "질문을 묶어 보았지만 한 주제로 모인 것이 없었습니다. 군집화 옵션의 최소 클러스터 크기를 낮추면 더 작은 묶음도 잡힙니다.",
+      };
+    default:
+      // 모르는 값이 와도 빈 화면을 그냥 두지는 않는다
+      return { title: "표시할 결과가 없습니다.", body: `분석은 끝났습니다. (${reason})` };
+  }
+}
