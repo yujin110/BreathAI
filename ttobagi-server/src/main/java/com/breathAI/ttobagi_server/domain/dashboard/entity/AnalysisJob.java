@@ -8,6 +8,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.DynamicInsert;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -92,6 +94,22 @@ public class AnalysisJob {
     @Column(name = "min_samples")
     private Integer minSamples;
 
+    // 실제 적용 모드, 만들 때 요청한 모드를 넣고 완료 콜백에서 확정한다
+    @Enumerated(EnumType.STRING)
+    @Column(name = "analysis_mode", nullable = false, length = 20)
+    private AnalysisMode analysisMode;
+
+    // AI 결과 형식 버전과 완료 사유·분석 범위, 예전 분석은 비어 있다
+    @Column(name = "result_schema_version")
+    private Integer resultSchemaVersion;
+
+    @Column(name = "completion_reason", length = 40)
+    private String completionReason;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "analysis_scope", columnDefinition = "json COMMENT 'AI가 보낸 분석 범위 건수'")
+    private AnalysisScope analysisScope;
+
     // AI가 보낸 업로드 파일별 요약값, 보내지 않은 예전 분석은 비어 있다
     @Column(name = "total_log_count")
     private Integer totalLogCount;
@@ -129,13 +147,14 @@ public class AnalysisJob {
         if (this.status == null) this.status = Status.PENDING;
         if (this.isMaskingEnabled == null) this.isMaskingEnabled = false;
         if (this.isTranslationEnabled == null) this.isTranslationEnabled = false;
+        if (this.analysisMode == null) this.analysisMode = AnalysisMode.ALL;
     }
 
     @Builder
     public AnalysisJob(UploadFile uploadFile, User requestedBy, String fileName,
                        Boolean isMaskingEnabled, Boolean isTranslationEnabled,
                        LocalDate periodStartDate, LocalDate periodEndDate,
-                       Integer minClusterSize, Integer minSamples) {
+                       Integer minClusterSize, Integer minSamples, AnalysisMode analysisMode) {
         this.uploadFile = uploadFile;
         this.requestedBy = requestedBy;
         this.fileName = fileName;
@@ -145,19 +164,21 @@ public class AnalysisJob {
         this.periodEndDate = periodEndDate;
         this.minClusterSize = minClusterSize;
         this.minSamples = minSamples;
+        this.analysisMode = analysisMode != null ? analysisMode : AnalysisMode.ALL;
         this.status = Status.PENDING;
     }
 
     // 결과에 영향을 주는 분석 옵션이 모두 같은지 확인, 같은 파일의 기존 결과를 재사용할 때 쓴다
     public boolean hasSameOptions(LocalDate periodStartDate, LocalDate periodEndDate,
                                   boolean isMaskingEnabled, boolean isTranslationEnabled,
-                                  Integer minClusterSize, Integer minSamples) {
+                                  Integer minClusterSize, Integer minSamples, AnalysisMode analysisMode) {
         return Objects.equals(this.periodStartDate, periodStartDate)
                 && Objects.equals(this.periodEndDate, periodEndDate)
                 && Boolean.TRUE.equals(this.isMaskingEnabled) == isMaskingEnabled
                 && Boolean.TRUE.equals(this.isTranslationEnabled) == isTranslationEnabled
                 && Objects.equals(this.minClusterSize, minClusterSize)
-                && Objects.equals(this.minSamples, minSamples);
+                && Objects.equals(this.minSamples, minSamples)
+                && this.analysisMode == analysisMode;
     }
 
     // 전처리 단계 진입, 분석 시작 시각 기록
@@ -210,6 +231,21 @@ public class AnalysisJob {
 
     public boolean hasSummary() {
         return totalLogCount != null;
+    }
+
+    // 완료 콜백의 결과 형식·실제 모드·완료 사유·분석 범위 기록
+    // 모드를 보내지 않은 AI는 전체 유형을 분석했으므로 ALL로 확정한다
+    public void recordResultScope(Integer resultSchemaVersion, AnalysisMode appliedMode,
+                                  String completionReason, AnalysisScope analysisScope) {
+        this.resultSchemaVersion = resultSchemaVersion;
+        this.analysisMode = appliedMode != null ? appliedMode : AnalysisMode.ALL;
+        this.completionReason = completionReason;
+        this.analysisScope = analysisScope;
+    }
+
+    // 결과 형식 버전, 값이 없는 예전 결과는 1
+    public int resultSchemaVersionOrDefault() {
+        return resultSchemaVersion != null ? resultSchemaVersion : 1;
     }
 
 }

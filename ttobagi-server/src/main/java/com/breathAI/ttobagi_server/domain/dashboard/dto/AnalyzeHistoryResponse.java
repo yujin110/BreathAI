@@ -54,5 +54,6 @@ public class AnalyzeHistoryResponse {
         private Boolean isTranslationEnabled;
         private Integer minClusterSize;
         private Integer minSamples;
+        private String analysisMode;
     }
 }

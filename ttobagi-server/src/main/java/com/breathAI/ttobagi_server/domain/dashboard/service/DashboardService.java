@@ -16,6 +16,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -76,6 +77,10 @@ public class DashboardService {
     private final AnalysisHistoryRepository analysisHistoryRepository;
     private final AnalysisCancellationService analysisCancellationService;
     private final AnalysisSubmissionService analysisSubmissionService;
+
+    // 새 분석의 모드 (환경변수 TTOBAGI_ANALYSIS_DEFAULT_MODE, 기본 IMPROVEMENT)
+    @Value("${ai.analysis.default-mode}")
+    private AnalysisMode defaultAnalysisMode;
 
     // 월 단위 챗봇 사용량 조회, 전월 대비 증가율 포함
     @Transactional(readOnly = true)
@@ -158,6 +163,10 @@ public class DashboardService {
                 .status(job.getStatus().name())
                 .periodStartDate(job.getPeriodStartDate() != null ? job.getPeriodStartDate().toString() : null)
                 .periodEndDate(job.getPeriodEndDate() != null ? job.getPeriodEndDate().toString() : null)
+                .resultSchemaVersion(job.resultSchemaVersionOrDefault())
+                .analysisMode(job.getAnalysisMode().name())
+                .completionReason(job.getCompletionReason())
+                .analysisScope(job.getAnalysisScope())
                 .systemStatus(commonData.getSystemStatus())
                 .performanceMetrics(commonData.getPerformanceMetrics())
                 .trend(commonData.getTrend())
@@ -380,6 +389,7 @@ public class DashboardService {
         return AnalyzeResultResponse.builder()
                 .periodStartDate(startDate != null ? startDate.toString() : null)
                 .periodEndDate(endDate != null ? endDate.toString() : null)
+                .analysisModes(jobs.stream().map(job -> job.getAnalysisMode().name()).distinct().sorted().toList())
                 .systemStatus(systemStatus)
                 .performanceMetrics(performanceMetrics)
                 .trend(trend)
@@ -432,15 +442,16 @@ public class DashboardService {
         LocalDate parsedStartDate = periodStartDate != null ? LocalDate.parse(periodStartDate) : null;
         LocalDate parsedEndDate = periodEndDate != null ? LocalDate.parse(periodEndDate) : null;
         String originalFileName = file.getOriginalFilename();
+        AnalysisMode analysisMode = defaultAnalysisMode;
 
         UploadFile uploadFile;
         Optional<UploadFile> existingUpload = uploadFileRepository.findByFileHash(fileHash);
         if (existingUpload.isPresent()) {
-                // 옵션이 같은 분석 중 가장 최근 것이 실패·취소가 아니면 재사용한다
+                // 옵션·모드가 같은 분석 중 가장 최근 것이 실패·취소가 아니면 재사용한다
                 Optional<AnalysisJob> existingJob = analysisJobRepository
                         .findByUploadFileOrderByCreatedAtDesc(existingUpload.get()).stream()
                         .filter(job -> job.hasSameOptions(parsedStartDate, parsedEndDate,
-                                isMaskingEnabled, isTranslationEnabled, minClusterSize, minSamples))
+                                isMaskingEnabled, isTranslationEnabled, minClusterSize, minSamples, analysisMode))
                         .findFirst();
                 if (existingJob.isPresent() && existingJob.get().getStatus() != AnalysisJob.Status.FAIL
                         && existingJob.get().getStatus() != AnalysisJob.Status.CANCELED) {
@@ -484,6 +495,7 @@ public class DashboardService {
                 .periodEndDate(parsedEndDate)
                 .minClusterSize(minClusterSize)
                 .minSamples(minSamples)
+                .analysisMode(analysisMode)
                 .build();
         analysisJobRepository.save(analysisJob);
         recordHistory(user, analysisJob);
@@ -506,6 +518,7 @@ public class DashboardService {
                         periodEndDate != null ? periodEndDate : "",
                         minClusterSize,
                         minSamples,
+                        analysisMode,
                         reason -> markPipelineRequestFailed(analysisId, reason));
                 if (!alreadyArchived) {
                     // 변환 전 원본을 그대로 보관한다 (xlsx는 xlsx로)
@@ -607,6 +620,7 @@ public class DashboardService {
                             .isTranslationEnabled(job.getIsTranslationEnabled())
                             .minClusterSize(job.getMinClusterSize())
                             .minSamples(job.getMinSamples())
+                            .analysisMode(job.getAnalysisMode().name())
                             .build();
                 })
                 .collect(Collectors.toList());
@@ -703,6 +717,7 @@ public class DashboardService {
         // 1. 업로드 파일별 요약값과 날짜 통계 적재
         // 업로드 파일 범위의 값이라 서비스 전체 사용량(gold_usage_stat)에는 쓰지 않는다
         saveAnalysisSummary(analysisJob, request);
+        saveResultScope(analysisJob, request);
         saveDailyStats(analysisJob, request);
 
         // 2. 클러스터링 결과 적재
@@ -1006,6 +1021,29 @@ public class DashboardService {
                 metrics != null ? toPercent(metrics.getCurrentUnanswerRate()) : null,
                 metrics != null ? toPercent(metrics.getPredictedAccuracyGain()) : null,
                 metrics != null ? metrics.getResolvedCountByAI() : null);
+    }
+
+    // 결과 형식·실제 모드·완료 사유·분석 범위 저장, 요약값처럼 이상해도 거절하지 않고 경고만 남긴다
+    // 모드를 보내지 않은 예전 AI는 전체 유형을 분석했으므로 ALL로 저장된다
+    private void saveResultScope(AnalysisJob analysisJob, AnalysisCallbackRequest request) {
+        AnalysisMode appliedMode = AnalysisMode.from(request.getAnalysisMode());
+        if (request.getAnalysisMode() != null && appliedMode == null) {
+            log.warn("알 수 없는 분석 모드, 요청한 모드로 저장: analysisId={}, analysisMode={}",
+                    analysisJob.getAnalysisId(), request.getAnalysisMode());
+            appliedMode = analysisJob.getAnalysisMode();
+        } else if (appliedMode != null && appliedMode != analysisJob.getAnalysisMode()) {
+            log.warn("요청과 다른 분석 모드로 완료: analysisId={}, 요청={}, 적용={}",
+                    analysisJob.getAnalysisId(), analysisJob.getAnalysisMode(), appliedMode);
+        } else if (appliedMode == null && analysisJob.getAnalysisMode() != AnalysisMode.ALL) {
+            log.warn("모드 없는 예전 형식 결과, ALL로 저장: analysisId={}, 요청={}",
+                    analysisJob.getAnalysisId(), analysisJob.getAnalysisMode());
+        }
+        if (request.getResultSchemaVersion() != null && request.getResultSchemaVersion() >= 2
+                && (request.getAnalysisScope() == null || request.getCompletionReason() == null)) {
+            log.warn("결과 형식 v2인데 분석 범위나 완료 사유가 없음: analysisId={}", analysisJob.getAnalysisId());
+        }
+        analysisJob.recordResultScope(request.getResultSchemaVersion(), appliedMode,
+                request.getCompletionReason(), request.getAnalysisScope());
     }
 
     // 파일별 날짜 통계 저장, usageStats가 없는 예전 형식은 trend로 저품질·미답변 건수만 채운다

@@ -1,12 +1,26 @@
 package com.breathAI.ttobagi_server.global.util;
 
+import com.breathAI.ttobagi_server.domain.dashboard.entity.AnalysisMode;
+import com.breathAI.ttobagi_server.domain.dashboard.service.AnalysisSubmissionService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
+import org.springframework.mock.http.client.reactive.MockClientHttpRequest;
+import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.client.ExchangeStrategies;
+import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Mono;
 
 import java.net.ConnectException;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class WebClientUtilTest {
 
@@ -32,6 +46,29 @@ class WebClientUtilTest {
         assertThat(requests.get(0).headers().getFirst("Authorization")).isEqualTo("Bearer existing-token");
         assertThat(requests.get(1).method()).isEqualTo(org.springframework.http.HttpMethod.GET);
         assertThat(requests.get(1).url().getPath()).isEqualTo("/jobs/123");
+    }
+
+    @Test
+    @DisplayName("분석 요청 본문에 분석 모드를 넣어 보낸다")
+    void pipelineRequestCarriesAnalysisMode() {
+        var body = new AtomicReference<String>();
+        var client = WebClient.builder()
+                .baseUrl("https://ai.example")
+                .exchangeFunction(request -> {
+                    var sent = new MockClientHttpRequest(request.method(), request.url());
+                    return request.writeTo(sent, ExchangeStrategies.withDefaults())
+                            .then(Mono.defer(sent::getBodyAsString))
+                            .doOnNext(body::set)
+                            .thenReturn(ClientResponse.create(HttpStatus.ACCEPTED).build());
+                }).build();
+        var submissions = mock(AnalysisSubmissionService.class);
+        when(submissions.begin(1L)).thenReturn(true);
+
+        new WebClientUtil(client, submissions).sendPipeline("upload-1", 1L, "번호,질문,날짜\n".getBytes(StandardCharsets.UTF_8),
+                "data.csv", true, false, "", "", null, null, AnalysisMode.UNANSWER_ONLY, reason -> {});
+
+        verify(submissions, timeout(5000)).received(1L);
+        assertThat(body.get()).contains("name=\"analysisMode\"").contains("UNANSWER_ONLY");
     }
 
     @Test

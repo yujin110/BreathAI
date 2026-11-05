@@ -13,6 +13,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 
 import java.time.Duration;
 import java.util.function.Consumer;
+import com.breathAI.ttobagi_server.domain.dashboard.entity.AnalysisMode;
 import com.breathAI.ttobagi_server.domain.dashboard.service.AnalysisSubmissionService;
 
 // AI 서버 호출 담당 유틸
@@ -58,6 +59,7 @@ public class WebClientUtil {
             String periodEndDate,
             Integer minClusterSize,
             Integer minSamples,
+            AnalysisMode analysisMode,
             Consumer<String> onFailure) {
         try {
             if (!submissions.begin(analysisId)) return;
@@ -71,6 +73,8 @@ public class WebClientUtil {
             // 군집화 설정은 값이 있을 때만 보내고, 없으면 AI 서버 기본값을 쓴다
             if (minClusterSize != null) body.add("minClusterSize", minClusterSize.toString());
             if (minSamples != null) body.add("minSamples", minSamples.toString());
+            // AI 기본값에 맡기지 않고 항상 보내, 저장한 모드와 AI가 쓴 모드를 맞춘다
+            body.add("analysisMode", analysisMode.name());
             body.add("file", new ByteArrayResource(fileBytes) {
                 @Override
                 public String getFilename() {

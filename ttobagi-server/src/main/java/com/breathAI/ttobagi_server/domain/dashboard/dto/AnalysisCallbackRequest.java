@@ -1,5 +1,6 @@
 package com.breathAI.ttobagi_server.domain.dashboard.dto;
 
+import com.breathAI.ttobagi_server.domain.dashboard.entity.AnalysisScope;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -14,6 +15,12 @@ public class AnalysisCallbackRequest {
     private String errorMessage;
     private String message;
     private String updatedAt;
+
+    // 결과 형식 v2부터 완료 콜백에 온다, 없으면 예전 AI(전체 유형 분석)
+    private Integer resultSchemaVersion;
+    private String analysisMode;
+    private String completionReason;
+    private AnalysisScope analysisScope;
 
     private SystemStatusResult systemStatus;
     private PerformanceMetricsResult performanceMetrics;
