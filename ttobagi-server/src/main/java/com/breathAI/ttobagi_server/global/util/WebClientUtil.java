@@ -31,17 +31,19 @@ public class WebClientUtil {
 
     public record AiJobStatus(String status) {}
 
+    // AI 작업 취소, 200이 아니면 예외 (404·409·503은 WebClientResponseException)
     public void cancelJob(Long analysisId) {
         var response = webClient.post().uri("/jobs/{id}/cancel", analysisId).retrieve()
                 .toBodilessEntity().timeout(Duration.ofSeconds(35)).block();
         if (response == null || response.getStatusCode().value() != 200)
-            throw new IllegalStateException("AI cancellation was not confirmed");
+            throw new IllegalStateException("AI 서버가 취소를 확인하지 않았습니다.");
     }
 
+    // AI 작업 상태 조회 (QUEUED, RUNNING, CANCELLING, CANCELED, COMPLETED, FAILED)
     public String jobStatus(Long analysisId) {
         var result = webClient.get().uri("/jobs/{id}", analysisId).retrieve()
                 .bodyToMono(AiJobStatus.class).timeout(Duration.ofSeconds(5)).block();
-        if (result == null) throw new IllegalStateException("Missing AI job status");
+        if (result == null) throw new IllegalStateException("AI 서버의 작업 상태 응답이 비어 있습니다.");
         return result.status();
     }
 

@@ -70,6 +70,29 @@ class AnalysisCancelIntegrationTest {
     }
 
     @Test
+    @DisplayName("취소를 요청한 지 10분이 지나면 자동 재시도를 멈추고, 다시 누르면 재개한다")
+    void recoveryStopsAfterWindow() throws Exception {
+        String admin = adminToken();
+        Long id = upload(admin, content(), Map.of());
+        jdbcTemplate.update("UPDATE gold_analysis_job SET ai_submission_state='ACCEPTED' WHERE analysis_id=?", id);
+        doThrow(new WebClientResponseException(503, "busy", null, null, null)).when(webClientUtil).cancelJob(id);
+        cancel(admin, id).andExpect(status().isServiceUnavailable());
+
+        jdbcTemplate.update("UPDATE gold_analysis_job SET cancel_requested_at = NOW() - INTERVAL 11 MINUTE WHERE analysis_id=?", id);
+        clearInvocations(webClientUtil);
+        cancellations.recover();
+        verify(webClientUtil, never()).cancelJob(id);
+        checkStatus(admin, id)
+                .andExpect(jsonPath("$.data.status").value("PENDING"))
+                .andExpect(jsonPath("$.data.cancelable").value(true));
+
+        // 다시 누르면 요청 시각이 갱신되어 바로 시도하고, 성공하면 취소된다
+        doNothing().when(webClientUtil).cancelJob(id);
+        cancel(admin, id).andExpect(status().isOk());
+        checkStatus(admin, id).andExpect(jsonPath("$.data.status").value("CANCELED"));
+    }
+
+    @Test
     @DisplayName("AI 완료가 먼저 확정되면 결과 콜백을 보존하고 취소는 409를 반환한다")
     void terminalCallbackWinsBeforeAiCancellation() throws Exception {
         String admin = adminToken();

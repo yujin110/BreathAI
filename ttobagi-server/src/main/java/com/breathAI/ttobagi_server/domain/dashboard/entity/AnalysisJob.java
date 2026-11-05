@@ -41,15 +41,19 @@ public class AnalysisJob {
     @JoinColumn(name = "requested_by", nullable = true, foreignKey = @ForeignKey(name = "fk_analysis_requested_by"))
     private User requestedBy;
 
+    // 취소를 요청한 시각, AI 확인 전까지 남아 있다 (상태는 CANCELED가 될 때까지 그대로)
     @Column(name = "cancel_requested_at")
     private LocalDateTime cancelRequestedAt;
 
+    // AI 전송 상태: PENDING(보내기 전), SENDING, ACCEPTED, REJECTED(AI가 거절), UNKNOWN(접수 여부 모름)
     @Column(name = "ai_submission_state", nullable = false, length = 20)
     private String aiSubmissionState = "PENDING";
 
+    // 취소 요청 기록·해제, 다시 요청하면 시각을 새로 남긴다
     public void requestCancellation() { this.cancelRequestedAt = LocalDateTime.now(); }
     public void clearCancellation() { this.cancelRequestedAt = null; }
     public boolean isCancellationRequested() { return cancelRequestedAt != null; }
+    // AI 전송 상태 변경
     public void submissionState(String state) { this.aiSubmissionState = state; }
 
     @Column(name = "status", nullable = false, length = 20, 

@@ -683,9 +683,8 @@ public class DashboardService {
             return;
         }
 
-        // An AI terminal callback means AI completion already won its atomic race
-        // with cancellation; its cancel API will return 409. Preserve that result.
-        // Progress arriving during cancellation must not regress the visible state.
+        // 취소 확인 중에 온 진행 콜백은 반영하지 않는다
+        // 완료·실패 콜백은 AI에서 취소보다 먼저 끝났다는 뜻이라(취소 API는 409) 그대로 저장한다
         if (analysisJob.isCancellationRequested()
                 && ("PREPROCESSING".equals(request.getStatus()) || "ANALYZING".equals(request.getStatus()))) return;
 
