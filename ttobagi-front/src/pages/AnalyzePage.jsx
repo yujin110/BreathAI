@@ -9,6 +9,7 @@ import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
 import Icon from "../components/Icon.jsx";
+import { scopeSentence, scopeCaption, legacyDefaultNotice } from "../utils/analysisScope.js";
 
 // Spring의 spring.servlet.multipart.max-file-size=50MB 와 동일하게 맞춘다
 const HISTORY_SIZE = 10;
@@ -56,6 +57,22 @@ const JOB_STATUS = {
   FAIL:          { label: "실패",      background: "#FDECEA", color: "#B91C1C" },
   CANCELED:      { label: "취소됨",    background: "#F1F5F9", color: "#475569" },
 };
+
+// 무엇을 분석한 결과인지 한 줄로 밝힌다.
+// 통계 카드는 올린 전체를 세고, 군집도·급증 키워드는 그중 골라낸 질문만 본다.
+// 두 숫자가 다른 이유를 적어 두지 않으면 화면이 틀린 것처럼 보인다.
+// 과거 결과에는 범위 정보가 없어 안내도 띄우지 않는다(계약 3절: 추정해 채우지 않는다).
+function ScopeNotice({ result }) {
+  const sentence = scopeSentence(result);
+  if (!sentence) return null;
+  const legacy = legacyDefaultNotice(result);
+  return (
+    <div style={S.scopeNotice}>
+      <div>{sentence}</div>
+      {legacy && <div style={{ marginTop: 4, opacity: 0.8 }}>{legacy}</div>}
+    </div>
+  );
+}
 
 // 모르는 상태가 와도 글자는 그대로 보여 준다. 숨기면 무슨 일인지 알 수 없다.
 function jobStatus(status) {
@@ -1124,6 +1141,11 @@ export default function AnalyzePage() {
           <div style={S.card}>
             <div style={S.cardHeader}>
               <span style={S.cardTitle}>클러스터링 시각화 (UMAP)</span>
+              {/* 통계 카드는 전체 기준인데 여기 점은 선별된 질문만이다.
+                  무엇을 묶은 그림인지 적지 않으면 숫자가 안 맞는 것으로 보인다. */}
+              {analyzeResult && (
+                <span style={{ fontSize: 11, color: "#9CA3AF" }}>{scopeCaption(analyzeResult)}</span>
+              )}
             </div>
             <div style={S.cardBody}>
               {!analyzeResult ? (
@@ -1131,10 +1153,13 @@ export default function AnalyzePage() {
                   분석을 먼저 실행해주세요.
                 </div>
               ) : (
-                <ClusterScatterPlot
-                  points={analyzeResult.clusteringView?.points || []}
-                  clusterNames={analyzeResult.clusteringView?.clusterNames || []}
-                />
+                <>
+                  <ScopeNotice result={analyzeResult} />
+                  <ClusterScatterPlot
+                    points={analyzeResult.clusteringView?.points || []}
+                    clusterNames={analyzeResult.clusteringView?.clusterNames || []}
+                  />
+                </>
               )}
             </div>
           </div>
@@ -1509,6 +1534,8 @@ const S = {
   btnReject:   { padding: "6px 14px", background: "#FFF1F2", color: "#BE123C", border: "1px solid #FECDD3", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
   // 진행 중 상자 안에 들어간다. 같이 쓰이는 파란 글씨보다 눈에 덜 띄어야
   // 기다리는 것이 기본이고 취소가 예외라는 것이 드러난다.
+  // 그림 위에 붙는 설명 줄. 결과를 가리지 않게 낮은 대비로 둔다.
+  scopeNotice: { marginBottom: 12, padding: "8px 12px", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8, fontSize: 12, color: "#475569", lineHeight: 1.5 },
   btnCancel:   { marginTop: 10, padding: "6px 12px", background: "#fff", color: "#BE123C", border: "1px solid #FECDD3", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   runningBox:  { marginTop: 10, padding: "10px 14px", background: "#EFF8FF", border: "1px solid #BFDBFE", borderRadius: 8, fontSize: 12, color: "#1E40AF" },
   successBox:  { marginTop: 10, padding: "10px 14px", background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 8, fontSize: 13, color: "#047857", display: "flex", alignItems: "center", gap: 8 },
