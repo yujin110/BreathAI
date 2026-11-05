@@ -138,6 +138,48 @@ class AnalysisScopeIntegrationTest {
     }
 
     @Test
+    @DisplayName("업로드에서 모드를 고르면 그 모드로 분석을 만들고 AI에도 그 모드를 보낸다")
+    void selectedModeIsUsed() throws Exception {
+        String admin = adminToken();
+        Long id = upload(admin, content(), Map.of("analysisMode", "UNANSWER_ONLY"));
+
+        verify(webClientUtil, timeout(5000)).sendPipeline(anyString(), eq(id), any(), anyString(),
+                anyBoolean(), anyBoolean(), anyString(), anyString(), any(), any(), eq(AnalysisMode.UNANSWER_ONLY), any());
+        assertThat(mode(id)).isEqualTo("UNANSWER_ONLY");
+        assertThat(rows(admin, id).get(0).get("analysisMode")).isEqualTo("UNANSWER_ONLY");
+    }
+
+    @Test
+    @DisplayName("고른 모드로 재사용을 판단한다: 다른 모드는 새 분석, 같은 모드는 기존 결과")
+    void selectedModeDecidesReuse() throws Exception {
+        String admin = adminToken();
+        byte[] content = content();
+        Long all = upload(admin, content, Map.of("analysisMode", "ALL"));
+        Long byDefault = upload(admin, content, Map.of());
+
+        assertThat(byDefault).isNotEqualTo(all);
+        assertThat(mode(byDefault)).isEqualTo("IMPROVEMENT");
+        assertThat(upload(admin, content, Map.of("analysisMode", "ALL"))).isEqualTo(all);
+        assertThat(upload(admin, content, Map.of("analysisMode", "IMPROVEMENT"))).isEqualTo(byDefault);
+    }
+
+    @Test
+    @DisplayName("잘못된 모드(소문자·빈 값·없는 이름)는 400이고 분석을 만들지 않는다")
+    void invalidModeIsRejected() throws Exception {
+        String admin = adminToken();
+        Integer before = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM gold_analysis_job", Integer.class);
+
+        for (String mode : List.of("improvement", "", "BOGUS")) {
+            mvc.perform(multipart("/api/v1/dashboard/analyze/upload").file(file(content()))
+                            .param("analysisMode", mode)
+                            .header(HttpHeaders.AUTHORIZATION, bearer(admin)))
+                    .andExpect(status().isBadRequest());
+        }
+
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM gold_analysis_job", Integer.class)).isEqualTo(before);
+    }
+
+    @Test
     @DisplayName("같은 파일·옵션이라도 모드가 다르면 새로 분석하고, 모드까지 같으면 기존 결과를 쓴다")
     void reuseRequiresSameMode() throws Exception {
         String admin = adminToken();

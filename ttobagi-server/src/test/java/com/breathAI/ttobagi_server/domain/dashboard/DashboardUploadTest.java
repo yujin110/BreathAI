@@ -64,7 +64,7 @@ class DashboardUploadTest {
     void invalidUploadCreatesNoDatabaseRecordsOrAiRequest() {
         var file = new MockMultipartFile("file", "bad.xlsx", null, new byte[]{1});
         assertThrows(CustomException.class,
-                () -> service.uploadAndStartAnalysis(file, "admin@example.com", null, null, true, false, null, null));
+                () -> service.uploadAndStartAnalysis(file, "admin@example.com", null, null, true, false, null, null, null));
         verifyNoInteractions(uploads, jobs, client);
     }
 
@@ -86,7 +86,7 @@ class DashboardUploadTest {
         }
         when(uploads.findByFileHash(anyString())).thenReturn(Optional.empty());
         var file = new MockMultipartFile("file", "원본.xlsx", null, bytes);
-        var response = service.uploadAndStartAnalysis(file, "admin@example.com", "2026-01-01", "2026-01-31", false, true, 3, 1);
+        var response = service.uploadAndStartAnalysis(file, "admin@example.com", "2026-01-01", "2026-01-31", false, true, 3, 1, null);
         assertEquals("원본.xlsx", response.getFileName());
         var saved = ArgumentCaptor.forClass(UploadFile.class);
         verify(uploads).save(saved.capture());
