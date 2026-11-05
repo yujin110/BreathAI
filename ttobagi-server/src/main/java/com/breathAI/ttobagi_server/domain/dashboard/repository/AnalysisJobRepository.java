@@ -12,6 +12,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import jakarta.persistence.LockModeType;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -21,8 +22,9 @@ import java.util.Optional;
 
 // 분석 작업 리포지토리, 조회 시 업로드 파일을 함께 로딩
 public interface AnalysisJobRepository extends JpaRepository<AnalysisJob, Long> {
-    @Query("SELECT a.analysisId FROM AnalysisJob a WHERE a.cancelRequestedAt IS NOT NULL AND a.status NOT IN :terminal")
-    List<Long> findCancellationPendingIds(@Param("terminal") List<Status> terminal);
+    // 취소를 요청했지만 아직 끝나지 않은 분석, since 이후에 요청한 것만
+    @Query("SELECT a.analysisId FROM AnalysisJob a WHERE a.cancelRequestedAt >= :since AND a.status NOT IN :terminal")
+    List<Long> findCancellationPendingIds(@Param("terminal") List<Status> terminal, @Param("since") LocalDateTime since);
 
     // 상태를 바꾸기 전에 행을 잠근다, 취소와 AI 콜백이 동시에 와도 하나씩 처리된다
     @Lock(LockModeType.PESSIMISTIC_WRITE)

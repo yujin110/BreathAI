@@ -25,6 +25,7 @@ import static org.mockito.Mockito.when;
 class WebClientUtilTest {
 
     @Test
+    @DisplayName("취소·상태 조회는 기존 인증 토큰으로 /jobs/{id} 경로를 부른다")
     void cancelUsesExistingBearerCredentialAndJobPath() {
         var requests = new java.util.ArrayList<org.springframework.web.reactive.function.client.ClientRequest>();
         var client = org.springframework.web.reactive.function.client.WebClient.builder()

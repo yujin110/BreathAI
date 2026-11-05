@@ -61,7 +61,7 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
-	// Avoid dynamic self-attachment, which restricted Docker runtimes may block.
+	// Mockito 에이전트를 미리 붙인다 (실행 중 붙이기는 일부 도커 환경에서 막힌다)
 	jvmArgs "-javaagent:${configurations.mockitoAgent.asPath}"
 	// 사용 중인 DB(.env) 대신 테스트 전용 설정을 쓴다
 	systemProperty 'spring.profiles.active', 'test'
