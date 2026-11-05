@@ -1,5 +1,6 @@
 package com.breathAI.ttobagi_server.global.util;
 
+import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -65,6 +66,22 @@ public class SseEmitterManager {
             if ("COMPLETED".equals(status) || "FAIL".equals(status) || "CANCELED".equals(status)) {
                 emitter.complete();
             }
+        } catch (Exception e) {
+            remove(analysisId, emitter);
+        }
+    }
+
+    // 해당 분석을 구독 중인 모든 클라이언트에 세부 진행 정보 전송 (progress 이벤트, 연결은 유지)
+    public void sendProgress(Long analysisId, Object progress) {
+        Set<SseEmitter> set = emitters.get(analysisId);
+        if (set == null) return;
+        set.forEach(emitter -> sendProgress(emitter, analysisId, progress));
+    }
+
+    // 지정한 연결에 세부 진행 정보 전송
+    public void sendProgress(SseEmitter emitter, Long analysisId, Object progress) {
+        try {
+            emitter.send(SseEmitter.event().name("progress").data(progress, MediaType.APPLICATION_JSON));
         } catch (Exception e) {
             remove(analysisId, emitter);
         }

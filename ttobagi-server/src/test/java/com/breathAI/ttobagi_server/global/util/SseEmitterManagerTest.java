@@ -33,4 +33,15 @@ class SseEmitterManagerTest {
         assertThatCode(() -> running.send("다음 상태")).doesNotThrowAnyException();
         assertThatThrownBy(() -> canceled.send("다음 상태")).isInstanceOf(IllegalStateException.class);
     }
+
+    @Test
+    @DisplayName("세부 진행 정보를 보내도 연결을 유지한다")
+    void progressKeepsConnection() {
+        SseEmitterManager manager = new SseEmitterManager();
+        SseEmitter emitter = manager.create(1L);
+
+        manager.sendProgress(1L, java.util.Map.of("phase", "EMBEDDING", "sequence", 15));
+
+        assertThatCode(() -> emitter.send("다음 상태")).doesNotThrowAnyException();
+    }
 }

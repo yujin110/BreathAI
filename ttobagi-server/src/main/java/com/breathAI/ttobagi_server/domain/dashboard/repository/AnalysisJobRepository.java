@@ -26,6 +26,11 @@ public interface AnalysisJobRepository extends JpaRepository<AnalysisJob, Long> 
     @Query("SELECT a.analysisId FROM AnalysisJob a WHERE a.cancelRequestedAt >= :since AND a.status NOT IN :terminal")
     List<Long> findCancellationPendingIds(@Param("terminal") List<Status> terminal, @Param("since") LocalDateTime since);
 
+    // 진행 정보를 물어볼 분석: 진행 중이고 AI가 접수했으며 취소 요청이 없는 것
+    @Query("SELECT a.analysisId FROM AnalysisJob a WHERE a.status IN :running "
+        + "AND a.aiSubmissionState = 'ACCEPTED' AND a.cancelRequestedAt IS NULL")
+    List<Long> findProgressTargetIds(@Param("running") List<Status> running);
+
     // 상태를 바꾸기 전에 행을 잠근다, 취소와 AI 콜백이 동시에 와도 하나씩 처리된다
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT a FROM AnalysisJob a WHERE a.analysisId = :analysisId")

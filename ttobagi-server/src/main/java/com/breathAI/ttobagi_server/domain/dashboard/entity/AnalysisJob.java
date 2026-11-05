@@ -114,6 +114,14 @@ public class AnalysisJob {
     @Column(name = "analysis_scope", columnDefinition = "json COMMENT 'AI가 보낸 분석 범위 건수'")
     private AnalysisScope analysisScope;
 
+    // AI가 보낸 마지막 진행 정보와 sequence가 늘어난 시각(BE 기준), 기록이 없으면 비어 있다
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "progress", columnDefinition = "json COMMENT 'AI가 보낸 마지막 진행 정보 (phase, 건수, 경과 시간, sequence)'")
+    private AnalysisProgress progress;
+
+    @Column(name = "progress_updated_at")
+    private LocalDateTime progressUpdatedAt;
+
     // AI가 보낸 업로드 파일별 요약값, 보내지 않은 예전 분석은 비어 있다
     @Column(name = "total_log_count")
     private Integer totalLogCount;
@@ -245,6 +253,21 @@ public class AnalysisJob {
         this.analysisMode = appliedMode != null ? appliedMode : AnalysisMode.ALL;
         this.completionReason = completionReason;
         this.analysisScope = analysisScope;
+    }
+
+    // 진행 정보 기록, 진행 중이고 취소 요청이 없으며 sequence가 늘었을 때만 바꾼다
+    public boolean recordProgress(AnalysisProgress progress, LocalDateTime now) {
+        if (status.isFinished() || isCancellationRequested()
+                || progress == null || progress.getPhase() == null || progress.getSequence() == null) {
+            return false;
+        }
+        if (this.progress != null && this.progress.getSequence() != null
+                && progress.getSequence() <= this.progress.getSequence()) {
+            return false;
+        }
+        this.progress = progress;
+        this.progressUpdatedAt = now;
+        return true;
     }
 
     // 결과 형식 버전, 값이 없는 예전 결과는 1
