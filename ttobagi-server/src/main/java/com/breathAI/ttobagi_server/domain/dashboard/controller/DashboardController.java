@@ -75,10 +75,11 @@ public class DashboardController {
             @RequestParam(value = "isTranslationEnabled", defaultValue = "false") boolean isTranslationEnabled,
             @RequestParam(value = "minClusterSize", required = false) Integer minClusterSize,
             @RequestParam(value = "minSamples", required = false) Integer minSamples,
+            @RequestParam(value = "analysisMode", required = false) String analysisMode,
             @AuthenticationPrincipal String email) {
         return ResponseEntity.ok(ApiResponse.success(
                 dashboardService.uploadAndStartAnalysis(file, email, periodStartDate, periodEndDate,
-                        isMaskingEnabled, isTranslationEnabled, minClusterSize, minSamples),
+                        isMaskingEnabled, isTranslationEnabled, minClusterSize, minSamples, analysisMode),
                 "분석 파이프라인이 성공적으로 시작되었습니다."));
     }
 

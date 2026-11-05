@@ -416,7 +416,8 @@ public class DashboardService {
             boolean isMaskingEnabled,
             boolean isTranslationEnabled,
             Integer minClusterSize,
-            Integer minSamples) {
+            Integer minSamples,
+            String requestedMode) {
 
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
@@ -424,6 +425,11 @@ public class DashboardService {
         // AI 서버와 같은 범위로 미리 검사해, 분석이 시작된 뒤 거절되어 실패로 끝나지 않게 한다
         if ((minClusterSize != null && minClusterSize < MIN_CLUSTER_SIZE_LIMIT)
                 || (minSamples != null && minSamples < MIN_SAMPLES_LIMIT)) {
+            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
+        }
+        // 분석 모드는 생략하면 서버 기본값, 값이 있으면 AI와 같이 대문자 이름만 받는다 (빈 값·소문자는 400)
+        AnalysisMode analysisMode = requestedMode == null ? defaultAnalysisMode : AnalysisMode.from(requestedMode);
+        if (analysisMode == null) {
             throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
         }
 
@@ -443,7 +449,6 @@ public class DashboardService {
         LocalDate parsedStartDate = periodStartDate != null ? LocalDate.parse(periodStartDate) : null;
         LocalDate parsedEndDate = periodEndDate != null ? LocalDate.parse(periodEndDate) : null;
         String originalFileName = file.getOriginalFilename();
-        AnalysisMode analysisMode = defaultAnalysisMode;
 
         UploadFile uploadFile;
         Optional<UploadFile> existingUpload = uploadFileRepository.findByFileHash(fileHash);

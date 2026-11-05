@@ -42,7 +42,8 @@ public class AnalysisProgressService {
 
     // AI가 접수한 진행 중 분석의 진행 정보를 가져와 저장하고, 구독자에게 현재 값을 보낸다
     // AI 호출 중에는 행 잠금을 잡지 않는다
-    @Scheduled(fixedDelayString = "${analysis.progress.poll-delay-ms:10000}", initialDelay = 10000)
+    @Scheduled(fixedDelayString = "${analysis.progress.poll-delay-ms:10000}",
+            initialDelayString = "${analysis.progress.poll-delay-ms:10000}")
     public void poll() {
         for (Long id : jobs.findProgressTargetIds(RUNNING)) {
             AnalysisProgress progress = fetch(id);
