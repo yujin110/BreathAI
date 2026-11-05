@@ -191,10 +191,10 @@ class AnalysisHistoryIntegrationTest {
 
         Long withOptions = upload(admin, content(), Map.of("minClusterSize", "3", "minSamples", "2"));
         verify(webClientUtil, timeout(5000)).sendPipeline(anyString(), eq(withOptions), any(), anyString(),
-                anyBoolean(), anyBoolean(), anyString(), anyString(), eq(3), eq(2), any());
+                anyBoolean(), anyBoolean(), anyString(), anyString(), eq(3), eq(2), any(), any());
         Long withoutOptions = upload(admin, content(), Map.of());
         verify(webClientUtil, timeout(5000)).sendPipeline(anyString(), eq(withoutOptions), any(), anyString(),
-                anyBoolean(), anyBoolean(), anyString(), anyString(), isNull(), isNull(), any());
+                anyBoolean(), anyBoolean(), anyString(), anyString(), isNull(), isNull(), any(), any());
 
         List<Map<String, Object>> row = rows(admin, "mine", null, withOptions);
         assertThat(row.get(0).get("minClusterSize")).isEqualTo(3);

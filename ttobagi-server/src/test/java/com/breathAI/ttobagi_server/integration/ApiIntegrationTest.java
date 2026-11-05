@@ -1,5 +1,6 @@
 package com.breathAI.ttobagi_server.integration;
 
+import com.breathAI.ttobagi_server.domain.dashboard.entity.AnalysisMode;
 import com.breathAI.ttobagi_server.domain.faq.entity.Faq;
 import com.breathAI.ttobagi_server.domain.faq.repository.FaqRepository;
 import com.breathAI.ttobagi_server.global.service.EmailService;
@@ -186,7 +187,7 @@ class ApiIntegrationTest {
 
         ArgumentCaptor<byte[]> bytes = ArgumentCaptor.forClass(byte[].class);
         verify(webClientUtil, timeout(5000)).sendPipeline(anyString(), eq(analysisId), bytes.capture(), eq("data.csv"),
-                anyBoolean(), anyBoolean(), anyString(), anyString(), any(), any(), any());
+                anyBoolean(), anyBoolean(), anyString(), anyString(), any(), any(), eq(AnalysisMode.IMPROVEMENT), any());
         assertThat(bytes.getValue()).isEqualTo(file.getBytes());
     }
 
@@ -197,7 +198,7 @@ class ApiIntegrationTest {
 
         ArgumentCaptor<byte[]> bytes = ArgumentCaptor.forClass(byte[].class);
         verify(webClientUtil, timeout(5000)).sendPipeline(anyString(), eq(analysisId), bytes.capture(), eq("data.csv"),
-                anyBoolean(), anyBoolean(), anyString(), anyString(), any(), any(), any());
+                anyBoolean(), anyBoolean(), anyString(), anyString(), any(), any(), any(), any());
         assertThat(new String(bytes.getValue(), StandardCharsets.UTF_8)).startsWith("번호,질문,날짜");
     }
 

@@ -1,5 +1,6 @@
 package com.breathAI.ttobagi_server.domain.dashboard.dto;
 
+import com.breathAI.ttobagi_server.domain.dashboard.entity.AnalysisScope;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -19,6 +20,11 @@ public class FileAnalyzeResultResponse {
     private String status;
     private String periodStartDate;
     private String periodEndDate;
+    // 분석 범위, 예전 분석은 1·ALL이고 완료 사유와 범위는 null (추정해 채우지 않는다)
+    private int resultSchemaVersion;
+    private String analysisMode;
+    private String completionReason;
+    private AnalysisScope analysisScope;
     private AnalyzeResultResponse.SystemStatus systemStatus;
     private AnalyzeResultResponse.PerformanceMetrics performanceMetrics;
     private List<AnalyzeResultResponse.TrendItem> trend;
