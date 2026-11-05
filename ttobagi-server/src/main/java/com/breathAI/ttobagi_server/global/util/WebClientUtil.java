@@ -14,6 +14,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import java.time.Duration;
 import java.util.function.Consumer;
 import com.breathAI.ttobagi_server.domain.dashboard.entity.AnalysisMode;
+import com.breathAI.ttobagi_server.domain.dashboard.entity.AnalysisProgress;
 import com.breathAI.ttobagi_server.domain.dashboard.service.AnalysisSubmissionService;
 
 // AI 서버 호출 담당 유틸
@@ -29,7 +30,8 @@ public class WebClientUtil {
     private final WebClient webClient;
     private final AnalysisSubmissionService submissions;
 
-    public record AiJobStatus(String status) {}
+    // AI GET /jobs/{id} 응답, status는 AI 내부 상태라 콜백 상태와 값이 다르다
+    public record AiJob(String status, String callback, AnalysisProgress progress) {}
 
     // AI 작업 취소, 200이 아니면 예외 (404·409·503은 WebClientResponseException)
     public void cancelJob(Long analysisId) {
@@ -41,10 +43,15 @@ public class WebClientUtil {
 
     // AI 작업 상태 조회 (QUEUED, RUNNING, CANCELLING, CANCELED, COMPLETED, FAILED)
     public String jobStatus(Long analysisId) {
+        return job(analysisId).status();
+    }
+
+    // AI 작업 조회, 상태와 진행 정보(progress, 기록이 없으면 null)
+    public AiJob job(Long analysisId) {
         var result = webClient.get().uri("/jobs/{id}", analysisId).retrieve()
-                .bodyToMono(AiJobStatus.class).timeout(Duration.ofSeconds(5)).block();
+                .bodyToMono(AiJob.class).timeout(Duration.ofSeconds(5)).block();
         if (result == null) throw new IllegalStateException("AI 서버의 작업 상태 응답이 비어 있습니다.");
-        return result.status();
+        return result;
     }
 
     // 업로드 파일을 AI 서버로 전달하여 분석 파이프라인 시작

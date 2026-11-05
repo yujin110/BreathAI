@@ -77,6 +77,7 @@ public class DashboardService {
     private final AnalysisHistoryRepository analysisHistoryRepository;
     private final AnalysisCancellationService analysisCancellationService;
     private final AnalysisSubmissionService analysisSubmissionService;
+    private final AnalysisProgressService analysisProgressService;
 
     // 새 분석의 모드 (환경변수 TTOBAGI_ANALYSIS_DEFAULT_MODE, 기본 IMPROVEMENT)
     @Value("${ai.analysis.default-mode}")
@@ -568,6 +569,7 @@ public class DashboardService {
                 .analysisId(analysisJob.getAnalysisId())
                 .status(analysisJob.getStatus().name())
                 .message(getStatusMessage(analysisJob.getStatus()))
+                .progressDetail(analysisProgressService.toResponse(analysisJob, LocalDateTime.now()))
                 .cancelable(!analysisJob.getStatus().isFinished() && analysisJob.isRequestedBy(user))
                 .updatedAt(analysisJob.getStartedAt() != null
                         ? analysisJob.getStartedAt()
@@ -585,10 +587,15 @@ public class DashboardService {
 
         // 구독을 먼저 등록한 뒤 상태를 읽어야 그 사이에 도착한 콜백을 놓치지 않는다
         SseEmitter emitter = sseEmitterManager.create(analysisId);
-        AnalysisJob.Status status = analysisJobRepository.findById(analysisId)
-                .map(AnalysisJob::getStatus)
+        AnalysisJob job = analysisJobRepository.findById(analysisId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ANALYSIS_NOT_FOUND));
+        AnalysisJob.Status status = job.getStatus();
         sseEmitterManager.send(emitter, analysisId, status.name(), getStatusMessage(status));
+        // 진행 중이면 세부 진행 정보도 바로 보낸다 (끝난 분석은 위에서 연결이 닫혔다)
+        AnalysisProgressResponse progress = analysisProgressService.toResponse(job, LocalDateTime.now());
+        if (!status.isFinished() && progress != null) {
+            sseEmitterManager.sendProgress(emitter, analysisId, progress);
+        }
         return emitter;
     }
 
