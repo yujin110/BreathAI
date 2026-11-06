@@ -56,5 +56,21 @@ def build_callback(job_dir):
         candidates.append(mapped)
     dashboard = build_dashboard(data, keywords, summaries, policy=policy)
     points = dashboard.pop('points')
-    return {"status": "COMPLETED", "faqCandidates": candidates, **dashboard,
+    extra = {}
+    if (data / 'analysis_metadata.json').exists():
+        from services.analysis_selection import finalize_selection
+        metadata = json.loads((data / 'analysis_metadata.json').read_text(encoding='utf-8'))
+        saved = json.loads((data / 'analysis_scope.json').read_text(encoding='utf-8'))
+        extra = finalize_selection(data, min_cluster_size=metadata['minClusterSize'],
+                                   min_samples=metadata['minSamples'], faq_min_size=metadata['faqMinSize'])
+        if extra != saved:
+            raise ValueError('Analysis scope differs from actual artifacts')
+        scope = extra['analysisScope']
+        counts = dashboard['systemStatus']['samplingStatus']
+        if (scope['totalLogCount'] != dashboard['systemStatus']['totalLogCount'] or
+                scope['totalLogCount'] != sum(counts.values()) or
+                scope['totalLogCount'] != sum(row['totalCnt'] for row in dashboard['usageStats']) or
+                scope['visualizedLogCount'] != len(points)):
+            raise ValueError('Analysis aggregate mismatch')
+    return {"status": "COMPLETED", "faqCandidates": candidates, **dashboard, **extra,
             "clusteringView": {"clusterNames": clusters, "points": points}}

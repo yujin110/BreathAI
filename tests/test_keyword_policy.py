@@ -3,6 +3,7 @@ import copy
 from datetime import date
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -185,6 +186,7 @@ class KeywordPolicyTest(unittest.TestCase):
             with patch('services.run_job.subprocess.run', side_effect=inference):
                 self.assertEqual(run_job(source, root / 'job', templates=source), 0)
 
+    @unittest.skipUnless(os.name == 'posix', 'Production worker supervision uses POSIX sessions')
     def test_actual_worker_records_failed_callback_for_invalid_policy(self):
         from services.job_store import JobStore
         from services.pipeline_worker import process_one

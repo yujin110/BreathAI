@@ -8,12 +8,21 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile, Path as ApiPath
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile, Request, Path as ApiPath
 from services.job_control import cancel_job
 
 from services.job_store import Conflict, JobStore
 from services.dashboard_metrics import validate_source_rows
 from services.analysis_input import read_analysis_csv, write_analysis_csv
+from services.analysis_selection import MODES
+from typing import Annotated
+
+
+async def validate_mode_form(request: Request):
+    # FastAPI treats an empty optional Form string as missing; reject explicit blanks.
+    form = await request.form()
+    if 'analysisMode' in form and form['analysisMode'] not in MODES:
+        raise HTTPException(422, 'Invalid analysisMode')
 
 
 def create_app(*, root=None, token=None, max_upload_bytes=50 * 1024 * 1024):
@@ -39,7 +48,8 @@ def create_app(*, root=None, token=None, max_upload_bytes=50 * 1024 * 1024):
         row = store.get(analysis_id)
         if not row:
             raise HTTPException(404, "Unknown analysisId")
-        return {"analysisId": analysis_id, "status": row["state"], "callback": row["delivery"]}
+        return {"analysisId": analysis_id, "status": row["state"], "callback": row["delivery"],
+                "progress": json.loads(row['progress']) if row.get('progress') else None}
 
     @app.post('/jobs/{analysis_id}/cancel', dependencies=[Depends(authorize)])
     def cancel(analysis_id: int = ApiPath(gt=0, le=2**63 - 1)):
@@ -60,7 +70,11 @@ def create_app(*, root=None, token=None, max_upload_bytes=50 * 1024 * 1024):
     def pipeline(file: UploadFile = File(...), uploadId: str = Form(...), analysisId: int = Form(...),
                  isMaskingEnabled: bool = Form(True), isTranslationEnabled: bool = Form(False),
                  periodStartDate: str = Form(""), periodEndDate: str = Form(""),
-                 minClusterSize: int = Form(5, ge=2), minSamples: int = Form(2, ge=1)):
+                 minClusterSize: int = Form(5, ge=2), minSamples: int = Form(2, ge=1),
+                 analysisMode: Annotated[str, Form()] = 'IMPROVEMENT',
+                 modeGuard: Annotated[None, Depends(validate_mode_form)] = None):
+        if analysisMode not in MODES:
+            raise HTTPException(422, 'Invalid analysisMode')
         if minClusterSize < 2 or minSamples < 1:
             raise HTTPException(422, "Invalid clustering parameters")
         if analysisId <= 0 or not uploadId.strip() or len(uploadId) > 200:
@@ -75,6 +89,7 @@ def create_app(*, root=None, token=None, max_upload_bytes=50 * 1024 * 1024):
         metadata = {"uploadId": uploadId, "analysisId": analysisId,
                     "masking": isMaskingEnabled, "translation": isTranslationEnabled,
                     "minClusterSize": minClusterSize, "minSamples": minSamples,
+                    "analysisMode": analysisMode,
                     "periodStartDate": periodStartDate, "periodEndDate": periodEndDate}
         path = uploads / f"{uuid4().hex}.csv"
         digest = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode())

@@ -284,6 +284,13 @@ def run_for_faqs() -> None:
     5. qType/category/matchedFaqs/similarQuestions를 후보에 기록
     """
 
+    from services.analysis_progress import report
+    candidates = load_faq_candidates()
+    faqs = [c for c in candidates if c.get('tag') == 'FAQ' and c.get('standardQuestion')]
+    report('RETRIEVING', 0, len(faqs), 'CLUSTER')
+    if not faqs:
+        OUTPUT_JSON.write_text(json.dumps({'faqRetrieval': []}), encoding='utf-8')
+        return
     kb = load_kb()
     print(f'KB chunks: {len(kb)}')
 
@@ -397,6 +404,7 @@ def run_for_faqs() -> None:
             'matchedFaqs': record['matchedFaqs'],
         })
         results.append(record)
+        report('RETRIEVING', i, len(faqs), 'CLUSTER')
 
         display_best = top[0] if top else None
 

@@ -165,7 +165,8 @@ def normalize_for_generation(text: str) -> str:
 
 # 6. 파이프라인
 def load() -> pd.DataFrame:
-    df = pd.read_csv(INPUT_CSV, encoding='utf-8-sig')
+    target = DATA_DIR / 'analysis_targets.csv'
+    df = pd.read_csv(target if target.exists() else INPUT_CSV, encoding='utf-8-sig', keep_default_na=False)
     df.columns = [c.replace('\n', '') for c in df.columns]
     return df
 
@@ -174,7 +175,9 @@ def run(df: pd.DataFrame, *, masking_enabled: bool = True,
         translation_enabled: bool = True) -> pd.DataFrame:
     """원문 → 번역 → PII 마스킹 → 열차번호 토큰화 → 이중 정규화."""
     rows = []
-    for _, row in df.iterrows():
+    from services.analysis_progress import report
+    report('PREPROCESSING', 0, len(df), 'LOG')
+    for index, (_, row) in enumerate(df.iterrows(), 1):
         raw = to_text(row[COL_QUESTION])
         lang = detect_lang(raw)
 
@@ -204,8 +207,12 @@ def run(df: pd.DataFrame, *, masking_enabled: bool = True,
             'labelKeywords': row.get(COL_KEYWORDS),
             'labelAnswerDirection': row.get(COL_ANSWER_DIR),
             'labelMatchProbability': row.get(COL_PROB),
+            'logType': row.get('logType', 'UNANSWER'),
         })
-    return pd.DataFrame(rows)
+        if index % 32 == 0 or index == len(df):
+            report('PREPROCESSING', index, len(df), 'LOG')
+    from services.analysis_selection import PREPARED_COLUMNS
+    return pd.DataFrame(rows, columns=PREPARED_COLUMNS)
 
 
 def save(out: pd.DataFrame) -> None:
