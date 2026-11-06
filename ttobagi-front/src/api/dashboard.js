@@ -73,12 +73,14 @@ export const dashApi = {
   // 전혀 확인하지 않는다. EventSource는 커스텀 헤더를 보낼 수 없어 이 엔드포인트를 인증할
   // 방법이 없으므로(항상 익명 → 403), fetch + ReadableStream으로 SSE를 직접 파싱해
   // 실제 Authorization 헤더를 싣는다. 백엔드는 SseEmitter.event().name("status")로
-  // 이름 있는 이벤트만 보낸다.
+  // 이름 있는 이벤트만 보낸다. status(상태)와 progress(세부 단계) 두 가지다.
   // onEnd: 종료 상태(COMPLETED/FAIL/CANCELED) 없이 스트림이 끊겼을 때 호출된다.
   // 백엔드 SseEmitterManager는 종료 상태에서 emitter.complete()로 연결을 닫지만,
   // 1시간 타임아웃이나 네트워크 단절로도 똑같이 "정상 종료"로 보인다. 그 경우 예외가
   // 발생하지 않아 onError도 안 타므로, 호출부가 폴링으로 넘어갈 수 있게 따로 알린다.
-  streamAnalysisStatus: (analysisId, onMessage, onError, onEnd) => {
+  // onProgress: 백엔드가 따로 보내는 "progress" 이벤트. 본문은 progressDetail과 같다.
+  // 상태(status)와 단계(progress)는 서로 다른 이벤트로 오므로 둘 다 받아야 한다.
+  streamAnalysisStatus: (analysisId, onMessage, onError, onEnd, onProgress) => {
     const { accessToken } = getStoredTokens();
     const controller = new AbortController();
     let closedByServer = false; // 종료 상태를 받았는지
@@ -110,6 +112,10 @@ export const dashApi = {
             for (const line of rawEvent.split("\n")) {
               if (line.startsWith("event:")) eventName = line.slice(6).trim();
               else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+            }
+            if (eventName === "progress" && dataLines.length) {
+              // 단계 정보는 끊김 판정에 쓰지 않는다. 종료는 status 이벤트로만 본다.
+              onProgress?.(dataLines.join("\n"));
             }
             if (eventName === "status" && dataLines.length) {
               const raw = dataLines.join("\n");

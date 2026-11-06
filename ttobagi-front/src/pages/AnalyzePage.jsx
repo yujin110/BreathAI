@@ -10,6 +10,7 @@ import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
 import Icon from "../components/Icon.jsx";
 import { scopeSentence, scopeCaption, legacyDefaultNotice, completionNotice, emptyFinishedNotice } from "../utils/analysisScope.js";
+import { PHASES, phaseIndex, phaseLabel, unitProgressText, unitPercent, elapsedText, delayNotice } from "../utils/analysisProgress.js";
 
 // Spring의 spring.servlet.multipart.max-file-size=50MB 와 동일하게 맞춘다
 const HISTORY_SIZE = 10;
@@ -57,6 +58,60 @@ const JOB_STATUS = {
   FAIL:          { label: "실패",      background: "#FDECEA", color: "#B91C1C" },
   CANCELED:      { label: "취소됨",    background: "#F1F5F9", color: "#475569" },
 };
+
+// 한 줄짜리 단계 표시. 지나간 것은 체크, 지금은 파랑, 아직은 회색.
+function PhaseRow({ label, state, order }) {
+  const isDone = state === "done";
+  const isRun  = state === "running";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+      <div style={{
+        width: 24, height: 24, borderRadius: "50%", display: "flex",
+        alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600,
+        background: isDone ? "#ECFDF5" : isRun ? "#EFF6FF" : "#F3F4F6",
+        color:      isDone ? "#047857" : isRun ? "#1D4ED8" : "#9CA3AF",
+      }}>
+        {isDone ? <Icon name="check" size={13} strokeWidth={2.6} /> : order}
+      </div>
+      <span style={{ color: isDone ? "#111827" : isRun ? "#1D4ED8" : "#9CA3AF", fontWeight: isDone || isRun ? 500 : 400 }}>
+        {label}
+      </span>
+      {isRun && <span style={{ fontSize: 11, color: "#1D4ED8" }}>처리 중...</span>}
+    </div>
+  );
+}
+
+// AI가 보고한 phase로 단계를 그린다.
+//
+// 보고가 없으면(progressDetail=null, 과거 작업이나 아직 안 보낸 경우) 예전처럼
+// 상태 콜백 기준 다섯 단계로 떨어진다. 새 정보가 없다고 화면이 비면 안 된다.
+//
+// 지금 단계보다 앞이면 지났다고 본다. 건너뛴 단계도 지난 것으로 그린다 —
+// 조건에 안 맞아 생략하는 것은 정상이고, 비워 두면 멈춘 것처럼 보인다(계약 4절).
+function PhaseList({ detail, step, running, done }) {
+  const FALLBACK = ["데이터 전처리", "문장 임베딩", "군집화 (HDBSCAN)", "FAQ 초안 생성", "검증 완료"];
+
+  if (!detail?.phase) {
+    return (
+      <>
+        {FALLBACK.map((label, i) => (
+          <PhaseRow key={label} label={label} order={i + 1}
+            state={step >= i ? "done" : step === i && running ? "running" : "todo"} />
+        ))}
+      </>
+    );
+  }
+
+  const current = phaseIndex(detail.phase);
+  return (
+    <>
+      {PHASES.map((p, i) => (
+        <PhaseRow key={p.key} label={p.label} order={i + 1}
+          state={done || i < current ? "done" : i === current ? (running ? "running" : "done") : "todo"} />
+      ))}
+    </>
+  );
+}
 
 // 무엇을 분석한 결과인지 한 줄로 밝힌다.
 // 통계 카드는 올린 전체를 세고, 군집도·급증 키워드는 그중 골라낸 질문만 본다.
@@ -243,6 +298,8 @@ export default function AnalyzePage() {
   // 후보 수정의 카테고리 선택지. GET /faq/categories 가 없으면 빈 배열로 둔다.
   const [categories, setCategories]     = useState([]);
   // 취소 확인 창을 띄울지, 취소 요청을 보내는 중인지
+  // AI가 보고한 세부 진행 단계. 보내기 전까지는 null이고, 그때는 단계 없이 진행만 알린다.
+  const [progressDetail, setProgressDetail] = useState(null);
   const [cancelAsking, setCancelAsking] = useState(false);
   const [cancelling, setCancelling]     = useState(false);
   const [cancelable, setCancelable]     = useState(false);
@@ -293,10 +350,13 @@ export default function AnalyzePage() {
     streamRef.current?.close();
     stopPolling();
     setCancelable(false);
+    setProgressDetail(null);
     // SSE contains status only; ownership comes from the authenticated status API.
     dashApi.getAnalysisStatus(id).then((r) => {
-      if (activeAnalysisRef.current === id && terminalDoneRef.current !== id)
-        setCancelable(r.data?.cancelable === true);
+      if (activeAnalysisRef.current !== id || terminalDoneRef.current === id) return;
+      setCancelable(r.data?.cancelable === true);
+      // 구독하기 전에 이미 지나간 단계가 있으므로 지금 값을 먼저 받아 둔다
+      setProgressDetail(r.data?.progressDetail ?? null);
     }).catch(() => {});
 
     const loadResults = () => {
@@ -364,6 +424,7 @@ export default function AnalyzePage() {
           const statusRes = await dashApi.getAnalysisStatus(id);
           if (activeAnalysisRef.current !== id) return;
           setCancelable(statusRes.data?.cancelable === true);
+          setProgressDetail(statusRes.data?.progressDetail ?? null);
           if (applyStatus(statusRes.data?.status)) stopPolling();
         } catch (err) {
           if (activeAnalysisRef.current !== id) return;
@@ -385,7 +446,12 @@ export default function AnalyzePage() {
         }
       },
       startPolling, // 연결 실패
-      startPolling  // 종료 상태 없이 스트림이 끊긴 경우 (타임아웃·네트워크 단절)
+      startPolling, // 종료 상태 없이 스트림이 끊긴 경우 (타임아웃·네트워크 단절)
+      (raw) => {
+        // 단계는 상태와 별개 이벤트로 온다. 깨져 와도 상태 흐름은 건드리지 않는다.
+        if (activeAnalysisRef.current !== id) return;
+        try { setProgressDetail(JSON.parse(raw)); } catch { /* 무시하고 다음 보고를 기다린다 */ }
+      }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopPolling]);
@@ -429,7 +495,6 @@ export default function AnalyzePage() {
       [key]: e.target.type === "checkbox" ? e.target.checked : e.target.value,
     }));
 
-  const STEPS = ["데이터 전처리", "문장 임베딩", "군집화 (HDBSCAN)", "FAQ 초안 생성", "검증 완료"];
 
   // 이력 목록 조회. scope·status는 백엔드가 받는 파라미터 그대로다.
   const loadHistory = useCallback(async (page, scope, completedOnly) => {
@@ -1024,35 +1089,46 @@ export default function AnalyzePage() {
               <div style={S.cardBody}>
                 {(running || done) && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {STEPS.map((s, i) => {
-                      const isDone = step >= i;
-                      const isRun  = step === i && running;
-                      return (
-                        <div key={s} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
-                          <div style={{
-                            width: 24, height: 24, borderRadius: "50%", display: "flex",
-                            alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600,
-                            background: isDone ? "#ECFDF5" : isRun ? "#EFF6FF" : "#F3F4F6",
-                            color: isDone ? "#047857" : isRun ? "#1D4ED8" : "#9CA3AF",
-                          }}>
-                            {isDone ? <Icon name="check" size={13} strokeWidth={2.6} /> : i + 1}
-                          </div>
-                          <span style={{ color: isDone ? "#111827" : isRun ? "#1D4ED8" : "#9CA3AF", fontWeight: isDone || isRun ? 500 : 400 }}>
-                            {s}
-                          </span>
-                          {isRun && <span style={{ fontSize: 11, color: "#1D4ED8" }}>처리 중...</span>}
-                        </div>
-                      );
-                    })}
+                    <PhaseList detail={progressDetail} step={step} running={running} done={done} />
                     {running && (
                       <div style={S.runningBox}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span>분석 진행 중</span>
+                          <span>
+                            분석 진행 중
+                            {phaseLabel(progressDetail?.phase) && ` · ${phaseLabel(progressDetail.phase)}`}
+                          </span>
                           <span style={{ fontFamily: "monospace" }}>{formatElapsed(elapsed)}</span>
                         </div>
+
+                        {/* AI가 세는 건수. 한쪽이라도 모르면 적지 않는다(계약 4절). */}
+                        {unitProgressText(progressDetail) && (
+                          <div style={{ marginTop: 8 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4 }}>
+                              <span>{unitProgressText(progressDetail)}</span>
+                              {elapsedText(progressDetail) && (
+                                <span style={{ opacity: 0.7 }}>AI 경과 {elapsedText(progressDetail)}</span>
+                              )}
+                            </div>
+                            {unitPercent(progressDetail) !== null && (
+                              <div style={S.unitBarTrack}>
+                                <div style={{ ...S.unitBarFill, width: `${unitPercent(progressDetail)}%` }} />
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* 진행 정보가 안 오는 것이지 분석이 멈춘 것이 아니다(계약 4절). */}
+                        {delayNotice(progressDetail) && (
+                          <div style={{ fontSize: 11, marginTop: 8, color: "#B45309" }}>
+                            {delayNotice(progressDetail)}
+                          </div>
+                        )}
+
                         <div style={{ fontSize: 11, marginTop: 6, lineHeight: 1.5, opacity: 0.85 }}>
-                          AI 서버가 중간 단계를 보고하지 않아 완료 전까지 위 단계 표시가 갱신되지 않을 수 있습니다.
-                          화면을 벗어나도 분석은 계속되며, 돌아오면 이력에서 결과를 확인할 수 있습니다.
+                          {progressDetail
+                            ? "단계를 건너뛰는 경우가 있습니다. 앞 단계가 보이지 않아도 문제가 아닙니다."
+                            : "AI 서버가 중간 단계를 보고하지 않아 완료 전까지 단계 표시가 갱신되지 않을 수 있습니다."}
+                          {" 화면을 벗어나도 분석은 계속되며, 돌아오면 이력에서 결과를 확인할 수 있습니다."}
                         </div>
                         {/* 잘못 올렸거나 오래 걸릴 때 중간에 멈춘다. 되돌릴 수 없어 한 번 묻는다. */}
                         {cancelable && (
@@ -1578,6 +1654,9 @@ const S = {
   // 기다리는 것이 기본이고 취소가 예외라는 것이 드러난다.
   // 그림 위에 붙는 설명 줄. 결과를 가리지 않게 낮은 대비로 둔다.
   scopeNotice: { marginBottom: 12, padding: "8px 12px", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8, fontSize: 12, color: "#475569", lineHeight: 1.5 },
+  // AI가 세는 건수 막대. 화면이 따로 세는 경과 시간과 다른 값이라 작게 둔다.
+  unitBarTrack: { height: 4, background: "#DBEAFE", borderRadius: 999, overflow: "hidden" },
+  unitBarFill:  { height: "100%", background: "#1D4ED8", borderRadius: 999, transition: "width .4s" },
   btnCancel:   { marginTop: 10, padding: "6px 12px", background: "#fff", color: "#BE123C", border: "1px solid #FECDD3", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   runningBox:  { marginTop: 10, padding: "10px 14px", background: "#EFF8FF", border: "1px solid #BFDBFE", borderRadius: 8, fontSize: 12, color: "#1E40AF" },
   successBox:  { marginTop: 10, padding: "10px 14px", background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 8, fontSize: 13, color: "#047857", display: "flex", alignItems: "center", gap: 8 },
