@@ -76,7 +76,8 @@ export function legacyDefaultNotice(result) {
 // 빈 화면에 "분석을 먼저 실행해주세요"를 띄우면 분석을 안 한 것처럼 보이고,
 // 오류로 적으면 다시 올리게 만든다. 둘 다 사실과 다르다.
 //
-// 설명과 함께 다음에 무엇을 하면 되는지까지 적는다.
+// 무슨 일이 있었는지만 적는다. 해결책은 짐작으로 쓰지 않는다 —
+// 기간을 넓히라거나 군집 크기를 낮추라는 말이 실제로 통하는지는 확인한 바 없다.
 export function completionNotice(result) {
   const reason = result?.completionReason;
   if (!reason || reason === "RESULTS_GENERATED") return null;
@@ -90,17 +91,17 @@ export function completionNotice(result) {
     case "NO_ELIGIBLE_TEXT":
       return {
         title: "분석할 수 있는 문장이 없습니다.",
-        body: "대상 질문은 있었지만 글자가 너무 짧아 모두 빠졌습니다. 한두 글자짜리 입력만 있는 경우입니다.",
+        body: "대상 질문은 있었지만 모두 두 글자 미만이라 분석에서 빠졌습니다.",
       };
     case "INSUFFICIENT_TARGET_LOGS":
       return {
         title: "질문이 적어 군집화를 하지 않았습니다.",
-        body: "비슷한 질문을 묶으려면 어느 정도 양이 필요합니다. 기간을 넓히거나 로그를 더 모아 다시 올려 주세요.",
+        body: "분석할 질문은 있었지만 수가 적어 묶는 단계를 건너뛰었습니다.",
       };
     case "NO_FAQ_CLUSTERS":
       return {
         title: "FAQ로 만들 만한 묶음이 없습니다.",
-        body: "질문을 묶어 보았지만 한 주제로 모인 것이 없었습니다. 군집화 옵션의 최소 클러스터 크기를 낮추면 더 작은 묶음도 잡힙니다.",
+        body: "질문을 묶어 보았지만 FAQ 생성 단계로 넘길 묶음이 없었습니다.",
       };
     default:
       // 모르는 값이 와도 빈 화면을 그냥 두지는 않는다
