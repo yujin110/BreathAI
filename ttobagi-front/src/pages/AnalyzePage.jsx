@@ -567,6 +567,16 @@ export default function AnalyzePage() {
       // 완료 확인 실패를 성공으로 표시하지 않는다. 구독은 유지한다.
       if (err?.status === 404) {
         toast.error("분석을 찾을 수 없습니다.");
+      } else if (err?.status === 403) {
+        // 분석을 시작한 사람만 취소할 수 있다. 버튼은 cancelable로 가리지만,
+        // 누르는 사이에 상태가 바뀌었거나 남의 분석을 열어 둔 경우 여기로 온다.
+        setCancelable(false);
+        toast.error("분석을 시작한 사람만 취소할 수 있습니다.");
+      } else if (err?.status === 503) {
+        // 백엔드가 AI 서버의 중단 확인을 받지 못한 경우다(ANALYSIS_CANCEL_PENDING).
+        // 취소가 됐는지 안 됐는지 모르는 상태라 단정하지 않고 다시 눌러 보게 한다.
+        toast.error("취소가 끝났는지 확인하지 못했습니다. 잠시 후 다시 눌러주세요.");
+        refreshHistoryRef.current?.();
       } else if (err?.status === 409) {
         // 누르는 사이에 끝났거나 이미 취소된 분석
         toast.info("이미 끝난 분석입니다.");
