@@ -24,6 +24,8 @@ class AuditActionCatalogTest {
                 .isEqualTo(new Resolved("FAQ 후보 반려", AuditCategory.FAQ, "후보 #7"));
         assertThat(AuditActionCatalog.resolve("DELETE", "/api/v1/dashboard/analyze/history/8"))
                 .isEqualTo(new Resolved("분석 이력 삭제", AuditCategory.ANALYSIS, "분석 #8"));
+        assertThat(AuditActionCatalog.resolve("PATCH", "/api/v1/dashboard/analyze/8/cancel"))
+                .isEqualTo(new Resolved("분석 취소", AuditCategory.ANALYSIS, "분석 #8"));
     }
 
     @Test

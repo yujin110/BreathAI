@@ -34,6 +34,8 @@ public enum ErrorCode {
     ANALYSIS_NOT_FOUND(404, "D-001", "분석 결과를 찾을 수 없습니다."),
     UPLOAD_FILE_NOT_FOUND(404, "D-002", "업로드 파일을 찾을 수 없습니다."),
     USAGE_STAT_NOT_FOUND(404, "D-003", "사용량 통계를 찾을 수 없습니다."),
+    ANALYSIS_NOT_CANCELABLE(409, "D-004", "취소할 수 없는 상태의 분석입니다."),
+    ANALYSIS_CANCEL_PENDING(503, "D-007", "분석 취소 완료를 확인하지 못했습니다. 상태를 확인하거나 다시 요청해 주세요."),
     
     // FAQ 관련
     FAQ_NOT_FOUND(404, "F-001", "해당 FAQ를 찾을 수 없습니다."),

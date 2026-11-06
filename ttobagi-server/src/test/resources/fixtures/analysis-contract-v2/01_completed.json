@@ -1,0 +1,70 @@
+{
+  "status": "COMPLETED",
+  "resultSchemaVersion": 2,
+  "analysisMode": "IMPROVEMENT",
+  "completionReason": "RESULTS_GENERATED",
+  "analysisScope": {
+    "totalLogCount": 10,
+    "targetLogCount": 5,
+    "excludedByModeCount": 5,
+    "excludedByTextCount": 0,
+    "eligibleLogCount": 5,
+    "clusteredLogCount": 5,
+    "deferredSmallInputCount": 0,
+    "noiseLogCount": 0,
+    "visualizedLogCount": 5,
+    "faqClusterCount": 1,
+    "classificationSourceCounts": {
+      "EXPLICIT_LOG_TYPE": 10,
+      "KEYWORD_MATCH_PERCENT": 0,
+      "AI_PERCENT": 0,
+      "LEGACY_DEFAULT": 0
+    },
+    "keywordScope": "ANALYSIS_TARGET"
+  },
+  "metricsScope": "ANALYSIS_INPUT",
+  "sourceLogIdScope": "UPLOAD_LOCAL",
+  "systemStatus": {
+    "totalLogCount": 10,
+    "samplingStatus": {"correct": 5, "lowQuality": 2, "unanswer": 3},
+    "visualizedLogCount": 5,
+    "excludedLogCount": 5,
+    "isSampled": false
+  },
+  "performanceMetrics": {
+    "currentUnanswerRate": 30.0,
+    "predictedAccuracyGain": null,
+    "resolvedCountByAI": null
+  },
+  "usageStats": [
+    {"statDate": "2026-11-05", "totalCnt": 10, "answerCnt": 5, "lowQualityCount": 2, "unanswerCnt": 3}
+  ],
+  "trend": [{"date": "2026-11-05", "lowQualityCount": 2, "unanswerCount": 3}],
+  "burstKeywords": [],
+  "surgeDetection": [],
+  "clusteringView": {
+    "clusterNames": [{"clusterLabel": 0, "name": "분실물", "topKeywords": ["분실물", "문의"], "size": 5}],
+    "points": [
+      {"sourceLogSeqNum": 6, "clusterLabel": 0, "x": 0.1, "y": 0.2, "text": "분실물 어디에 문의하나요", "logType": "LOW_QUALITY"},
+      {"sourceLogSeqNum": 7, "clusterLabel": 0, "x": 0.2, "y": 0.3, "text": "분실물 문의 방법", "logType": "LOW_QUALITY"},
+      {"sourceLogSeqNum": 8, "clusterLabel": 0, "x": 0.3, "y": 0.2, "text": "물건을 잃어버렸어요", "logType": "UNANSWER"},
+      {"sourceLogSeqNum": 9, "clusterLabel": 0, "x": 0.2, "y": 0.1, "text": "분실물을 찾고 싶어요", "logType": "UNANSWER"},
+      {"sourceLogSeqNum": 10, "clusterLabel": 0, "x": 0.1, "y": 0.1, "text": "분실물 문의는 어떻게 하나요", "logType": "UNANSWER"}
+    ]
+  },
+  "faqCandidates": [
+    {
+      "clusterLabel": 0,
+      "candidateType": "NEW",
+      "standardQuestion": "분실물은 어떻게 문의하나요?",
+      "answerDraft": "분실한 장소와 시간을 확인한 뒤 역 직원에게 문의해 주세요.",
+      "qType": null,
+      "category": null,
+      "occurrenceCount": 5,
+      "representativeKeywords": ["분실물", "문의"],
+      "similarQuestions": ["분실물 문의 방법", "분실물을 찾고 싶어요"],
+      "synonyms": [{"text": "잃어버린 물건", "type": "SYNONYM"}],
+      "matchedFaqs": []
+    }
+  ]
+}

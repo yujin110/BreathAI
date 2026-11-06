@@ -1,5 +1,6 @@
 package com.breathAI.ttobagi_server.domain.dashboard.entity;
 
+import com.breathAI.ttobagi_server.domain.auth.entity.User;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -7,6 +8,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.DynamicInsert;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -33,8 +36,28 @@ public class AnalysisJob {
     @JoinColumn(name = "upload_id", nullable = false, foreignKey = @ForeignKey(name = "fk_analysis_upload_id"))
     private UploadFile uploadFile;
 
+    // 이 분석을 시작한 사람, 취소 권한 판단에 쓴다. 예전 분석과 탈퇴한 사람은 비어 있다
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "requested_by", nullable = true, foreignKey = @ForeignKey(name = "fk_analysis_requested_by"))
+    private User requestedBy;
+
+    // 취소를 요청한 시각, AI 확인 전까지 남아 있다 (상태는 CANCELED가 될 때까지 그대로)
+    @Column(name = "cancel_requested_at")
+    private LocalDateTime cancelRequestedAt;
+
+    // AI 전송 상태: PENDING(보내기 전), SENDING, ACCEPTED, REJECTED(AI가 거절), UNKNOWN(접수 여부 모름)
+    @Column(name = "ai_submission_state", nullable = false, length = 20)
+    private String aiSubmissionState = "PENDING";
+
+    // 취소 요청 기록·해제, 다시 요청하면 시각을 새로 남긴다
+    public void requestCancellation() { this.cancelRequestedAt = LocalDateTime.now(); }
+    public void clearCancellation() { this.cancelRequestedAt = null; }
+    public boolean isCancellationRequested() { return cancelRequestedAt != null; }
+    // AI 전송 상태 변경
+    public void submissionState(String state) { this.aiSubmissionState = state; }
+
     @Column(name = "status", nullable = false, length = 20, 
-            columnDefinition = "VARCHAR(20) COMMENT 'PENDING, PREPROCESSING, ANALYZING, COMPLETED, FAIL'")
+            columnDefinition = "VARCHAR(20) COMMENT 'PENDING, PREPROCESSING, ANALYZING, COMPLETED, FAIL, CANCELED'")
     @Enumerated(EnumType.STRING)
     private Status status;
 
@@ -75,6 +98,30 @@ public class AnalysisJob {
     @Column(name = "min_samples")
     private Integer minSamples;
 
+    // 실제 적용 모드, 만들 때 요청한 모드를 넣고 완료 콜백에서 확정한다
+    @Enumerated(EnumType.STRING)
+    @Column(name = "analysis_mode", nullable = false, length = 20)
+    private AnalysisMode analysisMode;
+
+    // AI 결과 형식 버전과 완료 사유·분석 범위, 예전 분석은 비어 있다
+    @Column(name = "result_schema_version")
+    private Integer resultSchemaVersion;
+
+    @Column(name = "completion_reason", length = 40)
+    private String completionReason;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "analysis_scope", columnDefinition = "json COMMENT 'AI가 보낸 분석 범위 건수'")
+    private AnalysisScope analysisScope;
+
+    // AI가 보낸 마지막 진행 정보와 sequence가 늘어난 시각(BE 기준), 기록이 없으면 비어 있다
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "progress", columnDefinition = "json COMMENT 'AI가 보낸 마지막 진행 정보 (phase, 건수, 경과 시간, sequence)'")
+    private AnalysisProgress progress;
+
+    @Column(name = "progress_updated_at")
+    private LocalDateTime progressUpdatedAt;
+
     // AI가 보낸 업로드 파일별 요약값, 보내지 않은 예전 분석은 비어 있다
     @Column(name = "total_log_count")
     private Integer totalLogCount;
@@ -98,7 +145,12 @@ public class AnalysisJob {
     private Integer resolvedCountByAi;
 
     public enum Status {
-        PENDING, PREPROCESSING, ANALYZING, COMPLETED, FAIL
+        PENDING, PREPROCESSING, ANALYZING, COMPLETED, FAIL, CANCELED;
+
+        // 완료·실패·취소는 더 바뀌지 않는다
+        public boolean isFinished() {
+            return this == COMPLETED || this == FAIL || this == CANCELED;
+        }
     }
 
     @PrePersist
@@ -107,14 +159,16 @@ public class AnalysisJob {
         if (this.status == null) this.status = Status.PENDING;
         if (this.isMaskingEnabled == null) this.isMaskingEnabled = false;
         if (this.isTranslationEnabled == null) this.isTranslationEnabled = false;
+        if (this.analysisMode == null) this.analysisMode = AnalysisMode.ALL;
     }
 
     @Builder
-    public AnalysisJob(UploadFile uploadFile, String fileName,
+    public AnalysisJob(UploadFile uploadFile, User requestedBy, String fileName,
                        Boolean isMaskingEnabled, Boolean isTranslationEnabled,
                        LocalDate periodStartDate, LocalDate periodEndDate,
-                       Integer minClusterSize, Integer minSamples) {
+                       Integer minClusterSize, Integer minSamples, AnalysisMode analysisMode) {
         this.uploadFile = uploadFile;
+        this.requestedBy = requestedBy;
         this.fileName = fileName;
         this.isMaskingEnabled = isMaskingEnabled != null ? isMaskingEnabled : false;
         this.isTranslationEnabled = isTranslationEnabled != null ? isTranslationEnabled : false;
@@ -122,19 +176,21 @@ public class AnalysisJob {
         this.periodEndDate = periodEndDate;
         this.minClusterSize = minClusterSize;
         this.minSamples = minSamples;
+        this.analysisMode = analysisMode != null ? analysisMode : AnalysisMode.ALL;
         this.status = Status.PENDING;
     }
 
     // 결과에 영향을 주는 분석 옵션이 모두 같은지 확인, 같은 파일의 기존 결과를 재사용할 때 쓴다
     public boolean hasSameOptions(LocalDate periodStartDate, LocalDate periodEndDate,
                                   boolean isMaskingEnabled, boolean isTranslationEnabled,
-                                  Integer minClusterSize, Integer minSamples) {
+                                  Integer minClusterSize, Integer minSamples, AnalysisMode analysisMode) {
         return Objects.equals(this.periodStartDate, periodStartDate)
                 && Objects.equals(this.periodEndDate, periodEndDate)
                 && Boolean.TRUE.equals(this.isMaskingEnabled) == isMaskingEnabled
                 && Boolean.TRUE.equals(this.isTranslationEnabled) == isTranslationEnabled
                 && Objects.equals(this.minClusterSize, minClusterSize)
-                && Objects.equals(this.minSamples, minSamples);
+                && Objects.equals(this.minSamples, minSamples)
+                && this.analysisMode == analysisMode;
     }
 
     // 전처리 단계 진입, 분석 시작 시각 기록
@@ -161,6 +217,17 @@ public class AnalysisJob {
         this.finishedAt = LocalDateTime.now();
     }
 
+    // 시작한 사람의 취소 처리, 이후 AI 콜백은 무시한다
+    public void cancel() {
+        this.status = Status.CANCELED;
+        this.finishedAt = LocalDateTime.now();
+    }
+
+    // 분석을 시작한 사람인지 확인, 비어 있으면 아무도 아니다
+    public boolean isRequestedBy(User user) {
+        return requestedBy != null && user != null && Objects.equals(requestedBy.getUserId(), user.getUserId());
+    }
+
     // AI가 보낸 파일별 요약값 기록, 다시 계산하지 않고 받은 값을 그대로 둔다
     public void recordSummary(Integer totalLogCount, Integer correctCount, Integer lowQualityCount,
                               Integer unanswerCount, BigDecimal currentUnanswerRate,
@@ -176,6 +243,36 @@ public class AnalysisJob {
 
     public boolean hasSummary() {
         return totalLogCount != null;
+    }
+
+    // 완료 콜백의 결과 형식·실제 모드·완료 사유·분석 범위 기록
+    // 모드를 보내지 않은 AI는 전체 유형을 분석했으므로 ALL로 확정한다
+    public void recordResultScope(Integer resultSchemaVersion, AnalysisMode appliedMode,
+                                  String completionReason, AnalysisScope analysisScope) {
+        this.resultSchemaVersion = resultSchemaVersion;
+        this.analysisMode = appliedMode != null ? appliedMode : AnalysisMode.ALL;
+        this.completionReason = completionReason;
+        this.analysisScope = analysisScope;
+    }
+
+    // 진행 정보 기록, 진행 중이고 취소 요청이 없으며 sequence가 늘었을 때만 바꾼다
+    public boolean recordProgress(AnalysisProgress progress, LocalDateTime now) {
+        if (status.isFinished() || isCancellationRequested()
+                || progress == null || progress.getPhase() == null || progress.getSequence() == null) {
+            return false;
+        }
+        if (this.progress != null && this.progress.getSequence() != null
+                && progress.getSequence() <= this.progress.getSequence()) {
+            return false;
+        }
+        this.progress = progress;
+        this.progressUpdatedAt = now;
+        return true;
+    }
+
+    // 결과 형식 버전, 값이 없는 예전 결과는 1
+    public int resultSchemaVersionOrDefault() {
+        return resultSchemaVersion != null ? resultSchemaVersion : 1;
     }
 
 }

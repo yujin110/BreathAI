@@ -131,7 +131,8 @@ def main() -> None:
     for cid, (case, hits) in sorted(case_map.items()):
         _log(f'  C{cid:>2} → {case:<18} (hits={hits[:3]})')
 
-    tok, mdl = AE.load_llm()
+    from services.llm_runtime import load_pipeline_models
+    tok, mdl, judge_tok, judge_mdl = load_pipeline_models(AR.load_model, AE.load_llm)
     ce = AE.load_ce()
 
     OUTPUT_JSONL.write_text('', encoding='utf-8')
@@ -172,7 +173,7 @@ def main() -> None:
         e2 = AE.e2_score(ce, c.get('standardQuestion', ''), best_body) \
             if c.get('standardQuestion', '').strip() else None
         cluster_for_eval = {**c, 'answerDraft': best_body}
-        judge, judge_raw = AE.llm_judge(tok, mdl, cluster_for_eval)
+        judge, judge_raw = AE.llm_judge(judge_tok, judge_mdl, cluster_for_eval)
         llm_mean = (
             round(sum(judge[k] for k in ('accuracy', 'politeness',
                                          'actionability', 'essential_info')) / 4.0, 2)

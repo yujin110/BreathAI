@@ -7,6 +7,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SseEmitterManagerTest {
 
@@ -16,5 +18,30 @@ class SseEmitterManagerTest {
         SseEmitter emitter = new SseEmitterManager().create(1L);
 
         assertThat(emitter.getTimeout()).isEqualTo(Duration.ofHours(8).toMillis());
+    }
+
+    @Test
+    @DisplayName("취소 상태를 보내면 연결을 닫고, 진행 상태는 연결을 유지한다")
+    void canceledClosesConnection() {
+        SseEmitterManager manager = new SseEmitterManager();
+        SseEmitter running = manager.create(1L);
+        SseEmitter canceled = manager.create(2L);
+
+        manager.send(1L, "ANALYZING", "분석 중");
+        manager.send(2L, "CANCELED", "분석이 취소되었습니다.");
+
+        assertThatCode(() -> running.send("다음 상태")).doesNotThrowAnyException();
+        assertThatThrownBy(() -> canceled.send("다음 상태")).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("세부 진행 정보를 보내도 연결을 유지한다")
+    void progressKeepsConnection() {
+        SseEmitterManager manager = new SseEmitterManager();
+        SseEmitter emitter = manager.create(1L);
+
+        manager.sendProgress(1L, java.util.Map.of("phase", "EMBEDDING", "sequence", 15));
+
+        assertThatCode(() -> emitter.send("다음 상태")).doesNotThrowAnyException();
     }
 }

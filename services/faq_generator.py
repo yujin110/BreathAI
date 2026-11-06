@@ -1,4 +1,4 @@
-"""또타24 FAQ 후보 생성 — Qwen2.5-7B-Instruct + 프롬프트 엔지니어링.
+"""또타24 FAQ 후보 생성 — Llama 3.1 8B Instruct + 프롬프트 엔지니어링.
 
 입력:  dataset/clusters.csv          (clustering.py 산출물)
        dataset/cluster_keywords.json (클러스터별 top 키워드)
@@ -18,11 +18,11 @@ import re
 import time
 import unicodedata
 from pathlib import Path
-from services.runtime_config import runtime_path, llm_memory_options
+from services.runtime_config import runtime_path
+from services.llm_runtime import model_id, load_chat_model, generate_chat
 
 import pandas as pd
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
 def _nfd(p: Path) -> Path:
@@ -37,9 +37,8 @@ SUMMARY_CSV = DATA_DIR / 'cluster_summary.csv'
 OUTPUT_JSON = DATA_DIR / 'faq_candidates.json'
 OUTPUT_JSONL = DATA_DIR / 'faq_candidates.jsonl'  # per-cluster checkpoint
 
-MODEL_NAME = 'Qwen/Qwen2.5-7B-Instruct'
+MODEL_NAME = model_id()
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-DTYPE = torch.bfloat16
 
 MAX_NEW_TOKENS = 800
 TEMPERATURE = 0.3       # 사실성 우선
@@ -70,6 +69,7 @@ PROMPT_TEMPLATE = """당신은 서울교통공사 챗봇 '또타24'의 FAQ 작�
 ▶ FAQ 작성 시:
   - standardQuestion: 자연스러운 한국어 한 문장 (구체적이고 답변 가능한 형태)
   - answerDraft: 운영자 가이드 톤. 사실 기반(hallucination 금지). 모르면 "○○로 문의" 식으로 안내
+  - 검색 근거가 없는 단계이므로 전화번호, URL, 운영시간, 요금, 구체적인 처리 절차를 추측해 넣지 마세요.
   - synonyms: 10개. 각각 type 분류 (TYPO=오타, ABBR=약어, SYNONYM=동의어/유사 표현)
   - 한글 등록 원칙: 모든 출력은 자연스러운 한국어로
 
@@ -77,11 +77,11 @@ PROMPT_TEMPLATE = """당신은 서울교통공사 챗봇 '또타24'의 FAQ 작�
 
 ```json
 {{
-  "tag": "FAQ" | "OUT_OF_SCOPE" | "EMERGENCY" | "REJECT",
+  "tag": "FAQ",
   "standardQuestion": "...",
   "answerDraft": "...",
   "synonyms": [
-    {{"text": "...", "type": "TYPO|ABBR|SYNONYM"}}
+    {{"text": "...", "type": "SYNONYM"}}
   ],
   "reason": "(한 줄, 왜 이 tag로 분류했는지)"
 }}
@@ -106,62 +106,74 @@ def build_prompt(cluster_id: int, size: int, keywords: list[str],
 # 2. LLM 호출
 def load_model() -> tuple:
     print(f'모델 로드: {MODEL_NAME}')
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_NAME, torch_dtype=DTYPE, device_map='auto', trust_remote_code=True,
-        **llm_memory_options(),
-    ).eval()
-    return tokenizer, model
+    return load_chat_model(MODEL_NAME)
 
 
-@torch.no_grad()
 def generate(prompt: str, tokenizer, model) -> str:
-    messages = [
-        {'role': 'system', 'content': '당신은 정확하고 사실 기반으로 답하는 한국어 FAQ 작성자입니다.'},
+    text = generate_chat([
+        {'role': 'system', 'content': (
+            '당신은 한국어 FAQ 데이터를 생성합니다. 반드시 tag, standardQuestion, answerDraft, '
+            'synonyms, reason 키가 있는 유효한 JSON 객체 하나만 출력하세요. '
+            '마크다운, 코드 블록, 제목, 목록, JSON 밖 설명은 출력하지 마세요. '
+            '근거에 없는 연락처, URL, 시간, 요금, 절차를 만들지 마세요.')},
         {'role': 'user', 'content': prompt},
-    ]
-    inputs = tokenizer.apply_chat_template(
-        messages, add_generation_prompt=True, return_tensors='pt', return_dict=True
-    ).to(DEVICE)
-
-    out = model.generate(
-        **inputs,
-        max_new_tokens=MAX_NEW_TOKENS,
-        temperature=TEMPERATURE,
-        top_p=TOP_P,
-        do_sample=True,
-        eos_token_id=tokenizer.eos_token_id,
-        pad_token_id=tokenizer.eos_token_id,
-    )
-    response = tokenizer.decode(out[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
-    return response.strip()
+    ], tokenizer, model, max_new_tokens=MAX_NEW_TOKENS,
+        temperature=TEMPERATURE, top_p=TOP_P)
+    return text
 
 
-# 3. JSON 파싱 (LLM 출력에서 첫 JSON 블록 추출)
-RE_JSON_BLOCK = re.compile(r'```(?:json)?\s*(\{.*?\})\s*```', re.DOTALL)
-RE_JSON_BARE = re.compile(r'(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})', re.DOTALL)
-
-
+# 3. 최상위 FAQ JSON 객체 파싱 (동의어 객체와 구분)
 def parse_response(text: str) -> dict | None:
-    m = RE_JSON_BLOCK.search(text) or RE_JSON_BARE.search(text)
-    if not m:
-        return None
-    try:
-        return json.loads(m.group(1))
-    except json.JSONDecodeError:
-        return None
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r'\{', text):
+        try:
+            obj, _ = decoder.raw_decode(text[match.start():])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and 'tag' in obj:
+            return obj
+    return None
+
+
+def generate_candidate(prompt: str, tokenizer, model) -> tuple[dict, list[str]]:
+    """Retry malformed JSON once; preserve the existing FAQ payload contract."""
+    trials = []
+    for attempt in range(2):
+        suffix = '' if attempt == 0 else (
+            '\n\n직전 응답은 FAQ JSON 스키마를 따르지 않았습니다. '
+            '필수 키 5개를 포함한 JSON 객체 하나만 다시 출력하세요. '
+            'tag는 FAQ, OUT_OF_SCOPE, EMERGENCY, REJECT 중 하나입니다.')
+        raw = generate(prompt + suffix, tokenizer, model)
+        trials.append(raw)
+        obj = parse_response(raw)
+        if (obj is not None and isinstance(obj.get('tag'), str)
+                and obj['tag'] in {'FAQ', 'OUT_OF_SCOPE', 'EMERGENCY', 'REJECT'}
+                and all(isinstance(obj.get(k), str)
+                        for k in ('standardQuestion', 'answerDraft', 'reason'))
+                and isinstance(obj.get('synonyms'), list)
+                and (obj['tag'] != 'FAQ' or (obj['standardQuestion'].strip() and obj['answerDraft'].strip()))):
+            result = validate(obj)
+            if result['tag'] == 'FAQ':
+                result['answerDraft'] = '확인된 안내 자료가 없어 답변 내용을 확정할 수 없습니다.'
+            return result, trials
+    return validate({'tag': 'REJECT', 'reason': 'FAQ JSON schema validation failed after 2 attempts'}), trials
 
 
 def validate(obj: dict) -> dict:
     """필수 키 보장 + 기본값 보강."""
+    if (not isinstance(obj, dict)
+            or any(not isinstance(obj.get(key, ''), str)
+                   for key in ('tag', 'standardQuestion', 'answerDraft', 'reason'))
+            or not isinstance(obj.get('synonyms', []), list)):
+        obj = {'tag': 'REJECT', 'reason': 'Invalid FAQ field types'}
     tag = obj.get('tag', 'REJECT')
     if tag not in {'FAQ', 'OUT_OF_SCOPE', 'EMERGENCY', 'REJECT'}:
         tag = 'REJECT'
     synonyms = []
     for s in obj.get('synonyms') or []:
-        if isinstance(s, dict) and 'text' in s:
+        if isinstance(s, dict) and isinstance(s.get('text'), str):
             t = s.get('type', 'SYNONYM')
-            if t not in {'TYPO', 'ABBR', 'SYNONYM'}:
+            if not isinstance(t, str) or t not in {'TYPO', 'ABBR', 'SYNONYM'}:
                 t = 'SYNONYM'
             synonyms.append({'text': s['text'], 'type': t})
     return {
@@ -229,20 +241,13 @@ def main() -> None:
     print(f'대상 클러스터: {len(clusters)}개 (MIN_CLUSTER_SIZE={MIN_CLUSTER_SIZE} 이상, 노이즈 제외)\n')
 
     tokenizer, model = load_model()
-    print(f'GPU: {DEVICE} / dtype: {DTYPE}\n')
+    print(f'GPU: {DEVICE} / dtype: {model.dtype}\n')
 
     results = []
     for i, c in enumerate(clusters, 1):
         prompt = build_prompt(c['clusterId'], c['size'], c['keywords'], c['samples'])
         t0 = time.time()
-        raw = generate(prompt, tokenizer, model)
-        parsed = parse_response(raw)
-        if parsed is None:
-            print(f'  [C{c["clusterId"]:>2}] n={c["size"]:>3}  JSON 파싱 실패 → REJECT')
-            obj = {'tag': 'REJECT', 'reason': 'JSON parse failed'}
-        else:
-            obj = parsed
-        validated = validate(obj)
+        validated, _trials = generate_candidate(prompt, tokenizer, model)
         validated['clusterId'] = c['clusterId']
         validated['size'] = c['size']
         validated['topKeywords'] = c['keywords'][:5]

@@ -13,6 +13,9 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 
 import java.time.Duration;
 import java.util.function.Consumer;
+import com.breathAI.ttobagi_server.domain.dashboard.entity.AnalysisMode;
+import com.breathAI.ttobagi_server.domain.dashboard.entity.AnalysisProgress;
+import com.breathAI.ttobagi_server.domain.dashboard.service.AnalysisSubmissionService;
 
 // AI 서버 호출 담당 유틸
 @Slf4j
@@ -25,6 +28,31 @@ public class WebClientUtil {
     private static final Duration PIPELINE_REQUEST_TIMEOUT = Duration.ofMinutes(2);
 
     private final WebClient webClient;
+    private final AnalysisSubmissionService submissions;
+
+    // AI GET /jobs/{id} 응답, status는 AI 내부 상태라 콜백 상태와 값이 다르다
+    public record AiJob(String status, String callback, AnalysisProgress progress) {}
+
+    // AI 작업 취소, 200이 아니면 예외 (404·409·503은 WebClientResponseException)
+    public void cancelJob(Long analysisId) {
+        var response = webClient.post().uri("/jobs/{id}/cancel", analysisId).retrieve()
+                .toBodilessEntity().timeout(Duration.ofSeconds(35)).block();
+        if (response == null || response.getStatusCode().value() != 200)
+            throw new IllegalStateException("AI 서버가 취소를 확인하지 않았습니다.");
+    }
+
+    // AI 작업 상태 조회 (QUEUED, RUNNING, CANCELLING, CANCELED, COMPLETED, FAILED)
+    public String jobStatus(Long analysisId) {
+        return job(analysisId).status();
+    }
+
+    // AI 작업 조회, 상태와 진행 정보(progress, 기록이 없으면 null)
+    public AiJob job(Long analysisId) {
+        var result = webClient.get().uri("/jobs/{id}", analysisId).retrieve()
+                .bodyToMono(AiJob.class).timeout(Duration.ofSeconds(5)).block();
+        if (result == null) throw new IllegalStateException("AI 서버의 작업 상태 응답이 비어 있습니다.");
+        return result;
+    }
 
     // 업로드 파일을 AI 서버로 전달하여 분석 파이프라인 시작
     // 결과는 응답이 아닌 별도 콜백으로 수신하고, 요청 자체가 실패하면 onFailure를 실행한다
@@ -40,8 +68,10 @@ public class WebClientUtil {
             String periodEndDate,
             Integer minClusterSize,
             Integer minSamples,
+            AnalysisMode analysisMode,
             Consumer<String> onFailure) {
         try {
+            if (!submissions.begin(analysisId)) return;
             MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
             body.add("uploadId", uploadId);
             body.add("analysisId", analysisId.toString());
@@ -52,6 +82,8 @@ public class WebClientUtil {
             // 군집화 설정은 값이 있을 때만 보내고, 없으면 AI 서버 기본값을 쓴다
             if (minClusterSize != null) body.add("minClusterSize", minClusterSize.toString());
             if (minSamples != null) body.add("minSamples", minSamples.toString());
+            // AI 기본값에 맡기지 않고 항상 보내, 저장한 모드와 AI가 쓴 모드를 맞춘다
+            body.add("analysisMode", analysisMode.name());
             body.add("file", new ByteArrayResource(fileBytes) {
                 @Override
                 public String getFilename() {
@@ -68,17 +100,27 @@ public class WebClientUtil {
                     .toBodilessEntity()
                     .timeout(PIPELINE_REQUEST_TIMEOUT)
                     .subscribe(
-                            response -> log.info("AI 서버 파이프라인 요청 접수 analysisId: {}, status: {}",
-                                    analysisId, response.getStatusCode()),
+                            response -> {
+                                submissions.received(analysisId);
+                                log.info("AI 서버 파이프라인 요청 접수 analysisId: {}, status: {}", analysisId, response.getStatusCode());
+                            },
                             e -> {
+                                submissions.failed(analysisId, definitiveRejection(e));
                                 log.error("AI 서버 파이프라인 요청 실패 analysisId: {}, uploadId: {}", analysisId, uploadId, e);
                                 onFailure.accept(failureReason(e));
                             });
 
         } catch (Exception e) {
+            submissions.failed(analysisId, definitiveRejection(e));
             log.error("AI 서버 파이프라인 요청 실패 analysisId: {}, uploadId: {}", analysisId, uploadId, e);
             onFailure.accept(failureReason(e));
         }
+    }
+
+    private static boolean definitiveRejection(Throwable error) {
+        if (!(error instanceof WebClientResponseException response)) return false;
+        int code = response.getStatusCode().value();
+        return code >= 400 && code < 500 && code != 409 && code != 408;
     }
 
     // 분석 실패 사유, AI가 입력 파일 검사에서 거절(422)한 경우는 연결 문제와 구분한다

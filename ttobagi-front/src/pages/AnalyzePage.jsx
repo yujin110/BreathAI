@@ -9,6 +9,9 @@ import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
 import Icon from "../components/Icon.jsx";
+import FitSelect from "../components/FitSelect.jsx";
+import { scopeSentence, scopeCaption, legacyDefaultNotice, completionNotice, emptyFinishedNotice, MODE_OPTIONS } from "../utils/analysisScope.js";
+import { PHASES, phaseIndex, phaseLabel, unitProgressText, unitPercent, elapsedText, delayNotice } from "../utils/analysisProgress.js";
 
 // Spring의 spring.servlet.multipart.max-file-size=50MB 와 동일하게 맞춘다
 const HISTORY_SIZE = 10;
@@ -54,7 +57,103 @@ const JOB_STATUS = {
   ANALYZING:     { label: "분석 중",   background: "#DBEAFE", color: "#1E40AF" },
   COMPLETED:     { label: "완료",      background: "#D1FAE5", color: "#065F46" },
   FAIL:          { label: "실패",      background: "#FDECEA", color: "#B91C1C" },
+  CANCELED:      { label: "취소됨",    background: "#F1F5F9", color: "#475569" },
 };
+
+// 한 줄짜리 단계 표시. 지나간 것은 체크, 지금은 파랑, 아직은 회색.
+function PhaseRow({ label, state, order }) {
+  const isDone = state === "done";
+  const isRun  = state === "running";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+      <div style={{
+        width: 24, height: 24, borderRadius: "50%", display: "flex",
+        alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600,
+        background: isDone ? "#ECFDF5" : isRun ? "#EFF6FF" : "#F3F4F6",
+        color:      isDone ? "#047857" : isRun ? "#1D4ED8" : "#9CA3AF",
+      }}>
+        {isDone ? <Icon name="check" size={13} strokeWidth={2.6} /> : order}
+      </div>
+      <span style={{ color: isDone ? "#111827" : isRun ? "#1D4ED8" : "#9CA3AF", fontWeight: isDone || isRun ? 500 : 400 }}>
+        {label}
+      </span>
+      {isRun && <span style={{ fontSize: 11, color: "#1D4ED8" }}>처리 중...</span>}
+    </div>
+  );
+}
+
+// AI가 보고한 phase로 단계를 그린다.
+//
+// 보고가 없으면(progressDetail=null, 과거 작업이나 아직 안 보낸 경우) 예전처럼
+// 상태 콜백 기준 다섯 단계로 떨어진다. 새 정보가 없다고 화면이 비면 안 된다.
+//
+// 지금 단계보다 앞이면 지났다고 본다. 건너뛴 단계도 지난 것으로 그린다 —
+// 조건에 안 맞아 생략하는 것은 정상이고, 비워 두면 멈춘 것처럼 보인다(계약 4절).
+function PhaseList({ detail, step, running, done }) {
+  const FALLBACK = ["데이터 전처리", "문장 임베딩", "군집화 (HDBSCAN)", "FAQ 초안 생성", "검증 완료"];
+
+  if (!detail?.phase) {
+    return (
+      <>
+        {FALLBACK.map((label, i) => (
+          <PhaseRow key={label} label={label} order={i + 1}
+            state={step >= i ? "done" : step === i && running ? "running" : "todo"} />
+        ))}
+      </>
+    );
+  }
+
+  const current = phaseIndex(detail.phase);
+  return (
+    <>
+      {PHASES.map((p, i) => (
+        <PhaseRow key={p.key} label={p.label} order={i + 1}
+          state={done || i < current ? "done" : i === current ? (running ? "running" : "done") : "todo"} />
+      ))}
+    </>
+  );
+}
+
+// 무엇을 분석한 결과인지 한 줄로 밝힌다.
+// 통계 카드는 올린 전체를 세고, 군집도·급증 키워드는 그중 골라낸 질문만 본다.
+// 두 숫자가 다른 이유를 적어 두지 않으면 화면이 틀린 것처럼 보인다.
+// 과거 결과에는 범위 정보가 없어 안내도 띄우지 않는다(계약 3절: 추정해 채우지 않는다).
+function ScopeNotice({ result }) {
+  const sentence = scopeSentence(result);
+  if (!sentence) return null;
+  const legacy = legacyDefaultNotice(result);
+  return (
+    <div style={S.scopeNotice}>
+      <div>{sentence}</div>
+      {legacy && <div style={{ marginTop: 4, opacity: 0.8 }}>{legacy}</div>}
+    </div>
+  );
+}
+
+// 결과가 비어 있을 때 무슨 일이 있었는지 알린다.
+//
+// 대상 0건·짧은 문장뿐·소량·묶이지 않음은 모두 정상 완료다(계약 3절).
+// "분석을 먼저 실행해주세요"를 띄우면 분석을 안 한 것처럼 보이고,
+// 오류처럼 적으면 멀쩡한 파일을 다시 올리게 만든다.
+function EmptyResult({ result, icon = "analyze" }) {
+  // 결과가 아예 없으면 아직 안 돌린 것이고, 결과는 왔는데 비었으면 끝난 것이다.
+  // 둘을 같은 문구로 덮으면 끝난 분석을 안 돌렸다고 말하게 된다.
+  const notice = result ? (completionNotice(result) || emptyFinishedNotice(result)) : null;
+  const title = notice ? notice.title : "분석을 먼저 실행해주세요.";
+  return (
+    <div style={{ ...S.card, ...S.cardBody, textAlign: "center", padding: 48, color: "#9CA3AF" }}>
+      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 44, height: 44, borderRadius: "50%", background: "#F3F4F6", color: "#9CA3AF", marginBottom: 12 }}>
+        <Icon name={icon} size={21} />
+      </span>
+      <div style={{ color: "#374151", fontWeight: 500 }}>{title}</div>
+      {notice && (
+        <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6, maxWidth: 460, marginLeft: "auto", marginRight: "auto" }}>
+          {notice.body}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // 모르는 상태가 와도 글자는 그대로 보여 준다. 숨기면 무슨 일인지 알 수 없다.
 function jobStatus(status) {
@@ -199,6 +298,12 @@ export default function AnalyzePage() {
   const [openQuestions, setOpenQuestions] = useState(() => new Set());
   // 후보 수정의 카테고리 선택지. GET /faq/categories 가 없으면 빈 배열로 둔다.
   const [categories, setCategories]     = useState([]);
+  // 취소 확인 창을 띄울지, 취소 요청을 보내는 중인지
+  // AI가 보고한 세부 진행 단계. 보내기 전까지는 null이고, 그때는 단계 없이 진행만 알린다.
+  const [progressDetail, setProgressDetail] = useState(null);
+  const [cancelAsking, setCancelAsking] = useState(false);
+  const [cancelling, setCancelling]     = useState(false);
+  const [cancelable, setCancelable]     = useState(false);
   const [startedAt, setStartedAt]   = useState(null); // 분석 시작 시각
   const [elapsed, setElapsed]       = useState(0);    // 경과 초
   const [options, setOptions]       = useState({
@@ -206,6 +311,8 @@ export default function AnalyzePage() {
     periodEndDate: "",
     isMaskingEnabled: true,
     isTranslationEnabled: false,
+    // 계약 2절의 기본값. 비워 보내면 백엔드도 같은 값을 쓴다.
+    analysisMode: "IMPROVEMENT",
     minClusterSize: "",
     minSamples: "",
   });
@@ -216,6 +323,7 @@ export default function AnalyzePage() {
   // 정리하지 않으면 다른 메뉴로 이동한 뒤에도 스트림과 setInterval이 계속 살아남는다.
   const streamRef = useRef(null);
   const pollRef = useRef(null);
+  const activeAnalysisRef = useRef(null);
 
   // 이력 목록을 "마지막에 불러온 조건 그대로" 다시 부르는 함수.
   // watchAnalysis가 loadHistory보다 먼저 선언돼 있어 직접 참조할 수 없고,
@@ -233,6 +341,7 @@ export default function AnalyzePage() {
   }, []);
 
   useEffect(() => () => {
+    activeAnalysisRef.current = null;
     streamRef.current?.close();
     stopPolling();
   }, [stopPolling]);
@@ -240,8 +349,18 @@ export default function AnalyzePage() {
   // 분석 진행 감시. 업로드 직후와, 이력에서 진행 중인 분석을 열었을 때 모두 쓴다.
   // SSE를 먼저 붙이고 끊기면 폴링으로 이어받는다.
   const watchAnalysis = useCallback((id) => {
+    activeAnalysisRef.current = id;
     streamRef.current?.close();
     stopPolling();
+    setCancelable(false);
+    setProgressDetail(null);
+    // SSE contains status only; ownership comes from the authenticated status API.
+    dashApi.getAnalysisStatus(id).then((r) => {
+      if (activeAnalysisRef.current !== id || terminalDoneRef.current === id) return;
+      setCancelable(r.data?.cancelable === true);
+      // 구독하기 전에 이미 지나간 단계가 있으므로 지금 값을 먼저 받아 둔다
+      setProgressDetail(r.data?.progressDetail ?? null);
+    }).catch(() => {});
 
     const loadResults = () => {
       stopPolling();
@@ -261,6 +380,7 @@ export default function AnalyzePage() {
     // 백엔드 AnalysisJob.Status는 PENDING / PREPROCESSING / ANALYZING / COMPLETED / FAIL이고,
     // 구독 즉시 현재 상태를 한 번 보내준다. 화면 단계는 5개인데 상태는 3개뿐이라 대표 지점만 찍는다.
     const applyStatus = (status) => {
+      if (activeAnalysisRef.current !== id) return true;
       if (status === "PENDING")       setStep(-1);
       if (status === "PREPROCESSING") setStep(0);
       if (status === "ANALYZING")     setStep(2);
@@ -271,15 +391,21 @@ export default function AnalyzePage() {
       setHistory((rows) => rows.map((row) =>
         row.analysisId === id && row.status !== status ? { ...row, status } : row));
 
-      if (status !== "COMPLETED" && status !== "FAIL") return false;
+      if (!["COMPLETED", "FAIL", "CANCELED"].includes(status)) return false;
 
       // 종료는 한 번만 처리한다. SSE가 같은 상태를 다시 보내거나
       // 폴링과 겹쳐도 결과 조회·알림이 두 번 나가지 않게 한다.
       if (terminalDoneRef.current === id) return true;
       terminalDoneRef.current = id;
+      setCancelable(false);
+      stopPolling();
+      streamRef.current?.close();
 
       if (status === "COMPLETED") {
         loadResults();
+      } else if (status === "CANCELED") {
+        setRunning(false); setDone(false); setStep(-1);
+        setAnalyzeResult(null); setCandidates([]);
       } else {
         setRunning(false);
         toast.error("분석에 실패했습니다.");
@@ -293,12 +419,18 @@ export default function AnalyzePage() {
 
     // SSE가 끊기면 폴링으로 이어받는다. 중복 시작을 막아야 interval이 여러 개 돌지 않는다.
     const startPolling = () => {
+      if (activeAnalysisRef.current !== id) return;
+      if (terminalDoneRef.current === id) return;
       if (pollRef.current) return;
       pollRef.current = setInterval(async () => {
         try {
           const statusRes = await dashApi.getAnalysisStatus(id);
+          if (activeAnalysisRef.current !== id) return;
+          setCancelable(statusRes.data?.cancelable === true);
+          setProgressDetail(statusRes.data?.progressDetail ?? null);
           if (applyStatus(statusRes.data?.status)) stopPolling();
         } catch (err) {
+          if (activeAnalysisRef.current !== id) return;
           stopPolling();
           setRunning(false);
           toast.error(err.message || "분석 상태 조회에 실패했습니다.");
@@ -317,7 +449,12 @@ export default function AnalyzePage() {
         }
       },
       startPolling, // 연결 실패
-      startPolling  // 종료 상태 없이 스트림이 끊긴 경우 (타임아웃·네트워크 단절)
+      startPolling, // 종료 상태 없이 스트림이 끊긴 경우 (타임아웃·네트워크 단절)
+      (raw) => {
+        // 단계는 상태와 별개 이벤트로 온다. 깨져 와도 상태 흐름은 건드리지 않는다.
+        if (activeAnalysisRef.current !== id) return;
+        try { setProgressDetail(JSON.parse(raw)); } catch { /* 무시하고 다음 보고를 기다린다 */ }
+      }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopPolling]);
@@ -361,7 +498,6 @@ export default function AnalyzePage() {
       [key]: e.target.type === "checkbox" ? e.target.checked : e.target.value,
     }));
 
-  const STEPS = ["데이터 전처리", "문장 임베딩", "군집화 (HDBSCAN)", "FAQ 초안 생성", "검증 완료"];
 
   // 이력 목록 조회. scope·status는 백엔드가 받는 파라미터 그대로다.
   const loadHistory = useCallback(async (page, scope, completedOnly) => {
@@ -395,6 +531,10 @@ export default function AnalyzePage() {
   const openAnalysis = useCallback(async (item) => {
     if (!item?.analysisId) return;
     const id = item.analysisId;
+    activeAnalysisRef.current = id;
+    streamRef.current?.close();
+    stopPolling();
+    setCancelable(false);
     setAnalysisId(id);
     setAnalyzeResult(null);
     setCandidates([]);
@@ -412,7 +552,7 @@ export default function AnalyzePage() {
     // 서버에 현재 상태를 물어본다. 묻지 않고 "진행 중입니다"를 띄우면
     // 곧이어 SSE가 FAIL을 전해 알림이 겹친다.
     let status = item.status;
-    if (status !== "COMPLETED" && status !== "FAIL") {
+    if (!["COMPLETED", "FAIL", "CANCELED"].includes(status)) {
       try {
         status = (await dashApi.getAnalysisStatus(id)).data?.status || status;
       } catch {
@@ -423,6 +563,15 @@ export default function AnalyzePage() {
     }
     // 목록이 낡아 있었으면(적힌 상태와 실제가 다르면) 목록도 맞춰 둔다.
     const staleRow = status && status !== item.status;
+    if (activeAnalysisRef.current !== id) return;
+
+    if (status === "CANCELED") {
+      setCancelable(false);
+      setDone(false); setRunning(false); setStep(-1);
+      toast.info("취소된 분석입니다.");
+      if (staleRow) refreshHistoryRef.current?.();
+      return;
+    }
 
     if (status === "FAIL") {
       setDone(false); setRunning(false); setStep(-1);
@@ -448,14 +597,67 @@ export default function AnalyzePage() {
       dashApi.getFileAnalyzeResult(id),
       faqApi.getCandidates(id),
     ]);
+    if (activeAnalysisRef.current !== id) return;
     if (resultRes.status === "fulfilled" && resultRes.value?.data) setAnalyzeResult(resultRes.value.data);
     if (candRes.status === "fulfilled" && candRes.value?.data?.recommendations) {
       setCandidates(candRes.value.data.recommendations);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [stopPolling]);
 
   // 내 이력에서만 삭제한다. 분석 결과·후보·반영된 FAQ는 그대로 남는다.
+  // 돌고 있는 분석을 멈춘다.
+  // 서버가 작업을 실제로 중단해야 하는 일이라 백엔드 응답을 받고 나서 화면을 정리한다.
+  // 먼저 끊고 성공으로 보여 주면, 실패했을 때 사용자는 멈춘 줄 알지만 서버는 계속 돈다.
+  const handleCancel = async () => {
+    if (!analysisId) return;
+    setCancelling(true);
+    try {
+      await dashApi.cancelAnalysis(analysisId);
+      if (activeAnalysisRef.current !== analysisId) {
+        setCancelAsking(false);
+        toast.success("분석을 취소했습니다.");
+        refreshHistoryRef.current?.();
+        return;
+      }
+      terminalDoneRef.current = analysisId;
+      setCancelable(false);
+      streamRef.current?.close();
+      stopPolling();
+      setRunning(false);
+      setDone(false);
+      setStep(-1);
+      setAnalyzeResult(null); setCandidates([]);
+      setCancelAsking(false);
+      toast.success("분석을 취소했습니다.");
+      refreshHistoryRef.current?.();
+    } catch (err) {
+      // 완료 확인 실패를 성공으로 표시하지 않는다. 구독은 유지한다.
+      if (err?.status === 404) {
+        toast.error("분석을 찾을 수 없습니다.");
+      } else if (err?.status === 403) {
+        // 분석을 시작한 사람만 취소할 수 있다. 버튼은 cancelable로 가리지만,
+        // 누르는 사이에 상태가 바뀌었거나 남의 분석을 열어 둔 경우 여기로 온다.
+        setCancelable(false);
+        toast.error("분석을 시작한 사람만 취소할 수 있습니다.");
+      } else if (err?.status === 503) {
+        // 백엔드가 AI 서버의 중단 확인을 받지 못한 경우다(ANALYSIS_CANCEL_PENDING).
+        // 취소가 됐는지 안 됐는지 모르는 상태라 단정하지 않고 다시 눌러 보게 한다.
+        toast.error("취소가 끝났는지 확인하지 못했습니다. 잠시 후 다시 눌러주세요.");
+        refreshHistoryRef.current?.();
+      } else if (err?.status === 409) {
+        // 누르는 사이에 끝났거나 이미 취소된 분석
+        toast.info("이미 끝난 분석입니다.");
+        refreshHistoryRef.current?.();
+      } else {
+        toast.error(err.message || "분석을 취소하지 못했습니다.");
+      }
+      setCancelAsking(false);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   const handleDeleteHistory = async (item) => {
     if (!window.confirm("내 이력에서 삭제합니다. 분석 결과와 반영된 FAQ는 그대로 남습니다.")) return;
     setDeleting(item.analysisId);
@@ -542,6 +744,8 @@ export default function AnalyzePage() {
     }
 
     // 이전 분석의 구독이 남아 있으면 단계 표시가 섞이므로 먼저 정리한다
+    activeAnalysisRef.current = null;
+    setCancelable(false);
     streamRef.current?.close();
     stopPolling();
     setUploading(true);
@@ -557,6 +761,7 @@ export default function AnalyzePage() {
         periodEndDate: options.periodEndDate,
         isMaskingEnabled: options.isMaskingEnabled,
         isTranslationEnabled: options.isTranslationEnabled,
+        analysisMode: options.analysisMode,
         clustering: {
           minClusterSize: options.minClusterSize,
           minSamples: options.minSamples,
@@ -764,6 +969,19 @@ export default function AnalyzePage() {
                 <div style={S.optionBox}>
                   <div style={S.optionTitle}>분석 옵션</div>
 
+                  {/* 무엇을 묶을지. 전체를 고르면 잘 답한 질문까지 들어가 오래 걸린다. */}
+                  <div style={{ ...S.optionRow, ...(isMobile ? S.optionRowMobile : {}) }}>
+                    <label style={S.optionLabel}>분석 대상</label>
+                    <div style={{ minWidth: 0, ...(isMobile ? S.optionFieldsMobile : {}) }}>
+                      <FitSelect style={{ ...S.optionInput, cursor: "pointer" }}
+                        value={options.analysisMode} onChange={setOption("analysisMode")}
+                        options={MODE_OPTIONS.map((m) => ({ value: m.value, label: m.label }))} />
+                      <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 6, lineHeight: 1.5 }}>
+                        {MODE_OPTIONS.find((m) => m.value === options.analysisMode)?.hint}
+                      </div>
+                    </div>
+                  </div>
+
                   <div style={{ ...S.optionRow, ...(isMobile ? S.optionRowMobile : {}) }}>
                     <label style={S.optionLabel}>분석 기간</label>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, ...(isMobile ? S.optionFieldsMobile : {}) }}>
@@ -876,54 +1094,68 @@ export default function AnalyzePage() {
               </div>
             </div>
 
+            {/* 분석이 시작되기 전에는 보여 줄 것이 없다.
+                머리글만 남은 빈 상자를 두면 무언가 비어 있는 것처럼 보인다.
+                분석을 시작하는 버튼은 ①의 "업로드 시작" 하나뿐이라 여기서 할 일도 없다. */}
+            {(running || done) && (
             <div style={S.card}>
               <div style={S.cardHeader}>
                 <span style={S.cardTitle}>② AI 분석 실행</span>
                 {done && <span style={{ ...S.badge, background: "#D1FAE5", color: "#065F46" }}>완료</span>}
               </div>
               <div style={S.cardBody}>
-                {!running && !done && (
-                  <>
-                    <p style={{ fontSize: 13, color: "#6B7280", marginBottom: 16 }}>
-                      파일 업로드 시 자동으로 분석이 시작됩니다.
-                    </p>
-                    <button style={{ ...S.btnPrimary, opacity: 0.5 }} disabled>
-                      업로드 후 자동 시작
-                    </button>
-                  </>
-                )}
                 {(running || done) && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {STEPS.map((s, i) => {
-                      const isDone = step >= i;
-                      const isRun  = step === i && running;
-                      return (
-                        <div key={s} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
-                          <div style={{
-                            width: 24, height: 24, borderRadius: "50%", display: "flex",
-                            alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600,
-                            background: isDone ? "#ECFDF5" : isRun ? "#EFF6FF" : "#F3F4F6",
-                            color: isDone ? "#047857" : isRun ? "#1D4ED8" : "#9CA3AF",
-                          }}>
-                            {isDone ? <Icon name="check" size={13} strokeWidth={2.6} /> : i + 1}
-                          </div>
-                          <span style={{ color: isDone ? "#111827" : isRun ? "#1D4ED8" : "#9CA3AF", fontWeight: isDone || isRun ? 500 : 400 }}>
-                            {s}
-                          </span>
-                          {isRun && <span style={{ fontSize: 11, color: "#1D4ED8" }}>처리 중...</span>}
-                        </div>
-                      );
-                    })}
+                    <PhaseList detail={progressDetail} step={step} running={running} done={done} />
                     {running && (
                       <div style={S.runningBox}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span>분석 진행 중</span>
+                          <span>
+                            분석 진행 중
+                            {phaseLabel(progressDetail?.phase) && ` · ${phaseLabel(progressDetail.phase)}`}
+                          </span>
                           <span style={{ fontFamily: "monospace" }}>{formatElapsed(elapsed)}</span>
                         </div>
+
+                        {/* AI가 세는 건수. 한쪽이라도 모르면 적지 않는다(계약 4절). */}
+                        {unitProgressText(progressDetail) && (
+                          <div style={{ marginTop: 8 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4 }}>
+                              <span>{unitProgressText(progressDetail)}</span>
+                              {elapsedText(progressDetail) && (
+                                <span style={{ opacity: 0.7 }}>AI 경과 {elapsedText(progressDetail)}</span>
+                              )}
+                            </div>
+                            {unitPercent(progressDetail) !== null && (
+                              <div style={S.unitBarTrack}>
+                                <div style={{ ...S.unitBarFill, width: `${unitPercent(progressDetail)}%` }} />
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* 진행 정보가 안 오는 것이지 분석이 멈춘 것이 아니다(계약 4절). */}
+                        {delayNotice(progressDetail) && (
+                          <div style={{ fontSize: 11, marginTop: 8, color: "#B45309" }}>
+                            {delayNotice(progressDetail)}
+                          </div>
+                        )}
+
+                        {/* 건너뛴 단계는 지난 것으로 그려 틈이 생기지 않는다(PhaseList).
+                            사용자가 겪지 않는 일을 설명할 필요는 없다. */}
                         <div style={{ fontSize: 11, marginTop: 6, lineHeight: 1.5, opacity: 0.85 }}>
-                          AI 서버가 중간 단계를 보고하지 않아 완료 전까지 위 단계 표시가 갱신되지 않을 수 있습니다.
+                          {!progressDetail &&
+                            "AI 서버가 중간 단계를 보고하지 않아 완료 전까지 단계 표시가 갱신되지 않을 수 있습니다. "}
                           화면을 벗어나도 분석은 계속되며, 돌아오면 이력에서 결과를 확인할 수 있습니다.
                         </div>
+                        {/* 잘못 올렸거나 오래 걸릴 때 중간에 멈춘다. 되돌릴 수 없어 한 번 묻는다. */}
+                        {cancelable && (
+                          <button type="button" style={S.btnCancel}
+                            disabled={cancelling}
+                            onClick={() => setCancelAsking(true)}>
+                            분석 취소
+                          </button>
+                        )}
                       </div>
                     )}
                     {done && (
@@ -935,6 +1167,7 @@ export default function AnalyzePage() {
                 )}
               </div>
             </div>
+            )}
           </div>
 
           <div style={S.card}>
@@ -1037,17 +1270,32 @@ export default function AnalyzePage() {
           <div style={S.card}>
             <div style={S.cardHeader}>
               <span style={S.cardTitle}>클러스터링 시각화 (UMAP)</span>
+              {/* 통계 카드는 전체 기준인데 여기 점은 선별된 질문만이다.
+                  무엇을 묶은 그림인지 적지 않으면 숫자가 안 맞는 것으로 보인다. */}
+              {analyzeResult && (
+                <span style={{ fontSize: 11, color: "#9CA3AF" }}>{scopeCaption(analyzeResult)}</span>
+              )}
             </div>
             <div style={S.cardBody}>
+              {/* 결과가 아예 없을 때와, 분석은 끝났는데 좌표가 없을 때는 다른 이야기다.
+                  뒤쪽은 정상 완료이므로 왜 비었는지 밝힌다. */}
               {!analyzeResult ? (
                 <div style={{ textAlign: "center", color: "#9CA3AF", padding: 40 }}>
                   분석을 먼저 실행해주세요.
                 </div>
+              ) : !(analyzeResult.clusteringView?.points || []).length ? (
+                <>
+                  <ScopeNotice result={analyzeResult} />
+                  <EmptyResult result={analyzeResult} icon="empty" />
+                </>
               ) : (
-                <ClusterScatterPlot
-                  points={analyzeResult.clusteringView?.points || []}
-                  clusterNames={analyzeResult.clusteringView?.clusterNames || []}
-                />
+                <>
+                  <ScopeNotice result={analyzeResult} />
+                  <ClusterScatterPlot
+                    points={analyzeResult.clusteringView?.points || []}
+                    clusterNames={analyzeResult.clusteringView?.clusterNames || []}
+                  />
+                </>
               )}
             </div>
           </div>
@@ -1060,7 +1308,10 @@ export default function AnalyzePage() {
                   // samplingStatus는 정답/오답변/미답변 3분류다. 예전에는 오답변(lowQuality)을
                   // 빼고 그려서 막대 합이 100%가 되지 않았다. 색도 대시보드와 맞춰 둔다.
                   const s = analyzeResult.systemStatus?.samplingStatus;
-                  const total = analyzeResult.systemStatus?.totalLogCount || 1;
+                  const count = analyzeResult.systemStatus?.totalLogCount || 0;
+                  // 0으로 나누지 않으려는 값과 화면에 적는 값은 다르다.
+                  // 둘을 같이 쓰면 0건인 분석이 "1건"으로 적힌다.
+                  const total = count || 1;
                   const segments = [
                     { label: "정답",      count: s?.correct    || 0, color: "#1565C0" },
                     { label: "오답변",    count: s?.lowQuality || 0, color: "#7C3AED" },
@@ -1070,7 +1321,7 @@ export default function AnalyzePage() {
                   return (
                     <div>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
-                        <span style={{ fontWeight: 500 }}>신규 데이터 {total.toLocaleString()}건</span>
+                        <span style={{ fontWeight: 500 }}>신규 데이터 {count.toLocaleString()}건</span>
                         <span style={{ color: "#1565C0", fontWeight: 600 }}>정답률 {answeredPct}%</span>
                       </div>
                       <div style={{ height: 24, background: "#F3F4F6", borderRadius: 6, overflow: "hidden", display: "flex" }}>
@@ -1125,10 +1376,7 @@ export default function AnalyzePage() {
       {tab === "recommend" && (
         <div>
           {candidates.length === 0 ? (
-            <div style={{ ...S.card, ...S.cardBody, textAlign: "center", padding: 48, color: "#9CA3AF" }}>
-              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 44, height: 44, borderRadius: "50%", background: "#F3F4F6", color: "#9CA3AF", marginBottom: 12 }}><Icon name="analyze" size={21} /></span>
-              <div>분석을 먼저 실행해주세요.</div>
-            </div>
+            <EmptyResult result={analyzeResult} />
           ) : (
             candidates.map((c) => {
               const isOpen = openQuestions.has(c.candidateId);
@@ -1227,6 +1475,29 @@ export default function AnalyzePage() {
       )}
 
       {/* 반려 사유 입력 — 본문 { reason }은 선택이라 비워 두고 보내도 된다 */}
+      {/* 분석 취소 확인 — 되돌릴 수 없으므로 무엇이 사라지는지 적어 둔다 */}
+      {cancelAsking && (
+        <div style={S.modalBg} onClick={() => !cancelling && setCancelAsking(false)}>
+          <div style={S.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalTitle}>분석을 취소할까요?</div>
+            <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, marginBottom: 6 }}>
+              지금까지 진행한 분석이 버려지고 결과는 남지 않습니다.
+              다시 분석하려면 파일을 처음부터 올려야 합니다.
+            </div>
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 14 }}>
+              분석 #{analysisId} · {formatElapsed(elapsed)}
+            </div>
+            <div style={S.modalActions}>
+              <button style={S.btnSm} disabled={cancelling}
+                onClick={() => setCancelAsking(false)}>계속 진행</button>
+              <button style={S.btnReject} disabled={cancelling} onClick={handleCancel}>
+                {cancelling ? "취소하는 중..." : "분석 취소"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {rejectTarget && (
         <div style={S.modalBg} onClick={() => setRejectTarget(null)}>
           <div style={S.modal} onClick={(e) => e.stopPropagation()}>
@@ -1397,6 +1668,14 @@ const S = {
   btnPrimary:  { padding: "10px 20px", background: "#1565C0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   btnAccept:   { padding: "6px 14px", background: "#ECFDF5", color: "#047857", border: "1px solid #A7F3D0", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
   btnReject:   { padding: "6px 14px", background: "#FFF1F2", color: "#BE123C", border: "1px solid #FECDD3", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
+  // 진행 중 상자 안에 들어간다. 같이 쓰이는 파란 글씨보다 눈에 덜 띄어야
+  // 기다리는 것이 기본이고 취소가 예외라는 것이 드러난다.
+  // 그림 위에 붙는 설명 줄. 결과를 가리지 않게 낮은 대비로 둔다.
+  scopeNotice: { marginBottom: 12, padding: "8px 12px", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8, fontSize: 12, color: "#475569", lineHeight: 1.5 },
+  // AI가 세는 건수 막대. 화면이 따로 세는 경과 시간과 다른 값이라 작게 둔다.
+  unitBarTrack: { height: 4, background: "#DBEAFE", borderRadius: 999, overflow: "hidden" },
+  unitBarFill:  { height: "100%", background: "#1D4ED8", borderRadius: 999, transition: "width .4s" },
+  btnCancel:   { marginTop: 10, padding: "6px 12px", background: "#fff", color: "#BE123C", border: "1px solid #FECDD3", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
   runningBox:  { marginTop: 10, padding: "10px 14px", background: "#EFF8FF", border: "1px solid #BFDBFE", borderRadius: 8, fontSize: 12, color: "#1E40AF" },
   successBox:  { marginTop: 10, padding: "10px 14px", background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 8, fontSize: 13, color: "#047857", display: "flex", alignItems: "center", gap: 8 },
 };

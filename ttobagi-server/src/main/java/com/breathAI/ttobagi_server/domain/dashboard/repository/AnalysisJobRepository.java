@@ -6,9 +6,13 @@ import com.breathAI.ttobagi_server.domain.dashboard.entity.UploadFile;
 import com.breathAI.ttobagi_server.domain.dashboard.entity.AnalysisJob.Status;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import jakarta.persistence.LockModeType;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -18,6 +22,24 @@ import java.util.Optional;
 
 // 분석 작업 리포지토리, 조회 시 업로드 파일을 함께 로딩
 public interface AnalysisJobRepository extends JpaRepository<AnalysisJob, Long> {
+    // 취소를 요청했지만 아직 끝나지 않은 분석, since 이후에 요청한 것만
+    @Query("SELECT a.analysisId FROM AnalysisJob a WHERE a.cancelRequestedAt >= :since AND a.status NOT IN :terminal")
+    List<Long> findCancellationPendingIds(@Param("terminal") List<Status> terminal, @Param("since") LocalDateTime since);
+
+    // 진행 정보를 물어볼 분석: 진행 중이고 AI가 접수했으며 취소 요청이 없는 것
+    @Query("SELECT a.analysisId FROM AnalysisJob a WHERE a.status IN :running "
+        + "AND a.aiSubmissionState = 'ACCEPTED' AND a.cancelRequestedAt IS NULL")
+    List<Long> findProgressTargetIds(@Param("running") List<Status> running);
+
+    // 상태를 바꾸기 전에 행을 잠근다, 취소와 AI 콜백이 동시에 와도 하나씩 처리된다
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT a FROM AnalysisJob a WHERE a.analysisId = :analysisId")
+    Optional<AnalysisJob> findByIdForUpdate(@Param("analysisId") Long analysisId);
+
+    // 회원 탈퇴 시 사용자 참조 해제
+    @Modifying
+    @Query("UPDATE AnalysisJob a SET a.requestedBy = null WHERE a.requestedBy = :user")
+    void clearRequestedBy(@Param("user") User user);
     
     @EntityGraph(attributePaths = {"uploadFile"})
     Optional<AnalysisJob> findByUploadFileUploadId(String uploadId);

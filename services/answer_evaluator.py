@@ -3,7 +3,7 @@
 E2 (Cross-Encoder): standardQuestion <-> answerDraft 의미 정합 점수
     BAAI/bge-reranker-v2-m3, Sigmoid (0~1)
 
-E3 (LLM-as-judge): Qwen2.5-7B-Instruct가 4축 [1-5] 정수로 채점
+E3 (LLM-as-judge): 설정된 Llama Judge가 4축 [1-5] 정수로 채점
     - accuracy       : 질문 의도에 정확하게 응답하는가
     - politeness     : 또타 브랜드보이스/공손 표현이 적절한가
     - actionability  : 다음 행동에 대한 구체적 안내가 있는가
@@ -23,12 +23,14 @@ needsReview 판정:
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import time
 import unicodedata
 from pathlib import Path
-from services.runtime_config import runtime_path, llm_memory_options
+from services.runtime_config import runtime_path
+from services.llm_runtime import model_id, load_chat_model, generate_chat
 
 import numpy as np
 import torch
@@ -53,9 +55,9 @@ RUN_LOG = LOG_DIR / 'answer_eval.log'
 DETAIL_LOG = LOG_DIR / 'answer_eval_detail.log'
 
 CE_MODEL = 'BAAI/bge-reranker-v2-m3'
-LLM_MODEL = 'Qwen/Qwen2.5-7B-Instruct'
+LLM_MODEL = model_id('judge')
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-DTYPE = torch.bfloat16
+CE_DEVICE = os.getenv('TTOBAGI_CE_DEVICE', DEVICE)
 
 LLM_MAX_NEW_TOKENS = 350
 LLM_TEMPERATURE = 0.1   # 채점은 결정적으로
@@ -114,7 +116,7 @@ def load_ce() -> CrossEncoder:
     return CrossEncoder(
         CE_MODEL,
         max_length=512,
-        device=DEVICE,
+        device=CE_DEVICE,
         activation_fn=torch.nn.Sigmoid(),
     )
 
@@ -131,18 +133,14 @@ def e2_score(ce: CrossEncoder, q: str, a: str) -> float | None:
 # ---------------------------------------------------------------------------
 def load_llm() -> tuple[AutoTokenizer, AutoModelForCausalLM]:
     _log(f'[E3] LLM 로드: {LLM_MODEL}')
-    tok = AutoTokenizer.from_pretrained(LLM_MODEL)
-    mdl = AutoModelForCausalLM.from_pretrained(
-        LLM_MODEL,
-        torch_dtype=DTYPE,
-        device_map='auto',
-        **llm_memory_options(),
-    )
-    mdl.eval()
-    return tok, mdl
+    return load_chat_model(LLM_MODEL, role='judge')
 
 
 JUDGE_SYSTEM = (
+    'For FAQ accuracy, use ONLY the supplied evidence, not your prior knowledge. '
+    'Unsupported specific claims about deadlines, contacts, policies, procedures or services '
+    'must receive accuracy <= 2. If FAQ evidence is absent, factual accuracy is unverified; '
+    'do not award a high accuracy score. '
     '당신은 서울교통공사 공식 챗봇 "또타24"의 답변 품질을 평가하는 시니어 QA 검수자입니다. '
     '아래 4가지 축에 대해 1~5점 정수로 채점하고 JSON으로만 응답하세요. '
     '점수 기준: 5=매우 우수, 4=양호, 3=보통, 2=결함 있음, 1=심각한 결함.'
@@ -158,6 +156,11 @@ def build_judge_prompt(cluster: dict) -> str:
     for s in cluster.get('synonyms', [])[:3]:
         samples.append(f'  - {s}')
     sample_block = '\n'.join(samples) if samples else '  (없음)'
+    evidence = (cluster.get('retrievalEvidence') or {}).get('used') or []
+    evidence_block = '\n\n'.join(
+        f'[근거 {i + 1}] {doc["text"]}' for i, doc in enumerate(evidence)
+        if isinstance(doc, dict) and isinstance(doc.get('text'), str)
+    ) or '(검증 근거 미제공 — FAQ 사실성 확인 불가)'
 
     axes = (
         '1) accuracy       : 질문 의도/상황에 정확하게 응답하는가 (사실관계 포함)\n'
@@ -172,6 +175,7 @@ def build_judge_prompt(cluster: dict) -> str:
         f'표준 질문: {q}\n'
         f'관련 키워드: {kws}\n'
         f'유사 원본 샘플:\n{sample_block}\n\n'
+        f'## 사실성 검증에 사용할 검색 근거\n{evidence_block}\n\n'
         f'## 답변 (평가 대상)\n{a}\n\n'
         f'## 채점 축 (각 1~5 정수)\n{axes}\n\n'
         f'## 출력 형식 (JSON 객체 하나만 출력, 다른 텍스트 금지)\n'
@@ -186,19 +190,8 @@ def call_llm(tok, mdl, system: str, user: str) -> str:
         {'role': 'system', 'content': system},
         {'role': 'user', 'content': user},
     ]
-    text = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    inputs = tok([text], return_tensors='pt').to(mdl.device)
-    with torch.no_grad():
-        out = mdl.generate(
-            **inputs,
-            max_new_tokens=LLM_MAX_NEW_TOKENS,
-            do_sample=True,
-            temperature=LLM_TEMPERATURE,
-            top_p=LLM_TOP_P,
-            pad_token_id=tok.eos_token_id,
-        )
-    gen = out[0][inputs.input_ids.shape[1]:]
-    return tok.decode(gen, skip_special_tokens=True).strip()
+    return generate_chat(messages, tok, mdl, max_new_tokens=LLM_MAX_NEW_TOKENS,
+                         temperature=LLM_TEMPERATURE, top_p=LLM_TOP_P)
 
 
 JSON_RE = re.compile(r'\{[^{}]*\}', re.DOTALL)

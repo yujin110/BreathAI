@@ -172,7 +172,10 @@ class KeywordPolicyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / 'input.csv'
-            source.write_text('input')
+            source.write_text(
+                '번호,질문,날짜,logType\n1,환승 문의,2026-03-01,UNANSWER\n',
+                encoding='utf-8',
+            )
             def inference(command, **options):
                 snapshot = Path(options['env']['TTOBAGI_KEYWORD_POLICY_PATH'])
                 self.assertEqual(snapshot.read_bytes(), self.policy.source_bytes)

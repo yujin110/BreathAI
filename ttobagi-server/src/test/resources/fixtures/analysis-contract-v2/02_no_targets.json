@@ -1,0 +1,47 @@
+{
+  "status": "COMPLETED",
+  "resultSchemaVersion": 2,
+  "analysisMode": "IMPROVEMENT",
+  "completionReason": "NO_TARGET_LOGS",
+  "analysisScope": {
+    "totalLogCount": 10,
+    "targetLogCount": 0,
+    "excludedByModeCount": 10,
+    "excludedByTextCount": 0,
+    "eligibleLogCount": 0,
+    "clusteredLogCount": 0,
+    "deferredSmallInputCount": 0,
+    "noiseLogCount": 0,
+    "visualizedLogCount": 0,
+    "faqClusterCount": 0,
+    "classificationSourceCounts": {
+      "EXPLICIT_LOG_TYPE": 10,
+      "KEYWORD_MATCH_PERCENT": 0,
+      "AI_PERCENT": 0,
+      "LEGACY_DEFAULT": 0
+    },
+    "keywordScope": "ANALYSIS_TARGET"
+  },
+  "metricsScope": "ANALYSIS_INPUT",
+  "sourceLogIdScope": "UPLOAD_LOCAL",
+  "systemStatus": {
+    "totalLogCount": 10,
+    "samplingStatus": {"correct": 10, "lowQuality": 0, "unanswer": 0},
+    "visualizedLogCount": 0,
+    "excludedLogCount": 10,
+    "isSampled": false
+  },
+  "performanceMetrics": {
+    "currentUnanswerRate": 0.0,
+    "predictedAccuracyGain": null,
+    "resolvedCountByAI": null
+  },
+  "usageStats": [
+    {"statDate": "2026-11-05", "totalCnt": 10, "answerCnt": 10, "lowQualityCount": 0, "unanswerCnt": 0}
+  ],
+  "trend": [{"date": "2026-11-05", "lowQualityCount": 0, "unanswerCount": 0}],
+  "burstKeywords": [],
+  "surgeDetection": [],
+  "clusteringView": {"clusterNames": [], "points": []},
+  "faqCandidates": []
+}

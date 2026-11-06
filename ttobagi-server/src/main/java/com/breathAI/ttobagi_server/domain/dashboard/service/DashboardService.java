@@ -16,6 +16,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -74,6 +75,13 @@ public class DashboardService {
     private final SseEmitterManager sseEmitterManager;
     private final UploadArchiveService uploadArchiveService;
     private final AnalysisHistoryRepository analysisHistoryRepository;
+    private final AnalysisCancellationService analysisCancellationService;
+    private final AnalysisSubmissionService analysisSubmissionService;
+    private final AnalysisProgressService analysisProgressService;
+
+    // 새 분석의 모드 (환경변수 TTOBAGI_ANALYSIS_DEFAULT_MODE, 기본 IMPROVEMENT)
+    @Value("${ai.analysis.default-mode}")
+    private AnalysisMode defaultAnalysisMode;
 
     // 월 단위 챗봇 사용량 조회, 전월 대비 증가율 포함
     @Transactional(readOnly = true)
@@ -156,6 +164,10 @@ public class DashboardService {
                 .status(job.getStatus().name())
                 .periodStartDate(job.getPeriodStartDate() != null ? job.getPeriodStartDate().toString() : null)
                 .periodEndDate(job.getPeriodEndDate() != null ? job.getPeriodEndDate().toString() : null)
+                .resultSchemaVersion(job.resultSchemaVersionOrDefault())
+                .analysisMode(job.getAnalysisMode().name())
+                .completionReason(job.getCompletionReason())
+                .analysisScope(job.getAnalysisScope())
                 .systemStatus(commonData.getSystemStatus())
                 .performanceMetrics(commonData.getPerformanceMetrics())
                 .trend(commonData.getTrend())
@@ -378,6 +390,7 @@ public class DashboardService {
         return AnalyzeResultResponse.builder()
                 .periodStartDate(startDate != null ? startDate.toString() : null)
                 .periodEndDate(endDate != null ? endDate.toString() : null)
+                .analysisModes(jobs.stream().map(job -> job.getAnalysisMode().name()).distinct().sorted().toList())
                 .systemStatus(systemStatus)
                 .performanceMetrics(performanceMetrics)
                 .trend(trend)
@@ -403,7 +416,8 @@ public class DashboardService {
             boolean isMaskingEnabled,
             boolean isTranslationEnabled,
             Integer minClusterSize,
-            Integer minSamples) {
+            Integer minSamples,
+            String requestedMode) {
 
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
@@ -411,6 +425,11 @@ public class DashboardService {
         // AI 서버와 같은 범위로 미리 검사해, 분석이 시작된 뒤 거절되어 실패로 끝나지 않게 한다
         if ((minClusterSize != null && minClusterSize < MIN_CLUSTER_SIZE_LIMIT)
                 || (minSamples != null && minSamples < MIN_SAMPLES_LIMIT)) {
+            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
+        }
+        // 분석 모드는 생략하면 서버 기본값, 값이 있으면 AI와 같이 대문자 이름만 받는다 (빈 값·소문자는 400)
+        AnalysisMode analysisMode = requestedMode == null ? defaultAnalysisMode : AnalysisMode.from(requestedMode);
+        if (analysisMode == null) {
             throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
         }
 
@@ -434,13 +453,14 @@ public class DashboardService {
         UploadFile uploadFile;
         Optional<UploadFile> existingUpload = uploadFileRepository.findByFileHash(fileHash);
         if (existingUpload.isPresent()) {
-                // 옵션이 같은 분석 중 가장 최근 것이 실패가 아니면 재사용한다
+                // 옵션·모드가 같은 분석 중 가장 최근 것이 실패·취소가 아니면 재사용한다
                 Optional<AnalysisJob> existingJob = analysisJobRepository
                         .findByUploadFileOrderByCreatedAtDesc(existingUpload.get()).stream()
                         .filter(job -> job.hasSameOptions(parsedStartDate, parsedEndDate,
-                                isMaskingEnabled, isTranslationEnabled, minClusterSize, minSamples))
+                                isMaskingEnabled, isTranslationEnabled, minClusterSize, minSamples, analysisMode))
                         .findFirst();
-                if (existingJob.isPresent() && existingJob.get().getStatus() != AnalysisJob.Status.FAIL) {
+                if (existingJob.isPresent() && existingJob.get().getStatus() != AnalysisJob.Status.FAIL
+                        && existingJob.get().getStatus() != AnalysisJob.Status.CANCELED) {
                 AnalysisJob job = existingJob.get();
                 recordHistory(user, job);
                 log.info("중복 파일 감지 - 기존 분석 결과 반환: analysisId={}", job.getAnalysisId());
@@ -455,7 +475,7 @@ public class DashboardService {
                 }
                 // 해시로 업로드 기록을 하나만 찾으므로, 새로 만들지 않고 기존 기록을 다시 쓴다
                 uploadFile = existingUpload.get();
-                log.info("같은 옵션의 분석이 없거나 실패한 파일 재분석: uploadId={}", uploadFile.getUploadId());
+                log.info("같은 옵션의 분석이 없거나 실패·취소된 파일 재분석: uploadId={}", uploadFile.getUploadId());
         } else {
             String newUploadId = UUID.randomUUID().toString();
             uploadFile = UploadFile.builder()
@@ -473,6 +493,7 @@ public class DashboardService {
 
         AnalysisJob analysisJob = AnalysisJob.builder()
                 .uploadFile(uploadFile)
+                .requestedBy(user)
                 .fileName(originalFileName)
                 .isMaskingEnabled(isMaskingEnabled)
                 .isTranslationEnabled(isTranslationEnabled)
@@ -480,6 +501,7 @@ public class DashboardService {
                 .periodEndDate(parsedEndDate)
                 .minClusterSize(minClusterSize)
                 .minSamples(minSamples)
+                .analysisMode(analysisMode)
                 .build();
         analysisJobRepository.save(analysisJob);
         recordHistory(user, analysisJob);
@@ -502,6 +524,7 @@ public class DashboardService {
                         periodEndDate != null ? periodEndDate : "",
                         minClusterSize,
                         minSamples,
+                        analysisMode,
                         reason -> markPipelineRequestFailed(analysisId, reason));
                 if (!alreadyArchived) {
                     // 변환 전 원본을 그대로 보관한다 (xlsx는 xlsx로)
@@ -525,26 +548,34 @@ public class DashboardService {
     // AI 서버에 분석 요청을 보내지 못했을 때 대기 중인 분석을 실패로 바꾸고 알린다
     // 요청 스레드 밖에서 실행되므로 저장소 메서드 단위 트랜잭션으로 처리한다
     private void markPipelineRequestFailed(Long analysisId, String reason) {
-        analysisJobRepository.findById(analysisId).ifPresent(job -> {
-            // 그 사이 AI 콜백으로 진행된 분석은 건드리지 않는다
-            if (job.getStatus() != AnalysisJob.Status.PENDING) return;
-            job.fail(reason);
-            analysisJobRepository.save(job);
-            sseEmitterManager.send(analysisId, "FAIL", "분석에 실패했습니다.");
-        });
+        analysisSubmissionService.markRequestFailed(analysisId, reason);
     }
 
     // 분석 진행 상태 조회, SSE 끊김 시 폴링 용도
+    // cancelable은 내가 시작했고 아직 진행 중인 분석일 때만 true다
     @Transactional(readOnly = true)
-    public AnalyzeStatusResponse getAnalysisStatus(Long analysisId) {
+    public AnalyzeStatusResponse getAnalysisStatus(Long analysisId, String email) {
         AnalysisJob analysisJob = analysisJobRepository.findById(analysisId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ANALYSIS_NOT_FOUND));
+        User user = userRepository.findByEmail(email).orElse(null);
 
+        return toStatusResponse(analysisJob, user);
+    }
+
+    // 진행 중인 분석 취소, 분석을 시작한 사람만 할 수 있다
+    // 취소 의도를 커밋한 뒤 AI를 호출한다. HTTP 호출 중 DB 행 잠금을 잡지 않는다.
+    public AnalyzeStatusResponse cancelAnalysis(Long analysisId, String email) {
+        return analysisCancellationService.cancel(analysisId, email);
+    }
+
+    private AnalyzeStatusResponse toStatusResponse(AnalysisJob analysisJob, User user) {
         return AnalyzeStatusResponse.builder()
                 .uploadId(analysisJob.getUploadFile().getUploadId())
                 .analysisId(analysisJob.getAnalysisId())
                 .status(analysisJob.getStatus().name())
                 .message(getStatusMessage(analysisJob.getStatus()))
+                .progressDetail(analysisProgressService.toResponse(analysisJob, LocalDateTime.now()))
+                .cancelable(!analysisJob.getStatus().isFinished() && analysisJob.isRequestedBy(user))
                 .updatedAt(analysisJob.getStartedAt() != null
                         ? analysisJob.getStartedAt()
                         : analysisJob.getCreatedAt())
@@ -561,10 +592,15 @@ public class DashboardService {
 
         // 구독을 먼저 등록한 뒤 상태를 읽어야 그 사이에 도착한 콜백을 놓치지 않는다
         SseEmitter emitter = sseEmitterManager.create(analysisId);
-        AnalysisJob.Status status = analysisJobRepository.findById(analysisId)
-                .map(AnalysisJob::getStatus)
+        AnalysisJob job = analysisJobRepository.findById(analysisId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ANALYSIS_NOT_FOUND));
+        AnalysisJob.Status status = job.getStatus();
         sseEmitterManager.send(emitter, analysisId, status.name(), getStatusMessage(status));
+        // 진행 중이면 세부 진행 정보도 바로 보낸다 (끝난 분석은 위에서 연결이 닫혔다)
+        AnalysisProgressResponse progress = analysisProgressService.toResponse(job, LocalDateTime.now());
+        if (!status.isFinished() && progress != null) {
+            sseEmitterManager.sendProgress(emitter, analysisId, progress);
+        }
         return emitter;
     }
 
@@ -596,6 +632,7 @@ public class DashboardService {
                             .isTranslationEnabled(job.getIsTranslationEnabled())
                             .minClusterSize(job.getMinClusterSize())
                             .minSamples(job.getMinSamples())
+                            .analysisMode(job.getAnalysisMode().name())
                             .build();
                 })
                 .collect(Collectors.toList());
@@ -646,17 +683,22 @@ public class DashboardService {
     // 중간 상태(PREPROCESSING, ANALYZING)와 실패는 상태만 갱신하고 종료한다
     @Transactional
     public void handleAnalysisCallback(Long analysisId, AnalysisCallbackRequest request) {
-        AnalysisJob analysisJob = analysisJobRepository.findById(analysisId)
+        // 취소와 동시에 와도 하나씩 처리되도록 행을 잠그고 읽는다
+        AnalysisJob analysisJob = analysisJobRepository.findByIdForUpdate(analysisId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ANALYSIS_NOT_FOUND));
 
-        // 이미 끝난 분석에 온 콜백은 다시 저장하지 않는다
+        // 이미 끝난(완료·실패·취소) 분석에 온 콜백은 저장하지 않는다
         // AI 서버가 재전송으로 판단하지 않도록 오류 없이 정상 응답한다
-        if (analysisJob.getStatus() == AnalysisJob.Status.COMPLETED
-                || analysisJob.getStatus() == AnalysisJob.Status.FAIL) {
+        if (analysisJob.getStatus().isFinished()) {
             log.warn("이미 종료된 분석의 콜백 무시: analysisId={}, 현재 상태={}, 수신 상태={}",
                     analysisId, analysisJob.getStatus(), request.getStatus());
             return;
         }
+
+        // 취소 확인 중에 온 진행 콜백은 반영하지 않는다
+        // 완료·실패 콜백은 AI에서 취소보다 먼저 끝났다는 뜻이라(취소 API는 409) 그대로 저장한다
+        if (analysisJob.isCancellationRequested()
+                && ("PREPROCESSING".equals(request.getStatus()) || "ANALYZING".equals(request.getStatus()))) return;
 
         // 중간 상태 콜백 (PREPROCESSING, ANALYZING)
         if ("PREPROCESSING".equals(request.getStatus())) {
@@ -686,6 +728,7 @@ public class DashboardService {
         // 1. 업로드 파일별 요약값과 날짜 통계 적재
         // 업로드 파일 범위의 값이라 서비스 전체 사용량(gold_usage_stat)에는 쓰지 않는다
         saveAnalysisSummary(analysisJob, request);
+        saveResultScope(analysisJob, request);
         saveDailyStats(analysisJob, request);
 
         // 2. 클러스터링 결과 적재
@@ -965,6 +1008,7 @@ public class DashboardService {
             case ANALYZING -> "현재 AI 클러스터링을 진행 중입니다. 잠시만 기다려 주세요.";
             case COMPLETED -> "분석이 완료되었습니다.";
             case FAIL -> "분석에 실패했습니다.";
+            case CANCELED -> "분석이 취소되었습니다.";
         };
     }
 
@@ -988,6 +1032,29 @@ public class DashboardService {
                 metrics != null ? toPercent(metrics.getCurrentUnanswerRate()) : null,
                 metrics != null ? toPercent(metrics.getPredictedAccuracyGain()) : null,
                 metrics != null ? metrics.getResolvedCountByAI() : null);
+    }
+
+    // 결과 형식·실제 모드·완료 사유·분석 범위 저장, 요약값처럼 이상해도 거절하지 않고 경고만 남긴다
+    // 모드를 보내지 않은 예전 AI는 전체 유형을 분석했으므로 ALL로 저장된다
+    private void saveResultScope(AnalysisJob analysisJob, AnalysisCallbackRequest request) {
+        AnalysisMode appliedMode = AnalysisMode.from(request.getAnalysisMode());
+        if (request.getAnalysisMode() != null && appliedMode == null) {
+            log.warn("알 수 없는 분석 모드, 요청한 모드로 저장: analysisId={}, analysisMode={}",
+                    analysisJob.getAnalysisId(), request.getAnalysisMode());
+            appliedMode = analysisJob.getAnalysisMode();
+        } else if (appliedMode != null && appliedMode != analysisJob.getAnalysisMode()) {
+            log.warn("요청과 다른 분석 모드로 완료: analysisId={}, 요청={}, 적용={}",
+                    analysisJob.getAnalysisId(), analysisJob.getAnalysisMode(), appliedMode);
+        } else if (appliedMode == null && analysisJob.getAnalysisMode() != AnalysisMode.ALL) {
+            log.warn("모드 없는 예전 형식 결과, ALL로 저장: analysisId={}, 요청={}",
+                    analysisJob.getAnalysisId(), analysisJob.getAnalysisMode());
+        }
+        if (request.getResultSchemaVersion() != null && request.getResultSchemaVersion() >= 2
+                && (request.getAnalysisScope() == null || request.getCompletionReason() == null)) {
+            log.warn("결과 형식 v2인데 분석 범위나 완료 사유가 없음: analysisId={}", analysisJob.getAnalysisId());
+        }
+        analysisJob.recordResultScope(request.getResultSchemaVersion(), appliedMode,
+                request.getCompletionReason(), request.getAnalysisScope());
     }
 
     // 파일별 날짜 통계 저장, usageStats가 없는 예전 형식은 trend로 저품질·미답변 건수만 채운다

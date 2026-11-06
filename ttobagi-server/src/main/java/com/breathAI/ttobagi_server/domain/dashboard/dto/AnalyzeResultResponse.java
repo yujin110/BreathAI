@@ -16,6 +16,8 @@ import java.util.List;
 public class AnalyzeResultResponse {
     private String periodStartDate;
     private String periodEndDate;
+    // 합산한 분석들의 모드 (중복 없이), 둘 이상이면 군집·키워드 기준이 섞여 있다
+    private List<String> analysisModes;
     private SystemStatus systemStatus;
     private PerformanceMetrics performanceMetrics;
     private List<TrendItem> trend;

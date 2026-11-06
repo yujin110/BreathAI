@@ -17,6 +17,10 @@ repositories {
 	mavenCentral()
 }
 
+configurations {
+	mockitoAgent
+}
+
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
@@ -47,6 +51,7 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	mockitoAgent('org.mockito:mockito-core') { transitive = false }
 	// 테스트 전용 MariaDB를 도커로 띄운다 (버전은 Spring Boot가 관리)
 	testImplementation 'org.testcontainers:testcontainers-mariadb'
 	testCompileOnly 'org.projectlombok:lombok'
@@ -56,6 +61,8 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	// Mockito 에이전트를 미리 붙인다 (실행 중 붙이기는 일부 도커 환경에서 막힌다)
+	jvmArgs "-javaagent:${configurations.mockitoAgent.asPath}"
 	// 사용 중인 DB(.env) 대신 테스트 전용 설정을 쓴다
 	systemProperty 'spring.profiles.active', 'test'
 }
