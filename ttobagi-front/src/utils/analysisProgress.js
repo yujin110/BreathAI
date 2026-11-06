@@ -72,7 +72,24 @@ export function elapsedText(detail) {
 
 // 진행 정보가 늦어지고 있을 때의 안내.
 // 실패가 아니다. 분석은 계속 돌고 있을 수 있다(계약 4절: 지연만으로 실패 처리하지 않는다).
+//
+// 얼마나 늦었는지까지 적는다. "지연"만 떠 있으면 1분인지 30분인지 알 수 없어
+// 기다릴지 취소할지 정할 수가 없다. updatedAt은 백엔드가 마지막으로 받은 시각이다.
 export function delayNotice(detail) {
   if (!detail?.delayed) return null;
-  return "진행 정보 확인이 지연되고 있습니다. 분석은 계속 진행 중일 수 있습니다.";
+  const since = staleText(detail?.updatedAt);
+  return since
+    ? `진행 정보 확인이 지연되고 있습니다. 마지막 보고가 ${since} 전입니다. 분석은 계속 진행 중일 수 있습니다.`
+    : "진행 정보 확인이 지연되고 있습니다. 분석은 계속 진행 중일 수 있습니다.";
+}
+
+// 마지막 보고로부터 얼마나 지났는지. 시계가 어긋나 미래로 보이면 적지 않는다.
+function staleText(updatedAt) {
+  if (!updatedAt) return null;
+  const then = new Date(updatedAt).getTime();
+  if (Number.isNaN(then)) return null;
+  const sec = Math.floor((Date.now() - then) / 1000);
+  if (sec < 60) return null;
+  const m = Math.floor(sec / 60);
+  return m < 60 ? `${m}분` : `${Math.floor(m / 60)}시간 ${m % 60}분`;
 }
