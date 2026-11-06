@@ -9,7 +9,8 @@ import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
 import Icon from "../components/Icon.jsx";
-import { scopeSentence, scopeCaption, legacyDefaultNotice, completionNotice, emptyFinishedNotice } from "../utils/analysisScope.js";
+import FitSelect from "../components/FitSelect.jsx";
+import { scopeSentence, scopeCaption, legacyDefaultNotice, completionNotice, emptyFinishedNotice, MODE_OPTIONS } from "../utils/analysisScope.js";
 import { PHASES, phaseIndex, phaseLabel, unitProgressText, unitPercent, elapsedText, delayNotice } from "../utils/analysisProgress.js";
 
 // Spring의 spring.servlet.multipart.max-file-size=50MB 와 동일하게 맞춘다
@@ -310,6 +311,8 @@ export default function AnalyzePage() {
     periodEndDate: "",
     isMaskingEnabled: true,
     isTranslationEnabled: false,
+    // 계약 2절의 기본값. 비워 보내면 백엔드도 같은 값을 쓴다.
+    analysisMode: "IMPROVEMENT",
     minClusterSize: "",
     minSamples: "",
   });
@@ -758,6 +761,7 @@ export default function AnalyzePage() {
         periodEndDate: options.periodEndDate,
         isMaskingEnabled: options.isMaskingEnabled,
         isTranslationEnabled: options.isTranslationEnabled,
+        analysisMode: options.analysisMode,
         clustering: {
           minClusterSize: options.minClusterSize,
           minSamples: options.minSamples,
@@ -964,6 +968,19 @@ export default function AnalyzePage() {
                 </div>
                 <div style={S.optionBox}>
                   <div style={S.optionTitle}>분석 옵션</div>
+
+                  {/* 무엇을 묶을지. 전체를 고르면 잘 답한 질문까지 들어가 오래 걸린다. */}
+                  <div style={{ ...S.optionRow, ...(isMobile ? S.optionRowMobile : {}) }}>
+                    <label style={S.optionLabel}>분석 대상</label>
+                    <div style={{ minWidth: 0, ...(isMobile ? S.optionFieldsMobile : {}) }}>
+                      <FitSelect style={{ ...S.optionInput, cursor: "pointer" }}
+                        value={options.analysisMode} onChange={setOption("analysisMode")}
+                        options={MODE_OPTIONS.map((m) => ({ value: m.value, label: m.label }))} />
+                      <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 6, lineHeight: 1.5 }}>
+                        {MODE_OPTIONS.find((m) => m.value === options.analysisMode)?.hint}
+                      </div>
+                    </div>
+                  </div>
 
                   <div style={{ ...S.optionRow, ...(isMobile ? S.optionRowMobile : {}) }}>
                     <label style={S.optionLabel}>분석 기간</label>

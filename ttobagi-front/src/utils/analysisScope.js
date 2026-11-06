@@ -122,3 +122,10 @@ export function emptyFinishedNotice(result) {
     body: "분석은 끝났습니다. 다른 탭에서 결과를 확인해 보세요.",
   };
 }
+
+// 업로드 화면의 모드 선택지. 값은 계약 2절 그대로 대문자로 보낸다.
+export const MODE_OPTIONS = [
+  { value: "IMPROVEMENT",   label: "미답변·오답변 (기본)", hint: "답을 못 했거나 잘못 답한 질문만 묶습니다. FAQ 후보는 여기서 나옵니다." },
+  { value: "UNANSWER_ONLY", label: "미답변만",            hint: "답을 못 한 질문만 봅니다." },
+  { value: "ALL",           label: "전체",                hint: "잘 답한 질문까지 모두 묶습니다. 오래 걸리고 FAQ와 무관한 묶음이 섞입니다." },
+];

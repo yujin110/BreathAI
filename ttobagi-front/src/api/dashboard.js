@@ -22,7 +22,7 @@ export const dashApi = {
   // 군집화 설정(minClusterSize >= 2, minSamples >= 1)은 백엔드가 그대로 AI로 전달한다.
   // 범위를 벗어나면 백엔드가 400(INVALID_INPUT_VALUE)을 낸다. 빈 값은 보내지 않는다.
   uploadAndAnalyze: (file, opts = {}) => {
-    const { periodStartDate, periodEndDate, isMaskingEnabled, isTranslationEnabled, clustering } = opts;
+    const { periodStartDate, periodEndDate, isMaskingEnabled, isTranslationEnabled, clustering, analysisMode } = opts;
 
     const formData = new FormData();
     formData.append("file", file);
@@ -30,6 +30,9 @@ export const dashApi = {
     if (periodEndDate) formData.append("periodEndDate", periodEndDate);
     if (isMaskingEnabled !== undefined) formData.append("isMaskingEnabled", String(isMaskingEnabled));
     if (isTranslationEnabled !== undefined) formData.append("isTranslationEnabled", String(isTranslationEnabled));
+    // 분석 대상 모드. 빈 문자열·소문자·모르는 값은 백엔드가 422로 막으므로 보내지 않는다.
+    // 생략하면 백엔드 기본값(IMPROVEMENT)을 쓴다.
+    if (analysisMode) formData.append("analysisMode", String(analysisMode).toUpperCase());
     Object.entries(clustering || {}).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== "") formData.append(key, String(value));
     });
