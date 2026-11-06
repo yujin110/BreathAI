@@ -9,7 +9,7 @@ import { useAuth } from "../hooks/useAuth.js";
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
 import Icon from "../components/Icon.jsx";
-import { scopeSentence, scopeCaption, legacyDefaultNotice, completionNotice } from "../utils/analysisScope.js";
+import { scopeSentence, scopeCaption, legacyDefaultNotice, completionNotice, emptyFinishedNotice } from "../utils/analysisScope.js";
 
 // Spring의 spring.servlet.multipart.max-file-size=50MB 와 동일하게 맞춘다
 const HISTORY_SIZE = 10;
@@ -80,7 +80,9 @@ function ScopeNotice({ result }) {
 // "분석을 먼저 실행해주세요"를 띄우면 분석을 안 한 것처럼 보이고,
 // 오류처럼 적으면 멀쩡한 파일을 다시 올리게 만든다.
 function EmptyResult({ result, icon = "analyze" }) {
-  const notice = result ? completionNotice(result) : null;
+  // 결과가 아예 없으면 아직 안 돌린 것이고, 결과는 왔는데 비었으면 끝난 것이다.
+  // 둘을 같은 문구로 덮으면 끝난 분석을 안 돌렸다고 말하게 된다.
+  const notice = result ? (completionNotice(result) || emptyFinishedNotice(result)) : null;
   const title = notice ? notice.title : "분석을 먼저 실행해주세요.";
   return (
     <div style={{ ...S.card, ...S.cardBody, textAlign: "center", padding: 48, color: "#9CA3AF" }}>
@@ -1202,7 +1204,10 @@ export default function AnalyzePage() {
                   // samplingStatus는 정답/오답변/미답변 3분류다. 예전에는 오답변(lowQuality)을
                   // 빼고 그려서 막대 합이 100%가 되지 않았다. 색도 대시보드와 맞춰 둔다.
                   const s = analyzeResult.systemStatus?.samplingStatus;
-                  const total = analyzeResult.systemStatus?.totalLogCount || 1;
+                  const count = analyzeResult.systemStatus?.totalLogCount || 0;
+                  // 0으로 나누지 않으려는 값과 화면에 적는 값은 다르다.
+                  // 둘을 같이 쓰면 0건인 분석이 "1건"으로 적힌다.
+                  const total = count || 1;
                   const segments = [
                     { label: "정답",      count: s?.correct    || 0, color: "#1565C0" },
                     { label: "오답변",    count: s?.lowQuality || 0, color: "#7C3AED" },
@@ -1212,7 +1217,7 @@ export default function AnalyzePage() {
                   return (
                     <div>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
-                        <span style={{ fontWeight: 500 }}>신규 데이터 {total.toLocaleString()}건</span>
+                        <span style={{ fontWeight: 500 }}>신규 데이터 {count.toLocaleString()}건</span>
                         <span style={{ color: "#1565C0", fontWeight: 600 }}>정답률 {answeredPct}%</span>
                       </div>
                       <div style={{ height: 24, background: "#F3F4F6", borderRadius: 6, overflow: "hidden", display: "flex" }}>
