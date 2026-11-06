@@ -49,6 +49,12 @@ class PipelineRetrievalTest(unittest.TestCase):
             pipeline = load_source('_test_preflight', 'run_pipeline.py', deps)
             pipeline._ensure_logs = lambda: None
             pipeline._log = lambda message: None
+            stack.enter_context(patch('services.analysis_selection.prepare_selection', return_value=[{}]))
+            stack.enter_context(patch('services.analysis_selection.finalize_selection',
+                                      return_value={'completionReason': 'RESULTS_GENERATED'}))
+            directory = stack.enter_context(tempfile.TemporaryDirectory())
+            pipeline.DATA_DIR = Path(directory) / 'dataset'
+            pipeline.DATA_DIR.mkdir()
             with self.assertRaisesRegex(RuntimeError, 'empty KB'):
                 pipeline.run_full_pipeline()
         deps['services.faq_generator'].main.assert_not_called()
@@ -140,13 +146,34 @@ class PipelineRetrievalTest(unittest.TestCase):
                                                {'needs_review_v2': False, 'llm_mean': 4}])
         with tempfile.TemporaryDirectory() as directory:
             pipeline.OUTPUT_JSON = Path(directory) / 'final.json'
-            pipeline.run_answer_pipeline()
+            import services
+            with ExitStack() as stack:
+                stack.enter_context(patch.dict(sys.modules, deps))
+                for name in ('answer_regenerator', 'answer_evaluator', 'answer_refiner', 'oos_refresher'):
+                    stack.enter_context(patch.object(services, name, deps[f'services.{name}'], create=True))
+                pipeline.run_answer_pipeline()
             result = json.loads(pipeline.OUTPUT_JSON.read_text(encoding='utf-8'))['faqCandidates'][0]
         self.assertEqual(result['answerDraft'], 'Final answer')
         self.assertEqual(result['matchedFaqs'], self.record['matchedFaqs'])
         self.assertEqual(result['retrievalEvidence']['query'], 'Question')
         self.assertEqual(len(result['retrievalEvidence']['used']), 5)
         self.assertTrue(result['retrievalEvidence']['questionChangedAfterRetrieval'])
+
+    def test_regeneration_helper_remains_callable_before_pipeline_entry(self):
+        # The GPU smoke runner calls these helpers directly, without run_answer_pipeline.
+        import services
+        from services import run_pipeline as pipeline
+        ar = types.ModuleType('services.answer_regenerator')
+        ar.select_kb_chunks = lambda record: []
+        ar.build_prompt = lambda *args: 'prompt'
+        ar.generate = lambda *args: 'generated body'
+        ar.clean_body = lambda text: text
+        ar.validate_answer = lambda *args: (True, [])
+        with patch.dict(sys.modules, {'services.answer_regenerator': ar}), \
+                patch.object(services, 'answer_regenerator', ar, create=True):
+            answer, missing, attempts = pipeline.stage_regenerate(
+                {'tag': 'FAQ', 'clusterLabel': 1}, {}, {'FAQ': {}, '_shared': {}}, None, None)
+        self.assertEqual((answer, missing, attempts), ('generated body', [], 1))
 
 
 if __name__ == '__main__':

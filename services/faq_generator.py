@@ -22,7 +22,6 @@ from services.runtime_config import runtime_path
 from services.llm_runtime import model_id, load_chat_model, generate_chat
 
 import pandas as pd
-import torch
 
 
 def _nfd(p: Path) -> Path:
@@ -38,19 +37,20 @@ OUTPUT_JSON = DATA_DIR / 'faq_candidates.json'
 OUTPUT_JSONL = DATA_DIR / 'faq_candidates.jsonl'  # per-cluster checkpoint
 
 MODEL_NAME = model_id()
-DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+DEVICE = 'auto'  # The shared loader selects the actual device only when needed.
 
 MAX_NEW_TOKENS = 800
 TEMPERATURE = 0.3       # 사실성 우선
 TOP_P = 0.9
-MIN_CLUSTER_SIZE = 5    # 이보다 작은 클러스터는 LLM 호출 안 함
+from services.analysis_selection import FAQ_MIN_CLUSTER_SIZE
+MIN_CLUSTER_SIZE = FAQ_MIN_CLUSTER_SIZE
 MAX_SAMPLES_PER_CLUSTER = 12  # 프롬프트에 넣을 대표 샘플 수
 
 
 # 1. 프롬프트 빌더
 PROMPT_TEMPLATE = """당신은 서울교통공사 챗봇 '또타24'의 FAQ 작성자입니다. 또타24는 지하철 이용에 관한 안내 챗봇입니다(노선/역/요금/환승/유실물/냉난방/시설 등).
 
-아래는 사용자들이 보낸 미답변 질문들을 군집화한 결과입니다. 같은 군집의 질문들을 보고 표준 FAQ 1개를 작성하세요.
+아래는 분석 대상으로 선택된 사용자 질문들을 군집화한 결과입니다. 같은 군집의 질문들을 보고 표준 FAQ 1개를 작성하세요.
 
 [군집 #{cluster_id}]  (총 {size}건)
 대표 키워드: {keywords}
@@ -235,12 +235,18 @@ def save(results: list[dict]) -> None:
 
 # 6. 메인
 def main() -> None:
+    from services.analysis_progress import report, measure, count
     if OUTPUT_JSONL.exists():
         OUTPUT_JSONL.unlink()
     clusters = load_clusters()
+    report('FAQ_GENERATION', 0, len(clusters), 'CLUSTER')
+    if not clusters:
+        save([])
+        return
     print(f'대상 클러스터: {len(clusters)}개 (MIN_CLUSTER_SIZE={MIN_CLUSTER_SIZE} 이상, 노이즈 제외)\n')
 
-    tokenizer, model = load_model()
+    with measure('FAQ_MODEL_LOAD'):
+        tokenizer, model = load_model()
     print(f'GPU: {DEVICE} / dtype: {model.dtype}\n')
 
     results = []
@@ -248,10 +254,12 @@ def main() -> None:
         prompt = build_prompt(c['clusterId'], c['size'], c['keywords'], c['samples'])
         t0 = time.time()
         validated, _trials = generate_candidate(prompt, tokenizer, model)
+        count('faqGenerationAttempts', len(_trials))
         validated['clusterId'] = c['clusterId']
         validated['size'] = c['size']
         validated['topKeywords'] = c['keywords'][:5]
         results.append(validated)
+        report('FAQ_GENERATION', i, len(clusters), 'CLUSTER')
         with open(OUTPUT_JSONL, 'a', encoding='utf-8') as fp:
             fp.write(json.dumps(validated, ensure_ascii=False) + '\n')
         elapsed = time.time() - t0

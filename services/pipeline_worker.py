@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 import subprocess
 import sys
+import threading
 from urllib.parse import urlparse
 
 import httpx
@@ -91,6 +92,9 @@ def process_claimed(store, row, runner=run_job, on_progress=None):
     job_dir = store.root / f"analysis-{row['id']}"
     try:
         options = {} if on_progress is None else {"on_progress": lambda status: on_progress(row['id'], status)}
+        options['analysis_mode'] = metadata.get('analysisMode', 'ALL')
+        if runner is run_job:
+            options['on_detail'] = lambda event: store.update_progress(row['id'], event)
         for key, option in (("minClusterSize", "min_cluster_size"), ("minSamples", "min_samples")):
             if key in metadata:
                 options[option] = metadata[key]
@@ -99,11 +103,22 @@ def process_claimed(store, row, runner=run_job, on_progress=None):
         if code:
             raise RuntimeError("Pipeline failed; inspect job logs")
         payload = build_callback(job_dir)
+        from services.analysis_selection import write_json
+        write_json(job_dir / 'progress.json', {'phase': 'FINALIZING', 'completedUnits': 1,
+                                             'totalUnits': 1, 'unit': 'STEP'})
+        store.heartbeat()
     except Exception as exc:
         print(f"analysis={row['id']} failed errorType={type(exc).__name__} logs={job_dir / 'logs/stdout.log'}", flush=True)
         # Avoid disclosing raw input, DB details, or secrets to callbacks.
         payload = {"status": "FAILED", "errorMessage": f"AI job failed ({type(exc).__name__}); inspect AI logs"}
     with job_lock(store.root, row['id']):
+        metrics_path = job_dir / 'performance.json'
+        if metrics_path.exists():
+            from services.analysis_selection import write_json
+            metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
+            metrics['queueSeconds'] = max(0, row['updated'] - row['queued_at']) if row.get('queued_at') else None
+            metrics['callbackBytes'] = len(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode('utf-8'))
+            write_json(metrics_path, metrics)
         store.finish(row["id"], payload)
     return True
 
@@ -143,13 +158,33 @@ def main():
     store = JobStore(os.environ.get("TTOBAGI_JOB_ROOT", "/data/jobs"))
     with worker_lock(store.root), httpx.Client(timeout=30, follow_redirects=False) as client:
         store.recover_callbacks()
-        while True:
-            recover_cancellations(store)
-            delivered = False if standalone else deliver_one(store, base, token, client)
-            progress = None if standalone else lambda job_id, status: deliver_progress(store, job_id, status, base, token, client)
-            worked = process_one(store, on_progress=progress)
-            if not delivered and not worked:
-                time.sleep(1)
+        with progress_supervisor(store):
+            while True:
+                recover_cancellations(store)
+                delivered = False if standalone else deliver_one(store, base, token, client)
+                progress = None if standalone else lambda job_id, status: deliver_progress(store, job_id, status, base, token, client)
+                worked = process_one(store, on_progress=progress)
+                if not delivered and not worked:
+                    time.sleep(1)
+
+
+@contextmanager
+def progress_supervisor(store, interval=5):
+    stopped = threading.Event()
+    def monitor():
+        while not stopped.is_set():
+            try:
+                store.heartbeat()
+            except Exception as exc:
+                print(f'Progress monitor errorType={type(exc).__name__}', flush=True)
+            stopped.wait(interval)
+    thread = threading.Thread(target=monitor, daemon=True, name='analysis-progress')
+    thread.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        thread.join(timeout=10)
 
 
 if __name__ == "__main__":

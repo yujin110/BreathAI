@@ -2,6 +2,7 @@
 from collections import Counter, defaultdict
 import csv
 from datetime import datetime, timedelta
+import json
 import math
 from services.keyword_policy import get_policy, KOREAN_TOKEN
 from services.log_classification import LOG_TYPES, log_type
@@ -56,13 +57,20 @@ def build_dashboard(data, keywords, summaries, *, policy=None):
         daily[day]['totalCnt'] += 1
         daily[day][{'CORRECT': 'answerCnt', 'LOW_QUALITY': 'lowQualityCount', 'UNANSWER': 'unanswerCnt'}[kind]] += 1
     prepared = {source_id(row['logId']): row for row in preprocessed}
-    if len(prepared) != len(preprocessed) or prepared.keys() != originals.keys():
+    scope_path = data / 'analysis_scope.json'
+    selection = json.loads(scope_path.read_text(encoding='utf-8')) if scope_path.exists() else None
+    if selection:
+        from services.analysis_selection import selected
+        target_ids = {key for key, row in originals.items() if selected(log_type(row), selection['analysisMode'])}
+    else:
+        target_ids = originals.keys()
+    if len(prepared) != len(preprocessed) or prepared.keys() != target_ids:
         raise ValueError('Preprocessed log IDs do not match input')
     points, seen, cluster_counts = [], set(), Counter()
     for row in clustered:
         key = source_id(row['logId'])
         label = int(row['clusterId'])
-        if key not in originals or key in seen or label not in summaries:
+        if key not in prepared or key in seen or label not in summaries:
             raise ValueError('Invalid clustered source ID or label')
         x, y = float(row['umap_x']), float(row['umap_y'])
         if not math.isfinite(x) or not math.isfinite(y):
@@ -75,6 +83,8 @@ def build_dashboard(data, keywords, summaries, *, policy=None):
     if any(cluster_counts[label] != int(row['size']) for label, row in summaries.items()):
         raise ValueError('Cluster summary counts do not match points')
     expected = {key for key, row in prepared.items() if len(row['normalizedForClustering']) >= 2}
+    if selection and selection['completionReason'] == 'INSUFFICIENT_TARGET_LOGS':
+        expected = set()
     if seen != expected:
         raise ValueError('Coordinates must cover every cluster-eligible log; sampling is not enabled')
     usage = [{'statDate': day.isoformat(), **{name: daily[day][name] for name in

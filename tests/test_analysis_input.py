@@ -47,7 +47,7 @@ class AnalysisInputTest(unittest.TestCase):
         self.source.write_text('번호,질문,날짜,kind,logType,답변확률\n1,질문,2026-03-01,0,CORRECT,0.1\n', encoding='cp949')
         fields, rows = read_analysis_csv(self.source)
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]['답변확률'], '0.1')
+        self.assertEqual(rows[0]['keywordMatchPercent'], '0.1')
         self.assertEqual(log_type(rows[0]), 'CORRECT')
 
     def test_daily_aggregates_invalid_kind_and_mixed_headers_are_rejected(self):

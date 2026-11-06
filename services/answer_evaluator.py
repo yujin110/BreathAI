@@ -33,9 +33,6 @@ from services.runtime_config import runtime_path
 from services.llm_runtime import model_id, load_chat_model, generate_chat
 
 import numpy as np
-import torch
-from sentence_transformers import CrossEncoder
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 # ---------------------------------------------------------------------------
@@ -56,8 +53,8 @@ DETAIL_LOG = LOG_DIR / 'answer_eval_detail.log'
 
 CE_MODEL = 'BAAI/bge-reranker-v2-m3'
 LLM_MODEL = model_id('judge')
-DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-CE_DEVICE = os.getenv('TTOBAGI_CE_DEVICE', DEVICE)
+DEVICE = 'auto'
+CE_DEVICE = os.getenv('TTOBAGI_CE_DEVICE')
 
 LLM_MAX_NEW_TOKENS = 350
 LLM_TEMPERATURE = 0.1   # 채점은 결정적으로
@@ -112,11 +109,13 @@ def save_v2(records: list[dict]) -> None:
 # E2: Cross-Encoder pair score
 # ---------------------------------------------------------------------------
 def load_ce() -> CrossEncoder:
+    import torch
+    from sentence_transformers import CrossEncoder
     _log(f'[E2] Cross-Encoder 로드: {CE_MODEL}')
     return CrossEncoder(
         CE_MODEL,
         max_length=512,
-        device=CE_DEVICE,
+        device=CE_DEVICE or ('cuda' if torch.cuda.is_available() else 'cpu'),
         activation_fn=torch.nn.Sigmoid(),
     )
 

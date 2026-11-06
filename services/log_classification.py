@@ -54,3 +54,13 @@ def log_type(row):
     # Legacy unanswered-learning uploads have neither an outcome nor a score.
     # Training labels (답변확률/질의 유효 여부) are not observed outcomes.
     return 'UNANSWER'
+
+
+def classification_source(row):
+    if row.get('logType') is not None and row.get('logType') != '':
+        return 'EXPLICIT_LOG_TYPE'
+    if PERCENT_COLUMN in row:
+        return 'KEYWORD_MATCH_PERCENT'
+    if 'ai_percent' in row:
+        return 'AI_PERCENT'
+    return 'LEGACY_DEFAULT'

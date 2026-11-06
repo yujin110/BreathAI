@@ -26,11 +26,8 @@ from services.keyword_policy import get_policy
 import numpy as np
 import pandas as pd
 
-import services.answer_regenerator as AR
-import services.answer_evaluator as AE
-import services.answer_refiner as ARF
-import services.oos_refresher as OOS
 from services.retrieval_contract import bind_retrieval
+from services.analysis_progress import report as progress, Performance, measure, count
 
 
 def _nfd(p):
@@ -65,6 +62,7 @@ def _log(msg: str) -> None:
 # 평가 helper
 # ---------------------------------------------------------------------------
 def _evaluate(cluster: dict, ce, tok, mdl) -> dict:
+    import services.answer_evaluator as AE
     q = cluster.get('standardQuestion', '').strip()
     a = cluster.get('answerDraft', '').strip()
     e2 = AE.e2_score(ce, q, a) if q and a else None
@@ -91,6 +89,7 @@ def _evaluate(cluster: dict, ce, tok, mdl) -> dict:
 def stage_regenerate(cluster: dict, retrieval: dict, templates: dict,
                      tok, mdl) -> tuple[str, list, int]:
     """초기 답변 best-of-N 재생성."""
+    import services.answer_regenerator as AR
     tag = cluster['tag']
     tag_cfg = templates[tag]
     kb_chunks = AR.select_kb_chunks(retrieval.get(cluster['clusterLabel']))
@@ -111,6 +110,8 @@ def stage_regenerate(cluster: dict, retrieval: dict, templates: dict,
 def stage_refine(cluster: dict, retrieval: dict, templates: dict,
                  tok, mdl) -> tuple[str, str, bool, int]:
     """needsReview 클러스터: 표준질문(한자 시) + 답변을 피드백 프롬프트로 재생성."""
+    import services.answer_regenerator as AR
+    import services.answer_refiner as ARF
     prev_q = cluster.get('standardQuestion', '').strip()
     prev_a = cluster.get('answerDraft', '').strip()
     prev_eval = cluster['evaluation']
@@ -150,6 +151,8 @@ def stage_oos_case(cluster: dict, retrieval: dict, templates: dict,
     그 외 케이스(ambiguous/complaint/external)는 자동 개선 효과 없어 skip."""
     if cluster['tag'] != 'OUT_OF_SCOPE':
         return None
+    import services.answer_regenerator as AR
+    import services.oos_refresher as OOS
     cid = cluster['clusterLabel']
     samples = clu_df[clu_df['clusterId'] == cid]['text'].head(10).tolist()
     case, _hits = OOS.classify_oos(cluster.get('topKeywords', [])[:8], samples)
@@ -181,10 +184,13 @@ def stage_oos_case(cluster: dict, retrieval: dict, templates: dict,
 # 메인 — 답변 파이프라인 (steps 5-8 통합)
 # ---------------------------------------------------------------------------
 def run_answer_pipeline() -> None:
+    import services.answer_regenerator as AR
+    import services.answer_evaluator as AE
     _ensure_logs()
     _log(f'pipeline 시작 — device={AE.DEVICE}')
 
     candidates = AR.load_candidates()
+    progress('ANSWER_PIPELINE', 0, len(candidates), 'CLUSTER')
     retrieval = AR.load_retrieval()
     candidates = bind_retrieval(candidates, retrieval)
     templates = AR.load_templates()
@@ -193,9 +199,10 @@ def run_answer_pipeline() -> None:
     _log(f'대상 {len(candidates)}건')
 
     from services.llm_runtime import load_pipeline_models
-    tok, mdl, judge_tok, judge_mdl = load_pipeline_models(
-        lambda: AR.load_model(), AE.load_llm)
-    ce = AE.load_ce()
+    with measure('ANSWER_MODELS_LOAD'):
+        tok, mdl, judge_tok, judge_mdl = load_pipeline_models(
+            lambda: AR.load_model(), AE.load_llm)
+        ce = AE.load_ce()
 
     t0 = time.time()
     results = []
@@ -219,6 +226,7 @@ def run_answer_pipeline() -> None:
 
         # --- Step 5: 초기 답변 재생성 ---
         body, missing, attempts = stage_regenerate(c, retrieval, templates, tok, mdl)
+        count('answerGenerationAttempts', attempts)
         c['answerDraft'] = body
         c.setdefault('answerMeta', {}).update({
             'regenerator': 'pipeline v0.1',
@@ -238,6 +246,8 @@ def run_answer_pipeline() -> None:
                     'evaluation': c['evaluation']}
             new_q, new_body, q_refined, ref_attempts = stage_refine(
                 c, retrieval, templates, tok, mdl)
+            count('refinedCandidates')
+            count('refineAttempts', ref_attempts)
             c['standardQuestion'] = new_q
             c['answerDraft'] = new_body
             c['evaluation'] = _evaluate(c, ce, judge_tok, judge_mdl)
@@ -253,6 +263,7 @@ def run_answer_pipeline() -> None:
         oos_out = stage_oos_case(c, retrieval, templates, clu_df, tok, mdl)
         if oos_out is not None:
             case, trial_body, oos_attempts = oos_out
+            count('oosAttempts', oos_attempts)
             # 새 답변 평가 후 더 좋을 때만 채택
             prev_eval = c['evaluation']
             trial = {**c, 'answerDraft': trial_body, 'oos_case': case}
@@ -277,6 +288,7 @@ def run_answer_pipeline() -> None:
             record and record['query'].strip() != (c.get('standardQuestion') or '').strip()
         )
         results.append(c)
+        progress('ANSWER_PIPELINE', i, len(candidates), 'CLUSTER')
         ev = c['evaluation']
         flag = 'ok' if not ev['needs_review_v2'] else '!!'
         _log(f'  [{i:>2}/{len(candidates)}] C{cid:>2} [{tag:<13}] '
@@ -305,30 +317,54 @@ def run_answer_pipeline() -> None:
 # 전체 (preprocess부터)
 # ---------------------------------------------------------------------------
 def run_full_pipeline() -> None:
-    get_policy()  # Validate before any stage loads models, including batch CLI.
+    from services.analysis_progress import release
+    try:
+        _run_full_pipeline()
+    finally:
+        release()
+
+
+def _run_full_pipeline() -> None:
+    import os
+    from services.analysis_selection import (prepare_selection, finalize_selection, write_json,
+                                             write_csv, PREPARED_COLUMNS, empty_clusters, FAQ_MIN_CLUSTER_SIZE)
+    policy = get_policy()
     _ensure_logs()
+    performance = Performance(DATA_DIR.parent / 'performance.json')
+    mode = os.environ.get('TTOBAGI_ANALYSIS_MODE', 'IMPROVEMENT')
+    minimum = int(os.environ.get('TTOBAGI_MIN_CLUSTER_SIZE', '5'))
+    samples = int(os.environ.get('TTOBAGI_MIN_SAMPLES', '2'))
+    faq_minimum = FAQ_MIN_CLUSTER_SIZE
+    print('TTOBAGI_PROGRESS:PREPROCESSING', flush=True)
+    with performance.stage('CLASSIFYING'):
+        targets = prepare_selection(DATA_DIR, mode)
+    if not targets:
+        write_csv(DATA_DIR / 'preprocessed_full.csv', PREPARED_COLUMNS, [])
+        empty_clusters(DATA_DIR, policy)
+        performance.skip(['PREPROCESSING', 'EMBEDDING', 'DIMENSION_REDUCTION', 'CLUSTERING',
+                          'FAQ_GENERATION', 'RETRIEVING', 'ANSWER_PIPELINE'], 'NO_TARGET_LOGS')
+        with performance.stage('FINALIZING'):
+            progress('FINALIZING', 0, 1, 'STEP')
+            result = finalize_selection(DATA_DIR, min_cluster_size=minimum, min_samples=samples,
+                                        faq_min_size=faq_minimum)
+            write_json(OUTPUT_JSON, {'faqCandidates': []})
+        performance.value['analysisScope'] = result['analysisScope']
+        performance.value['resultBytes'] = OUTPUT_JSON.stat().st_size
+        performance.save()
+        return
     import services.preprocess as PRE
     import services.clustering as CLU
-    import services.faq_generator as FAQ
-    import services.retriever as RET
-
-    for name, operation, progress in (
-        ('1: preprocess', PRE.main, 'PREPROCESSING'),
-        ('2: clustering', CLU.main, 'ANALYZING'),
-        ('3: faq_generator', FAQ.main, None),
-        ('4: retriever', RET.main, None),
-        ('5-8: answer pipeline', run_answer_pipeline, None),
+    for name, operation, status in (
+        ('PREPROCESSING', PRE.main, None),
+        ('CLUSTERING', CLU.main, 'ANALYZING'),
     ):
         _log(f'=== STAGE {name} ===')
-        if progress:
-            print(f'TTOBAGI_PROGRESS:{progress}', flush=True)
-        if name == '3: faq_generator':
-            # Discover missing KB/DB configuration before expensive generation.
-            _log('KB preflight: checking retrieval sources before FAQ generation')
-            RET.load_kb()
+        if status:
+            print(f'TTOBAGI_PROGRESS:{status}', flush=True)
         started = time.monotonic()
         try:
-            operation()
+            with performance.stage(name):
+                operation()
         finally:
             # Stage locals are gone; collect cycles before releasing CUDA's cache.
             import gc
@@ -339,6 +375,36 @@ def run_full_pipeline() -> None:
                 torch.cuda.empty_cache()
             # stdout preserves this even when the answer pipeline resets RUN_LOG.
             _log(f'=== STAGE {name} elapsed={time.monotonic() - started:.1f}s ===')
+
+    result = finalize_selection(DATA_DIR, min_cluster_size=minimum, min_samples=samples,
+                                faq_min_size=faq_minimum)
+    if result['completionReason'] != 'RESULTS_GENERATED':
+        if not result['analysisScope']['clusteredLogCount']:
+            performance.skip(['EMBEDDING', 'DIMENSION_REDUCTION', 'HDBSCAN'], result['completionReason'])
+        performance.skip(['FAQ_GENERATION', 'RETRIEVING', 'ANSWER_PIPELINE'], result['completionReason'])
+        with performance.stage('FINALIZING'):
+            progress('FINALIZING', 0, 1, 'STEP')
+            write_json(OUTPUT_JSON, {'faqCandidates': []})
+    else:
+        import services.faq_generator as FAQ
+        import services.retriever as RET
+        # Discover bad KB configuration before expensive generation.
+        with performance.stage('KB_PREFLIGHT'):
+            RET.load_kb()
+        for name, operation in [('FAQ_GENERATION', FAQ.main), ('RETRIEVING', RET.main),
+                                ('ANSWER_PIPELINE', run_answer_pipeline)]:
+            with performance.stage(name):
+                operation()
+            import gc
+            import sys
+            gc.collect()
+            torch = sys.modules.get('torch')
+            if torch is not None and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        progress('FINALIZING', 0, 1, 'STEP')
+    performance.value['analysisScope'] = result['analysisScope']
+    performance.value['resultBytes'] = OUTPUT_JSON.stat().st_size
+    performance.save()
 
 
 def main() -> None:

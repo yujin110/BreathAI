@@ -74,6 +74,7 @@ def stop_tokens(tokenizer, model):
 
 def generate_chat(messages, tokenizer, model, *, max_new_tokens, temperature, top_p):
     import torch
+    from services.analysis_progress import count
 
     inputs = tokenizer.apply_chat_template(
         messages, add_generation_prompt=True, tokenize=True,
@@ -88,10 +89,13 @@ def generate_chat(messages, tokenizer, model, *, max_new_tokens, temperature, to
     device = getattr(getattr(embedding, '_hf_hook', None), 'execution_device', None)
     inputs = inputs.to(device if device is not None else embedding.weight.device)
     stops = stop_tokens(tokenizer, model)
+    count('llmCalls')
+    count('llmInputTokens', length)
     with torch.inference_mode():
         output = model.generate(
             **inputs, max_new_tokens=max_new_tokens, do_sample=temperature > 0,
             **({'temperature': temperature, 'top_p': top_p} if temperature > 0 else {}),
             eos_token_id=stops, pad_token_id=tokenizer.pad_token_id
             if tokenizer.pad_token_id is not None else stops[0])
+    count('llmOutputTokens', len(output[0][length:]))
     return tokenizer.decode(output[0][length:], skip_special_tokens=True).strip()

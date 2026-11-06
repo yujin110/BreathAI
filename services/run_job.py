@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 from datetime import date, datetime, timezone
 from services.keyword_policy import KeywordPolicy, DEFAULT_POLICY_PATH
 from services.analysis_input import read_analysis_csv, write_analysis_csv
@@ -43,7 +44,7 @@ def _copy_input(source, target, period_start=None, period_end=None):
     write_analysis_csv(target, fields, selected)
 
 
-def _run_with_progress(command, *, output, on_progress, **options):
+def _run_with_progress(command, *, output, on_progress=None, on_detail=None, **options):
     """Drain stdout while inference runs; no background sender survives the job."""
     with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                           text=True, encoding="utf-8", errors="replace", **options) as process:
@@ -52,7 +53,9 @@ def _run_with_progress(command, *, output, on_progress, **options):
                 output.write(line)
                 output.flush()
                 status = line.strip().removeprefix("TTOBAGI_PROGRESS:")
-                if line.startswith("TTOBAGI_PROGRESS:") and status in {"PREPROCESSING", "ANALYZING"}:
+                if on_detail and line.startswith('TTOBAGI_DETAIL:'):
+                    on_detail(json.loads(line.removeprefix('TTOBAGI_DETAIL:')))
+                if on_progress and line.startswith("TTOBAGI_PROGRESS:") and status in {"PREPROCESSING", "ANALYZING"}:
                     try:
                         on_progress(status)
                     except Exception:
@@ -70,8 +73,10 @@ def _run_with_progress(command, *, output, on_progress, **options):
 
 
 def run_job(input_path, job_dir, *, templates=None, masking=True, translation=False,
-            period_start=None, period_end=None, on_progress=None,
-            min_cluster_size=5, min_samples=2):
+            period_start=None, period_end=None, on_progress=None, on_detail=None,
+            min_cluster_size=5, min_samples=2, analysis_mode='IMPROVEMENT'):
+    from services.analysis_selection import validate_mode
+    validate_mode(analysis_mode)
     if type(min_cluster_size) is not int or min_cluster_size < 2 or type(min_samples) is not int or min_samples < 1:
         raise ValueError("min_cluster_size must be >= 2 and min_samples >= 1")
     input_path = Path(input_path).resolve(strict=True)
@@ -82,6 +87,7 @@ def run_job(input_path, job_dir, *, templates=None, masking=True, translation=Fa
     # Exclusive creation prevents reusing a previous job or overwriting its output.
     job_dir.mkdir(parents=True, exist_ok=False)
     data_dir, log_dir = job_dir / "dataset", job_dir / "logs"
+    started = time.monotonic()
     try:
         data_dir.mkdir()
         log_dir.mkdir()
@@ -105,6 +111,27 @@ def run_job(input_path, job_dir, *, templates=None, masking=True, translation=Fa
             "TTOBAGI_MIN_CLUSTER_SIZE": str(min_cluster_size),
             "TTOBAGI_MIN_SAMPLES": str(min_samples),
             "TTOBAGI_KEYWORD_POLICY_PATH": str(snapshot),
+            "TTOBAGI_ANALYSIS_MODE": analysis_mode,
+            "TTOBAGI_PROGRESS_PATH": str(job_dir / 'progress.json'),
+        })
+        from importlib.metadata import version, PackageNotFoundError
+        from services.analysis_selection import write_json
+        versions = {}
+        for name in ('numpy', 'pandas', 'torch', 'transformers', 'scikit-learn', 'umap-learn', 'hdbscan'):
+            try:
+                versions[name] = version(name)
+            except PackageNotFoundError:
+                versions[name] = None
+        write_json(job_dir / 'runtime_manifest.json', {
+            'analysisMode': analysis_mode, 'artifactSchemaVersion': 2,
+            'classificationPolicyVersion': 'match-percent-v1', 'versions': versions,
+            'minClusterSize': min_cluster_size, 'minSamples': min_samples,
+            'masking': masking, 'translation': translation,
+            'generatorModel': env.get('TTOBAGI_LLM_MODEL', 'meta-llama/Llama-3.1-8B-Instruct'),
+            'generatorRevision': env.get('TTOBAGI_LLM_REVISION'),
+            'judgeModel': env.get('TTOBAGI_JUDGE_MODEL', env.get('TTOBAGI_LLM_MODEL', 'meta-llama/Llama-3.1-8B-Instruct')),
+            'judgeRevision': env.get('TTOBAGI_JUDGE_REVISION'),
+            'codeVersion': env.get('TTOBAGI_CODE_VERSION'),
         })
         # Shared FAQ sources stay outside job output; their explicit settings win.
         for key, filename in (
@@ -119,8 +146,9 @@ def run_job(input_path, job_dir, *, templates=None, masking=True, translation=Fa
             shutil.copyfile(source_kb, data_dir / "seoulmetro_kb_clean.jsonl")
         _write_status(job_dir, "RUNNING", masking=masking, translation=translation)
         with (log_dir / "stdout.log").open("w", encoding="utf-8") as output:
-            execute = subprocess.run if on_progress is None else _run_with_progress
-            transport = dict(stdout=output, stderr=subprocess.STDOUT, check=False) if on_progress is None else dict(output=output, on_progress=on_progress)
+            monitored = on_progress is not None or on_detail is not None
+            execute = _run_with_progress if monitored else subprocess.run
+            transport = dict(output=output, on_progress=on_progress, on_detail=on_detail) if monitored else dict(stdout=output, stderr=subprocess.STDOUT, check=False)
             result = execute(
                 [sys.executable, "-u", "-m", "services.run_pipeline", "--full"],
                 cwd=ROOT, env=env, **transport,
@@ -138,6 +166,12 @@ def run_job(input_path, job_dir, *, templates=None, masking=True, translation=Fa
     except Exception as exc:
         _write_status(job_dir, "FAILED", errorType=type(exc).__name__)
         raise
+    finally:
+        from services.analysis_selection import write_json
+        path = job_dir / 'performance.json'
+        metrics = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'schemaVersion': 1, 'stages': []}
+        metrics['runnerElapsedSeconds'] = round(time.monotonic() - started, 6)
+        write_json(path, metrics)
 
 
 def main():
@@ -149,10 +183,11 @@ def main():
     parser.add_argument("--translation", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--period-start", help="Inclusive ISO date")
     parser.add_argument("--period-end", help="Inclusive ISO date")
+    parser.add_argument('--analysis-mode', choices=('IMPROVEMENT', 'UNANSWER_ONLY', 'ALL'), default='IMPROVEMENT')
     args = parser.parse_args()
     raise SystemExit(run_job(args.input, args.job_dir, templates=args.templates,
                             masking=args.masking, translation=args.translation,
-                            period_start=args.period_start, period_end=args.period_end))
+                            period_start=args.period_start, period_end=args.period_end, analysis_mode=args.analysis_mode))
 
 
 if __name__ == "__main__":

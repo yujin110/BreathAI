@@ -8,7 +8,7 @@
        dataset/clusters_umap2d.png    (UMAP 2D 산점도)
 
 설계 원칙:
-  - 라벨 기반 사전 필터 없음. HDBSCAN이 노이즈(-1)로 자연스럽게 분리.
+  - 파이프라인에서 선택한 대상만 입력. HDBSCAN 노이즈 판정은 별도.
   - 진짜 정보 0인 행(정규화 후 길이 ≤1)만 임베딩 전 제외.
   - 라벨은 평가 단계의 ground truth로만 사용.
 """
@@ -21,6 +21,7 @@ import unicodedata
 from collections import defaultdict
 from pathlib import Path
 from services.runtime_config import runtime_path
+from services.analysis_progress import report as progress, measure
 from services.keyword_policy import (
     KOREAN_STOPWORDS, DOMAIN_STOPWORDS, STOPWORDS, get_policy, write_audit,
 )
@@ -61,7 +62,7 @@ MIN_NORMALIZED_LEN = 2
 
 # 1. 데이터 로드 + 사전 필터
 def load() -> pd.DataFrame:
-    df = pd.read_csv(INPUT_CSV, encoding='utf-8-sig')
+    df = pd.read_csv(INPUT_CSV, encoding='utf-8-sig', keep_default_na=False)
     before = len(df)
     df = df[df['normalizedForClustering'].notna() &
             (df['normalizedForClustering'].astype(str).str.len() >= MIN_NORMALIZED_LEN)
@@ -95,19 +96,26 @@ def _encode(texts: list[str], tokenizer, model) -> np.ndarray:
         out = model(**inp)
         emb = out.last_hidden_state[:, 0, :]
         all_emb.append(emb.cpu().numpy())
+        progress('EMBEDDING', min(i + BATCH_SIZE, len(texts)), len(texts), 'LOG')
     return np.vstack(all_emb)
 
 
 # 3. UMAP — 클러스터링용 10D + 시각화용 2D
 def reduce_dims(embeddings: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     import umap
-    reducer_clu = umap.UMAP(n_components=UMAP_CLUSTER_DIM, n_neighbors=UMAP_NEIGHBORS,
+    count = len(embeddings)
+    neighbors, dimensions = min(UMAP_NEIGHBORS, count - 1), min(UMAP_CLUSTER_DIM, count - 2)
+    progress('DIMENSION_REDUCTION', 0, 2, 'STEP')
+    reducer_clu = umap.UMAP(n_components=dimensions, n_neighbors=neighbors,
                             min_dist=0.0, metric='cosine', random_state=RANDOM_STATE)
     emb_clu = reducer_clu.fit_transform(embeddings)
+    progress('DIMENSION_REDUCTION', 1, 2, 'STEP')
 
-    reducer_viz = umap.UMAP(n_components=UMAP_VIZ_DIM, n_neighbors=UMAP_NEIGHBORS,
+    reducer_viz = umap.UMAP(n_components=UMAP_VIZ_DIM, n_neighbors=neighbors,
+                            init='random' if count <= 3 else 'spectral',
                             min_dist=0.1, metric='cosine', random_state=RANDOM_STATE)
     emb_viz = reducer_viz.fit_transform(embeddings)
+    progress('DIMENSION_REDUCTION', 2, 2, 'STEP')
     return emb_clu, emb_viz
 
 
@@ -256,27 +264,38 @@ def report(cluster_labels: np.ndarray, keywords: dict[int, list[str]],
 
 def main() -> None:
     policy = get_policy()  # Fail before importing/loading inference models.
-    import torch
     df = load()
+    if len(df) < max(3, HDBSCAN_MIN_CLUSTER_SIZE, HDBSCAN_MIN_SAMPLES + 1):
+        from services.analysis_selection import empty_clusters
+        empty_clusters(DATA_DIR, policy)
+        return
+    import torch
     texts = df['normalizedForClustering'].astype(str).tolist()
     print(f'GPU: {torch.cuda.is_available()} '
           f'({torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"})')
     print()
 
     print(f'[1/4] KoSimCSE 임베딩 ({MODEL_NAME})')
+    progress('EMBEDDING', 0, len(df), 'LOG')
     t0 = time.time()
-    tokenizer, model = load_model()
-    embeddings = encode(texts, tokenizer, model)
+    with measure('EMBEDDING_MODEL_LOAD'):
+        tokenizer, model = load_model()
+    with measure('EMBEDDING'):
+        embeddings = encode(texts, tokenizer, model)
     print(f'  shape={embeddings.shape}, {time.time()-t0:.1f}s')
 
     print(f'[2/4] UMAP 축소 (768 → {UMAP_CLUSTER_DIM}D / {UMAP_VIZ_DIM}D)')
     t0 = time.time()
-    emb_clu, emb_viz = reduce_dims(embeddings)
+    with measure('DIMENSION_REDUCTION'):
+        emb_clu, emb_viz = reduce_dims(embeddings)
     print(f'  clustering={emb_clu.shape}, viz={emb_viz.shape}, {time.time()-t0:.1f}s')
 
     print(f'[3/4] HDBSCAN (min_cluster_size={HDBSCAN_MIN_CLUSTER_SIZE})')
+    progress('CLUSTERING', 0, 1, 'STEP')
     t0 = time.time()
-    cluster_labels = cluster(emb_clu)
+    with measure('HDBSCAN'):
+        cluster_labels = cluster(emb_clu)
+    progress('CLUSTERING', 1, 1, 'STEP')
     print(f'  {time.time()-t0:.1f}s')
 
     print('[4/4] c-TF-IDF 키워드')

@@ -1,0 +1,14 @@
+{
+  "analysisId": 1001,
+  "status": "RUNNING",
+  "callback": "NONE",
+  "progress": {
+    "phase": "EMBEDDING",
+    "completedUnits": 32,
+    "totalUnits": 1200,
+    "unit": "LOG",
+    "elapsedSeconds": 110.5,
+    "heartbeatAt": "2026-11-05T15:10:10Z",
+    "sequence": 15
+  }
+}
