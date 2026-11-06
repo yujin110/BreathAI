@@ -69,10 +69,6 @@ export function legacyDefaultNotice(result) {
   return `이 중 ${count.toLocaleString()}건은 응답 유형과 매칭률이 모두 없어 미답변으로 셌습니다.`;
 }
 
-// 신규 필드가 없는 과거 결과인지. 범위를 추정해 적지 않기 위해 쓴다(계약 3절).
-export function isLegacyResult(result) {
-  return !result?.analysisScope;
-}
 
 // 분석이 왜 빈 결과로 끝났는지. 계약 v3 3절의 completionReason 다섯 가지다.
 //
@@ -112,27 +108,17 @@ export function completionNotice(result) {
   }
 }
 
-// 끝난 분석인데 보여 줄 것이 없는 경우.
+// 끝난 분석인데 이 자리에 보여 줄 것이 없는 경우.
 //
-// completionReason이 없는 과거 결과가 여기 해당한다. 이유를 모르니 추측하지 않고,
-// 분석이 끝났다는 사실과 결과가 비어 있다는 사실만 적는다.
-// "분석을 먼저 실행해주세요"는 안 돌린 사람에게 할 말이지 이 경우가 아니다.
+// "분석을 먼저 실행해주세요"는 안 돌린 사람에게 할 말이다. 끝난 분석에 그렇게 적으면
+// 멀쩡한 파일을 다시 올리게 된다. 그렇다고 왜 비었는지 지어내지는 않는다.
+// 완료 상태는 콜백이 결과를 모두 저장한 뒤에야 찍히므로(DashboardService.finish),
+// 보통은 다른 탭에 결과가 있다. 그 사실만 적고 추측은 보태지 않는다.
 export function emptyFinishedNotice(result) {
   if (!result) return null;
   if (completionNotice(result)) return null;   // 이유를 아는 경우는 그쪽이 맡는다
-
-  // 범위 정보가 없는 과거 결과. 왜 비었는지 알 길이 없다.
-  if (isLegacyResult(result)) {
-    return {
-      title: "이 분석에는 표시할 결과가 없습니다.",
-      body: "분석은 끝났지만 저장된 결과가 비어 있습니다. 결과가 남기 전에 만들어진 예전 분석일 수 있습니다.",
-    };
-  }
-
-  // RESULTS_GENERATED인데 이 자리에 보여 줄 것이 없는 경우.
-  // 군집은 만들었는데 FAQ 후보까지 가지 못한 때다. 과거 분석으로 몰면 사실과 다르다.
   return {
     title: "이 탭에 표시할 결과가 없습니다.",
-    body: "분석은 정상적으로 끝났습니다. 다른 탭에는 결과가 있을 수 있습니다.",
+    body: "분석은 끝났습니다. 다른 탭에서 결과를 확인해 보세요.",
   };
 }
