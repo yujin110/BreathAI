@@ -4,6 +4,7 @@ import { dashApi } from "../api/dashboard.js";
 import { useToast } from "../hooks/useToast.js";
 import { useIsMobile } from "../hooks/useIsMobile.js";
 import FitSelect from "../components/FitSelect.jsx";
+import { scopeCaption, legacyDefaultNotice } from "../utils/analysisScope.js";
 
 export default function DashboardPage() {
   const isMobile = useIsMobile();
@@ -165,6 +166,12 @@ export default function DashboardPage() {
         ))}
       </div>
 
+      {/* 유형도 매칭률도 없어 미답변으로 센 질문이 있으면 밝혀 둔다.
+          이 값이 크면 미답변 비율이 실제보다 높게 보인다. */}
+      {analyze && legacyDefaultNotice(analyze) && (
+        <div style={S.legacyNotice}>{legacyDefaultNotice(analyze)}</div>
+      )}
+
       {/* 날짜별 미답변·오답변 — 명세서 trend */}
       {trend.length > 0 && (
         <div style={{ ...S.card, marginBottom: 20 }}>
@@ -241,7 +248,11 @@ export default function DashboardPage() {
 
       {/* 급증 키워드 */}
       <div style={S.card}>
-        <div style={S.cardHeader}><span style={S.cardTitle}>급증 키워드</span></div>
+        <div style={S.cardHeader}>
+          <span style={S.cardTitle}>급증 키워드</span>
+          {/* 통계 카드는 전체를 세지만 키워드는 분석한 질문에서만 뽑는다 */}
+          {analyze && <span style={{ fontSize: 11, color: "#9CA3AF" }}>{scopeCaption(analyze)}</span>}
+        </div>
         <div style={{ padding: 20 }}>
           {burstKeywords.length === 0 && <div style={{ color: "#9CA3AF", fontSize: 12 }}>데이터 없음</div>}
           {burstKeywords.map((b) => (
@@ -269,6 +280,8 @@ const S = {
   pageTitle:  { fontSize: 20, fontWeight: 700, color: "#111827", marginBottom: 4 },
   pageSub:    { fontSize: 13, color: "#6B7280", marginBottom: 24 },
   statGrid:   { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 },
+  // 카드 아래에 붙는 단서. 수치를 가리지 않게 낮은 대비로 둔다.
+  legacyNotice: { marginTop: -8, marginBottom: 20, padding: "8px 12px", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8, fontSize: 12, color: "#475569", lineHeight: 1.5 },
   statCard:   { background: "#fff", borderRadius: 12, padding: "18px 20px", boxShadow: "0 1px 3px rgba(0,0,0,.08)", border: "1px solid rgba(0,0,0,.06)" },
   statLabel:  { fontSize: 12, color: "#6B7280", marginBottom: 6 },
   statValue:  { fontSize: 26, fontWeight: 700, lineHeight: 1 },
