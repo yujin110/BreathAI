@@ -141,6 +141,7 @@ public class AnalysisCallbackRequest {
         private Integer clusterLabel;
         private List<SynonymResult> synonyms;
         private List<MatchedFaqResult> matchedFaqs;
+        private java.util.Map<String, Object> analysisProvenance;
     }
 
     @Getter

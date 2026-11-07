@@ -59,6 +59,29 @@ class ExpandTargetIntegrationTest {
 
     private String admin;
 
+    @Test
+    @DisplayName("후보의 군집·로그 관계와 매칭 검토 근거를 저장하고 두 API로 반환한다")
+    void storesAnalysisProvenanceAndReviewEvidence() throws Exception {
+        Map<String, Object> item = candidate("NEW", "검토할 질문", List.of());
+        item.put("analysisProvenance", Map.of(
+                "candidateId", "candidate:0", "sourceCandidateIds", List.of("candidate:0", "candidate:1"),
+                "finalClusterIds", List.of(0, 1), "logIds", List.of(101, 102),
+                "matchStatus", "REVIEW_REQUIRED", "matchDecisionReason", "운영 ID 확인 필요",
+                "matchEvidence", List.of(Map.of("matchStatus", "ID_LINK_ERROR", "rerankerScore", 0.91))));
+        Long analysisId = analysis(item);
+        String recommendations = recommendations(analysisId);
+        assertThat((String) read(recommendations,
+                "$.data.recommendations[0].analysisProvenance.matchStatus")).isEqualTo("REVIEW_REQUIRED");
+        assertThat((List<?>) read(recommendations,
+                "$.data.recommendations[0].analysisProvenance.logIds")).hasSize(2);
+        String result = body(mvc.perform(get("/api/v1/dashboard/analyze/" + analysisId + "/result")
+                .header(HttpHeaders.AUTHORIZATION, bearer(admin))).andExpect(status().isOk()));
+        assertThat((List<?>) read(result,
+                "$.data.faqCandidates[0].analysisProvenance.finalClusterIds")).hasSize(2);
+        assertThat((String) read(result,
+                "$.data.faqCandidates[0].analysisProvenance.matchEvidence[0].matchStatus")).isEqualTo("ID_LINK_ERROR");
+    }
+
     @BeforeEach
     void setUp() throws Exception {
         String email = "expand-" + UUID.randomUUID().toString().substring(0, 8) + "@seoulmetro.co.kr";

@@ -40,7 +40,7 @@ def _nfd(p: Path) -> Path:
 DATA_DIR = runtime_path('TTOBAGI_DATA_DIR', _nfd(Path(__file__).resolve().parent.parent / 'dataset'))
 INPUT_CSV = DATA_DIR / 'preprocessed_full.csv'
 
-MODEL_NAME = 'BM-K/KoSimCSE-roberta'
+MODEL_NAME = os.getenv('TTOBAGI_EMBEDDING_MODEL', 'BM-K/KoSimCSE-roberta')
 BATCH_SIZE = 32
 MAX_LENGTH = 128
 
@@ -81,13 +81,13 @@ def load_model():
     return tokenizer, model
 
 
-def encode(texts: list[str], tokenizer, model) -> np.ndarray:
+def encode(texts: list[str], tokenizer, model, *, progress_enabled=True) -> np.ndarray:
     import torch
     with torch.no_grad():
-        return _encode(texts, tokenizer, model)
+        return _encode(texts, tokenizer, model, progress_enabled=progress_enabled)
 
 
-def _encode(texts: list[str], tokenizer, model) -> np.ndarray:
+def _encode(texts: list[str], tokenizer, model, *, progress_enabled=True) -> np.ndarray:
     all_emb = []
     for i in range(0, len(texts), BATCH_SIZE):
         batch = texts[i:i+BATCH_SIZE]
@@ -96,7 +96,8 @@ def _encode(texts: list[str], tokenizer, model) -> np.ndarray:
         out = model(**inp)
         emb = out.last_hidden_state[:, 0, :]
         all_emb.append(emb.cpu().numpy())
-        progress('EMBEDDING', min(i + BATCH_SIZE, len(texts)), len(texts), 'LOG')
+        if progress_enabled:
+            progress('EMBEDDING', min(i + BATCH_SIZE, len(texts)), len(texts), 'LOG')
     return np.vstack(all_emb)
 
 
@@ -217,18 +218,23 @@ def save(df: pd.DataFrame, embeddings: np.ndarray, emb_viz: np.ndarray,
 
     np.save(paths['emb'], embeddings)
 
-    pd.DataFrame({
+    output = pd.DataFrame({
         'logId': df['logId'].tolist(),
         'clusterId': cluster_labels.astype(int),
         'umap_x': emb_viz[:, 0],
         'umap_y': emb_viz[:, 1],
         'text': df['normalizedForClustering'].astype(str).tolist(),
-    }).to_csv(paths['clu'], index=False, encoding='utf-8-sig')
+    })
+    for field in ('questionGroupId', 'initialClusterId'):
+        if field in df:
+            output[field] = df[field].tolist()
+    output.to_csv(paths['clu'], index=False, encoding='utf-8-sig')
 
     summary = pd.DataFrame([
         {
             'clusterId': cid,
             'size': len(cluster_docs[cid]),
+            'uniqueSize': len(set(cluster_docs[cid])),
             'isNoise': cid == -1,
             'topKeywords': ', '.join(keywords[cid][:5]),
         }
@@ -265,39 +271,84 @@ def report(cluster_labels: np.ndarray, keywords: dict[int, list[str]],
 def main() -> None:
     policy = get_policy()  # Fail before importing/loading inference models.
     df = load()
-    if len(df) < max(3, HDBSCAN_MIN_CLUSTER_SIZE, HDBSCAN_MIN_SAMPLES + 1):
+    if len(df) == 0:
         from services.analysis_selection import empty_clusters
         empty_clusters(DATA_DIR, policy)
         return
-    import torch
-    texts = df['normalizedForClustering'].astype(str).tolist()
-    print(f'GPU: {torch.cuda.is_available()} '
-          f'({torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"})')
-    print()
-
+    from services.question_identity import group_questions, IntentVerifier, merge_partitions, unit
+    groups, inverse = group_questions(df['normalizedForClustering'].astype(str).tolist(),
+                                     df['logId'].tolist())
+    texts = [group['normalizedText'] for group in groups]
     print(f'[1/4] KoSimCSE 임베딩 ({MODEL_NAME})')
-    progress('EMBEDDING', 0, len(df), 'LOG')
+    progress('EMBEDDING', 0, len(groups), 'LOG')
     t0 = time.time()
-    with measure('EMBEDDING_MODEL_LOAD'):
-        tokenizer, model = load_model()
-    with measure('EMBEDDING'):
-        embeddings = encode(texts, tokenizer, model)
+    small = len(groups) < max(3, HDBSCAN_MIN_CLUSTER_SIZE, HDBSCAN_MIN_SAMPLES + 1)
+    if small:
+        # Never run UMAP on a singleton, nor invent a semantic noise cluster.
+        embeddings = np.zeros((len(groups), 1))
+    else:
+        import torch
+        with measure('EMBEDDING_MODEL_LOAD'):
+            tokenizer, model = load_model()
+        with measure('EMBEDDING'):
+            embeddings = encode(texts, tokenizer, model)
+        del tokenizer, model
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     print(f'  shape={embeddings.shape}, {time.time()-t0:.1f}s')
 
     print(f'[2/4] UMAP 축소 (768 → {UMAP_CLUSTER_DIM}D / {UMAP_VIZ_DIM}D)')
     t0 = time.time()
     with measure('DIMENSION_REDUCTION'):
-        emb_clu, emb_viz = reduce_dims(embeddings)
+        if small:
+            emb_clu, emb_viz = embeddings, np.zeros((len(groups), 2))
+        else:
+            emb_clu, emb_viz = reduce_dims(embeddings)
     print(f'  clustering={emb_clu.shape}, viz={emb_viz.shape}, {time.time()-t0:.1f}s')
 
     print(f'[3/4] HDBSCAN (min_cluster_size={HDBSCAN_MIN_CLUSTER_SIZE})')
     progress('CLUSTERING', 0, 1, 'STEP')
     t0 = time.time()
     with measure('HDBSCAN'):
-        cluster_labels = cluster(emb_clu)
+        cluster_labels = np.full(len(groups), -1, dtype=int) if small else cluster(emb_clu)
     progress('CLUSTERING', 1, 1, 'STEP')
     print(f'  {time.time()-t0:.1f}s')
 
+    initial_labels = cluster_labels.copy()
+    ids = sorted(set(cluster_labels.tolist()) - {-1})
+    merge_history = []
+    if len(ids) > 1:
+        members = [[texts[i] for i in np.flatnonzero(initial_labels == cid)] for cid in ids]
+        centers = np.asarray([unit(embeddings[initial_labels == cid]).mean(axis=0) for cid in ids])
+        verifier = IntentVerifier()
+        try:
+            partitions, merge_history = merge_partitions(members, centers, verifier)
+        except Exception as exc:
+            partitions = [[i] for i in range(len(ids))]
+            merge_history = [dict(decision='unknown', reason=f'{type(exc).__name__}: {exc}')]
+        for partition in partitions:
+            for index in partition:
+                cluster_labels[initial_labels == ids[index]] = ids[partition[0]]
+        del verifier
+    for i, group in enumerate(groups):
+        group.update(initialClusterId=int(initial_labels[i]), finalClusterId=int(cluster_labels[i]))
+    (DATA_DIR / 'question_groups.json').write_text(
+        json.dumps({'groups': groups, 'initialClusterIds': ids, 'mergeHistory': merge_history}, ensure_ascii=False, indent=2), encoding='utf-8')
+    np.save(DATA_DIR / 'unique_embeddings.npy', embeddings)
+    (DATA_DIR / 'clustering_quality.json').write_text(json.dumps({
+        'originalLogCount': len(df), 'uniqueQuestionCount': len(groups),
+        'uniqueNoiseRate': float(np.mean(cluster_labels == -1)),
+        'originalNoiseRate': float(np.mean(cluster_labels[inverse] == -1)),
+        'identicalQuestionConsistency': 1.0, 'logPreservationRate': 1.0,
+        'embeddingSkippedSmallInput': small,
+    }, indent=2), encoding='utf-8')
+    df['questionGroupId'] = [groups[i]['questionGroupId'] for i in inverse]
+    df['initialClusterId'] = initial_labels[inverse]
+    embeddings, emb_viz, cluster_labels = embeddings[inverse], emb_viz[inverse], cluster_labels[inverse]
+    texts = [groups[i]['normalizedText'] for i in inverse]
+    df['normalizedForClustering'] = texts
     print('[4/4] c-TF-IDF 키워드')
     keywords, cluster_docs = extract_keywords(texts, cluster_labels, policy=policy,
                                              audit_path=DATA_DIR / 'keyword_policy_audit.json')

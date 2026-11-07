@@ -149,6 +149,7 @@ RE_WS = re.compile(r'\s+')
 
 def normalize_for_clustering(text: str) -> str:
     """클러스터링용: 자모/이모지/반복 제거. 의미 단위 유지."""
+    text = unicodedata.normalize('NFC', text)
     text = RE_EMOJI.sub(' ', text)
     text = RE_REPEAT_KOR.sub(r'\1\1', text)
     text = RE_REPEAT_CHAR.sub(r'\1\1', text)

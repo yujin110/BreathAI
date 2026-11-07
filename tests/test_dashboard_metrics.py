@@ -133,6 +133,27 @@ class DashboardMetricsTest(unittest.TestCase):
         self.assertIn(-1, [r['clusterLabel'] for r in payload['clusteringView']['clusterNames']])
         json.dumps(payload, allow_nan=False)
 
+    def test_merged_candidate_callback_preserves_all_relations_and_checks_log_coverage(self):
+        self.clustered[2]['clusterId'] = 1
+        self.summaries = {0: {'size': '2'}, 1: {'size': '1'}}
+        self.save()
+        self.write_callback_artifacts()
+        candidate = dict(clusterLabel=0, candidateType='NEW', standardQuestion='문의', answerDraft='검토',
+                         candidateId='candidate:0', sourceCandidateIds=['candidate:0', 'candidate:1'],
+                         finalClusterIds=[0, 1], logIds=[10, 20, 30], matchStatus='REVIEW_REQUIRED',
+                         matchEvidence=[dict(matchStatus='ID_LINK_ERROR')])
+        output = self.data / 'faq_candidates_final.json'
+        output.write_text(json.dumps(dict(faqCandidates=[candidate]), ensure_ascii=False), encoding='utf-8')
+        payload = build_callback(self.job)['faqCandidates'][0]
+        self.assertEqual(payload['occurrenceCount'], 3)
+        self.assertEqual(payload['analysisProvenance']['finalClusterIds'], [0, 1])
+        self.assertEqual(payload['analysisProvenance']['logIds'], [10, 20, 30])
+        self.assertEqual(payload['analysisProvenance']['matchStatus'], 'REVIEW_REQUIRED')
+        candidate['logIds'] = [10, 30]
+        output.write_text(json.dumps(dict(faqCandidates=[candidate]), ensure_ascii=False), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'log provenance'):
+            build_callback(self.job)
+
     def test_snapshot_policy_used_by_real_callback_and_audit_not_recounted(self):
         import numpy as np
         from services.clustering import extract_keywords

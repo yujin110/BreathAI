@@ -12,6 +12,7 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import java.util.List;
+import java.util.Map;
 
 import java.time.LocalDateTime;
 
@@ -54,6 +55,10 @@ public class FaqCandidate {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "similar_questions", columnDefinition = "json COMMENT '클러스터 내 실제 사용자 질문'")
     private List<String> similarQuestions;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "analysis_provenance", columnDefinition = "json")
+    private Map<String, Object> analysisProvenance;
 
     @Column(name = "review_status", nullable = false, length = 20, 
             columnDefinition = "VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING, ACCEPTED, REJECTED, APPLIED'")
@@ -98,7 +103,7 @@ public class FaqCandidate {
                         CandidateType candidateType, String standardQuestion,
                         String answerDraft, Integer qType, String category,
                         List<String> similarQuestions, Integer occurrenceCount,
-                        List<String> representativeKeywords) { 
+                        List<String> representativeKeywords, Map<String, Object> analysisProvenance) {
         this.analysisJob = analysisJob;
         this.cluster = cluster;
         this.candidateType = candidateType;
@@ -109,6 +114,7 @@ public class FaqCandidate {
         this.similarQuestions = similarQuestions;
         this.occurrenceCount = occurrenceCount;
         this.representativeKeywords = representativeKeywords; 
+        this.analysisProvenance = analysisProvenance;
         this.reviewStatus = ReviewStatus.PENDING;
 }
 

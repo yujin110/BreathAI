@@ -128,7 +128,9 @@ def finalize_selection(data, *, min_cluster_size, min_samples, faq_min_size):
     clustered = read_csv(data / 'clusters.csv')
     ids = [int(row['logId']) for row in clustered]
     minimum = max(3, min_cluster_size, min_samples + 1)
-    deferred = len(eligible) if len(eligible) < minimum else 0
+    # Accept legacy deferred artifacts; current clustering preserves small inputs
+    # as individual question groups mapped to noise, with real log provenance.
+    deferred = len(eligible) if len(eligible) < minimum and not clustered else 0
     expected = set() if deferred else eligible
     if len(set(ids)) != len(ids) or set(ids) != expected:
         raise ValueError('Cluster IDs do not cover selected eligible input')

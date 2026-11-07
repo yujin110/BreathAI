@@ -30,6 +30,7 @@ import torch
 from sentence_transformers import CrossEncoder, SentenceTransformer
 
 from services.faq_kb import load_current_kb
+from services.faq_matching import decide_match, valid_faq_id
 
 
 def _nfd(p: Path) -> Path:
@@ -46,8 +47,8 @@ CLUSTERS_CSV = DATA_DIR / 'clusters.csv'
 OUTPUT_JSON = DATA_DIR / 'faq_retrieval.json'
 
 # 모델
-DENSE_MODEL = 'BAAI/bge-m3'
-RERANK_MODEL = 'BAAI/bge-reranker-v2-m3'
+DENSE_MODEL = os.getenv('TTOBAGI_RETRIEVAL_MODEL', 'BAAI/bge-m3')
+RERANK_MODEL = os.getenv('TTOBAGI_RERANK_MODEL', 'BAAI/bge-reranker-v2-m3')
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 TOP_K1 = 20    # dense retrieval
@@ -280,7 +281,7 @@ def run_for_faqs() -> None:
     1. 네 원천을 통합한 KB 로드 및 임베딩
     2. standardQuestion으로 코사인 유사도 상위 20개 검색
     3. reranker로 상위 5개 재정렬
-    4. 최고 점수 결과가 운영 FAQ ID를 가지고 임계값 이상이면 EXPAND, 아니면 NEW
+    4. 별도 운영 FAQ 검색 결과의 유효 ID·점수·답변 의도를 확인해 EXPAND/NEW 및 검토 상태 기록
     5. qType/category/matchedFaqs/similarQuestions를 후보에 기록
     """
 
@@ -320,24 +321,32 @@ def run_for_faqs() -> None:
 
     results = []
 
-    for i, c in enumerate(faqs, 1):
+    # Retrieve operational FAQs independently, then rerank the union. A document
+    # or source FAQ at rank one must not hide a valid operating FAQ.
+    operational_indices = [i for i, item in enumerate(kb)
+                           if item.get('source_type') in FAQ_SOURCE_TYPES and valid_faq_id(item.get('faq_id'))]
+    ranked = []
+    for c in faqs:
+        dense = search(c['standardQuestion'], enc, kb, kb_emb, TOP_K1)
+        if operational_indices:
+            operational = search(c['standardQuestion'], enc,
+                                 [kb[i] for i in operational_indices], kb_emb[operational_indices], TOP_K1)
+            dense = list({(item.get('source_type'), item.get('chunk_id'), item.get('faq_id'), item['text']): item
+                          for item in dense + operational}.values())
+        ranked.append(rerank(c['standardQuestion'], dense, reranker, max(len(dense), TOP_K2)))
+    # The semantic judge is loaded only after retrieval models release GPU memory.
+    del enc, reranker
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    from services.question_identity import IntentVerifier
+    verifier = IntentVerifier()
+
+    for i, (c, all_ranked) in enumerate(zip(faqs, ranked), 1):
         q = c['standardQuestion']
         t0 = time.time()
 
-        dense_candidates = search(
-            query=q,
-            enc=enc,
-            kb=kb,
-            kb_emb=kb_emb,
-            top_k=TOP_K1,
-        )
-
-        top = rerank(
-            query=q,
-            candidates=dense_candidates,
-            reranker=reranker,
-            top_k=TOP_K2,
-        )
+        top = all_ranked[:TOP_K2]
 
         elapsed = time.time() - t0
 
@@ -366,37 +375,13 @@ def run_for_faqs() -> None:
             ],
         }
 
-        # 최고 점수 FAQ를 운영 DB에서 찾을 수 있을 때만 EXPAND로 판정한다.
-        best_match = (
-            top[0]
-            if top
-            and top[0].get('source_type') in FAQ_SOURCE_TYPES
-            and top[0].get('faq_id') is not None
-            and top[0].get('rerank_score', 0.0) >= FAQ_MATCH_THRESHOLD
-            else None
-        )
-        matched = [
-            item for item in top
-            if item.get('source_type') in FAQ_SOURCE_TYPES
-            and item.get('rerank_score', 0.0) >= FAQ_MATCH_THRESHOLD
-        ]
-        record.update({
-            'candidateType': 'EXPAND' if best_match else 'NEW',
-            'qType': best_match.get('q_type') if best_match else None,
-            'category': best_match.get('category') if best_match else None,
-            'similarQuestions': c.get('similarQuestions') or similar_by_cluster.get(c['clusterLabel'], []),
-            'matchedFaqs': [
-                {
-                    'matchedFaqId': item.get('faq_id'),
-                    'matchedFaqSeqNum': item.get('source_seq_num'),
-                    'matchScore': round(item.get('rerank_score', 0.0), 4),
-                }
-                for item in matched
-            ],
-        })
+        decision = decide_match(q, all_ranked, verifier, FAQ_MATCH_THRESHOLD)
+        record.update(decision)
+        record['similarQuestions'] = c.get('similarQuestions') or similar_by_cluster.get(c['clusterLabel'], [])
         # 후속 답변 생성·백엔드 payload 단계가 같은 파일을 읽을 수 있도록
         # 원본 faqCandidates에도 새 API 계약 필드를 반영한다.
         c.update({
+            **decision,
             'candidateType': record['candidateType'],
             'qType': record['qType'],
             'category': record['category'],

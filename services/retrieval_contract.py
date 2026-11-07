@@ -5,7 +5,8 @@ import copy
 import math
 
 
-MATCH_FIELDS = ('candidateType', 'qType', 'category', 'similarQuestions', 'matchedFaqs')
+MATCH_FIELDS = ('candidateType', 'qType', 'category', 'similarQuestions', 'matchedFaqs',
+                'matchStatus', 'matchDecisionReason', 'matchEvidence')
 
 
 def index_retrieval(payload: dict) -> dict[int, dict]:

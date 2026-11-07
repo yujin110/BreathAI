@@ -265,7 +265,7 @@ class ModeApiTest(unittest.TestCase):
 class SmallPipelineTest(unittest.TestCase):
     def test_real_preprocessing_and_small_branch_skip_models(self):
         from services import run_pipeline as pipeline, preprocess, clustering
-        for text, reason in [('', 'NO_ELIGIBLE_TEXT'), ('환승 문의', 'INSUFFICIENT_TARGET_LOGS')]:
+        for text, reason in [('', 'NO_ELIGIBLE_TEXT'), ('환승 문의', 'NO_FAQ_CLUSTERS')]:
             with self.subTest(reason=reason), tempfile.TemporaryDirectory() as directory:
                 job = Path(directory)
                 data = job / 'dataset'
@@ -278,6 +278,7 @@ class SmallPipelineTest(unittest.TestCase):
                      patch.multiple(preprocess, DATA_DIR=data, OUTPUT_CSV=data / 'preprocessed_full.csv'), \
                      patch.multiple(clustering, DATA_DIR=data, INPUT_CSV=data / 'preprocessed_full.csv'), \
                      patch.object(clustering, 'load_model', side_effect=AssertionError('model loaded')), \
+                     patch.object(clustering, 'plot_2d', side_effect=lambda *args: args[-1].write_bytes(b'plot')), \
                      patch.dict(os.environ, {'TTOBAGI_ANALYSIS_MODE': 'IMPROVEMENT',
                                             'TTOBAGI_TRANSLATION_ENABLED': 'false'}):
                     pipeline.run_full_pipeline()
