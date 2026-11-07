@@ -393,9 +393,12 @@ def load_current_kb(
     """
     base = load_base_kb(base_path)
     handcrafted, source_counts = load_handcrafted_faqs(general_path, counselling_path)
-    # A slim deployment may contain neither source file. In that case the
-    # seeded active DB copies are the only available existing FAQ source.
-    approved = load_approved_faqs(connection_factory, include_source_copies=not handcrafted)
+    # Keep active operating IDs searchable even when source spreadsheets exist.
+    # merge_kb replaces the corresponding file records with authoritative DB copies.
+    approved = load_approved_faqs(connection_factory, include_source_copies=True)
+    # File records are not authoritative about active operating IDs.
+    for record in base + handcrafted:
+        record.pop('faq_id', None)
     merged = sanitize_kb(merge_kb(base + handcrafted, approved))
     return merged, {
         "base": len(base),

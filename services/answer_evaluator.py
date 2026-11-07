@@ -51,7 +51,7 @@ OUTPUT_JSONL = DATA_DIR / 'answer_eval.jsonl'
 RUN_LOG = LOG_DIR / 'answer_eval.log'
 DETAIL_LOG = LOG_DIR / 'answer_eval_detail.log'
 
-CE_MODEL = 'BAAI/bge-reranker-v2-m3'
+CE_MODEL = os.getenv('TTOBAGI_RERANK_MODEL', 'BAAI/bge-reranker-v2-m3')
 LLM_MODEL = model_id('judge')
 DEVICE = 'auto'
 CE_DEVICE = os.getenv('TTOBAGI_CE_DEVICE')

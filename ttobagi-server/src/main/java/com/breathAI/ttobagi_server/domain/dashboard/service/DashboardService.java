@@ -802,6 +802,7 @@ public class DashboardService {
                         .similarQuestions(candidateResult.getSimilarQuestions())
                         .occurrenceCount(candidateResult.getOccurrenceCount())
                         .representativeKeywords(candidateResult.getRepresentativeKeywords())
+                        .analysisProvenance(candidateResult.getAnalysisProvenance())
                         .build();
                 faqCandidateRepository.save(candidate);
 
@@ -974,6 +975,7 @@ public class DashboardService {
                 .occurrenceCount(candidate.getOccurrenceCount() != null
                         ? candidate.getOccurrenceCount() : 0)
                 .matchedFaqs(matchedFaqs)
+                .analysisProvenance(candidate.getAnalysisProvenance())
                 .build();
     }
 

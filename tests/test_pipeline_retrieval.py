@@ -120,7 +120,7 @@ class PipelineRetrievalTest(unittest.TestCase):
             self.assertIn(doc['text'], prompt)
             self.assertIn(doc['chunk_id'], prompt)
 
-    def test_pipeline_keeps_evidence_and_match_fields_through_refine(self):
+    def test_pipeline_keeps_evidence_but_rechecks_match_after_question_refine(self):
         ar = types.ModuleType('services.answer_regenerator')
         ar.load_candidates = lambda: copy.deepcopy(self.candidates)
         ar.load_retrieval = lambda: {1: copy.deepcopy(self.record)}
@@ -154,7 +154,9 @@ class PipelineRetrievalTest(unittest.TestCase):
                 pipeline.run_answer_pipeline()
             result = json.loads(pipeline.OUTPUT_JSON.read_text(encoding='utf-8'))['faqCandidates'][0]
         self.assertEqual(result['answerDraft'], 'Final answer')
-        self.assertEqual(result['matchedFaqs'], self.record['matchedFaqs'])
+        self.assertEqual(result['matchedFaqs'], [])
+        self.assertEqual(result['candidateType'], 'NEW')
+        self.assertEqual(result['matchStatus'], 'REVIEW_REQUIRED')
         self.assertEqual(result['retrievalEvidence']['query'], 'Question')
         self.assertEqual(len(result['retrievalEvidence']['used']), 5)
         self.assertTrue(result['retrievalEvidence']['questionChangedAfterRetrieval'])

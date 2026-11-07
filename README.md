@@ -224,9 +224,9 @@ TTOBAGI_SIMILAR_QUESTION_LIMIT=5
 `dataset/counselling_info.csv`를 찾습니다. 일반상담에만 존재하여
 `counselling_info`와 연결되지 않는 FAQ의 `qType`은 `null`로 유지합니다.
 
-활성 `gold_faq` 중 신규 FAQ(`source_seq_num IS NULL`) 또는 수정 이력이 있는
-FAQ만 AI KB에 추가합니다. 미수정 복사본은 파일에서 읽으므로 원천 파일도
-배포 환경에 유지해야 합니다. 수정된 FAQ는 같은 `source_seq_num`의 원본을 대체합니다.
+활성 `gold_faq`는 미수정 원천 복사본을 포함해 AI KB에 추가하여 운영 FAQ ID를
+검색할 수 있게 합니다. 같은 질문 또는 `source_seq_num`의 파일 레코드는 운영 DB
+레코드로 대체하며, 파일 레코드가 주장하는 운영 ID는 신뢰하지 않습니다.
 일반상담의 0부터 시작하는 6~15열은 `유사질문1~10`으로, 키워드와 구분하여
 `similar_questions`에 보관하고 검색 텍스트에 포함합니다.
 
@@ -253,3 +253,18 @@ AI `POST /pipeline` multipart 요청은 `minClusterSize`(정수 2 이상, 기본
 `minSamples`(정수 1 이상, 기본 2)를 지원합니다. 백엔드에서 이 값을 AI로 전달해야 적용됩니다.
 HDBSCAN 클러스터 개수는 직접 지정할 수 없습니다.
 자세한 변경 및 검증 범위는 [VRAM·군집화 안내](docs/vram-and-clustering-20261019.md)를 참고하세요.
+
+## 질문 군집화·FAQ 후보 개선
+
+동일 정규화 질문을 고유 그룹으로 군집화한 후 원본 로그 전체에 역매핑합니다.
+유사 군집과 FAQ 후보는 답변 의도까지 확인해 통합하고, 원본 로그·빈도·병합 이력을 보존합니다.
+운영 FAQ를 별도로 검색해 NEW/EXPAND를 판정하며, ID 누락·경계 점수·불명확한 의도는 검토 상태로 남깁니다.
+콜백의 선택적 `analysisProvenance`와 BE의 V17 마이그레이션, FE 검토 배지를 함께 반영해야 전체 추적 정보를 볼 수 있습니다.
+
+- [구현 내용·연동·평가 방법](docs/clustering-faq-improvement.md)
+- [실제 모델·HTTP 실행 검증과 한계](docs/clustering-runtime-validation-20261107.md)
+
+로컬 모델 캐시는 `TTOBAGI_EMBEDDING_MODEL`, `TTOBAGI_RETRIEVAL_MODEL`,
+`TTOBAGI_RERANK_MODEL`로 지정할 수 있으며 기본 모델은 유지합니다.
+실제 16건 전체 API 실행과 추가 EXPAND·근거 답변 검사는 통과했지만,
+실제 19,000행 품질 비교와 운영 BE·FE 연결 검증은 아직 남아 있습니다.

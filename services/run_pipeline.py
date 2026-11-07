@@ -287,6 +287,10 @@ def run_answer_pipeline() -> None:
         c['retrievalEvidence']['questionChangedAfterRetrieval'] = bool(
             record and record['query'].strip() != (c.get('standardQuestion') or '').strip()
         )
+        if c['retrievalEvidence']['questionChangedAfterRetrieval']:
+            # A rewritten question has not been verified against the operating FAQ.
+            c.update(candidateType='NEW', matchedFaqs=[], matchStatus='REVIEW_REQUIRED',
+                     matchDecisionReason='매칭 후 표준 질문이 변경되어 운영 FAQ를 다시 확인해야 합니다.')
         results.append(c)
         progress('ANSWER_PIPELINE', i, len(candidates), 'CLUSTER')
         ev = c['evaluation']

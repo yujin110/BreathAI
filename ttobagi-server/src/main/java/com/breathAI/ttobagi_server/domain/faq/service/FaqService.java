@@ -751,6 +751,7 @@ public class FaqService {
                 .occurrenceCount(candidate.getOccurrenceCount())
                 .synonyms(synonyms)
                 .matchedFaqs(matchedFaqs)
+                .analysisProvenance(candidate.getAnalysisProvenance())
                 .createdAt(candidate.getCreatedAt())
                 .build();
     }

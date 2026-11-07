@@ -135,6 +135,7 @@ public class AnalyzeResultResponse {
         private List<SynonymItem> synonyms;
         private int occurrenceCount;
         private List<MatchedFaq> matchedFaqs;
+        private java.util.Map<String, Object> analysisProvenance;
 
         @Getter
         @Builder
