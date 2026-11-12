@@ -1,8 +1,8 @@
 """또타24 미답변 로그 전처리 — 텍스트 정제 단일 책임.
 
 기능:
-  1. 언어 감지 + 외국어→한국어 번역 (한글 등록 원칙)
-  2. PII 마스킹 (전화/이메일/주민/카드/URL → 토큰)
+  1. 언어 감지 및 PII 마스킹 (전화/이메일/주민/카드/URL → 토큰)
+  2. 외국어→한국어 번역 (한글 등록 원칙)
   3. 열차번호 보호 토큰화 (4자리=서울메트로, 6자리=코레일)
   4. 이중 정규화 (클러스터링용 강함 / 생성용 오타 보존)
 
@@ -18,8 +18,7 @@ from pathlib import Path
 from services.runtime_config import runtime_path
 
 import pandas as pd
-from deep_translator import GoogleTranslator
-from deep_translator.exceptions import TranslationNotFound, NotValidPayload
+from services.translation import translate_with_azure
 
 
 def _nfd(p: Path) -> Path:
@@ -68,25 +67,11 @@ def detect_lang(text: str) -> str:
     return 'unknown'
 
 
-_translate_cache: dict[str, str | None] = {}
-
-
 def translate_to_ko(text: str, src_lang: str) -> str | None:
     """한국어 등록 원칙: 외국어로 감지되면 한국어로 번역."""
     if src_lang in ('ko', 'empty', 'unknown') or not text.strip():
         return None
-    if text in _translate_cache:
-        return _translate_cache[text]
-    try:
-        ko = GoogleTranslator(source='auto', target='ko').translate(text)
-        if not ko or ko.strip() == text.strip():
-            ko = None
-    except (TranslationNotFound, NotValidPayload):
-        ko = None
-    except Exception:
-        ko = None
-    _translate_cache[text] = ko
-    return ko
+    return translate_with_azure(text)
 
 
 # 3. PII 마스킹
@@ -174,18 +159,25 @@ def load() -> pd.DataFrame:
 
 def run(df: pd.DataFrame, *, masking_enabled: bool = True,
         translation_enabled: bool = True) -> pd.DataFrame:
-    """원문 → 번역 → PII 마스킹 → 열차번호 토큰화 → 이중 정규화."""
+    """원문 → PII 마스킹 → 번역 → 열차번호 토큰화 → 이중 정규화."""
     rows = []
+    translations: dict[str, str | None] = {}
     from services.analysis_progress import report
     report('PREPROCESSING', 0, len(df), 'LOG')
     for index, (_, row) in enumerate(df.iterrows(), 1):
         raw = to_text(row[COL_QUESTION])
         lang = detect_lang(raw)
 
-        translated = translate_to_ko(raw, lang) if translation_enabled else ''
-        working = translated if translated else raw
-
-        masked, pii_ent = mask_pii(working) if masking_enabled else (working, {})
+        masked, pii_ent = mask_pii(raw) if masking_enabled else (raw, {})
+        translated = None
+        if translation_enabled and lang not in ('ko', 'empty', 'unknown'):
+            if masked not in translations:
+                translations[masked] = translate_to_ko(masked, lang)
+            translated = translations[masked]
+        if translated:
+            masked, output_pii = mask_pii(translated) if masking_enabled else (translated, {})
+            for kind, values in output_pii.items():
+                pii_ent[kind] = list(dict.fromkeys(pii_ent.get(kind, []) + values))
         tagged, num_ent = tag_numbers(masked)
 
         clu = normalize_for_clustering(tagged)
