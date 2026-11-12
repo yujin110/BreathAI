@@ -469,12 +469,16 @@ export default function FaqPage() {
                     </div>
                     <div style={S.faqQ}>{f.standardQuestion}</div>
                     <div style={S.faqA}>{toPlainText(f.answer)}</div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8 }}>
-                      {f.keywords?.map((k) => <span key={k} style={S.tag}>{k}</span>)}
-                    </div>
-                    {/* 유사어는 키워드와 쓰임이 달라 구분해 보여 준다 (2026-10-31 추가) */}
+                    {/* 키워드와 유사어는 쓰임이 다르다. 둘 다 이름을 붙여 두 줄의 왼쪽 끝을 맞춘다.
+                        한쪽만 이름이 있으면 줄이 어긋나고, 색만으로는 처음 보는 사람이 구분하지 못한다. */}
+                    {f.keywords?.length > 0 && (
+                      <div style={S.tagRow}>
+                        <span style={S.tagLabel}>키워드</span>
+                        {f.keywords.map((k) => <span key={k} style={S.tag}>{k}</span>)}
+                      </div>
+                    )}
                     {f.synonyms?.length > 0 && (
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6, alignItems: "center" }}>
+                      <div style={S.tagRow}>
                         <span style={S.tagLabel}>유사어</span>
                         {f.synonyms.map((sy) => <span key={sy} style={S.synTag}>{sy}</span>)}
                       </div>
@@ -964,7 +968,9 @@ const S = {
   rowNo:       { fontFamily: "monospace", color: "#9CA3AF", marginRight: 6 },
   errTh:       { textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600, whiteSpace: "nowrap" },
   errTd:       { padding: "6px 8px", borderBottom: "1px solid #F3F4F6", color: "#374151", verticalAlign: "top" },
-  tagLabel:    { fontSize: 10, color: "#9CA3AF", marginRight: 2 },
+  // 이름 칸을 같은 너비로 잡아 두 줄의 태그 시작점을 맞춘다
+  tagRow:      { display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6, alignItems: "center" },
+  tagLabel:    { fontSize: 10, color: "#9CA3AF", marginRight: 2, width: 30, flexShrink: 0 },
   synTag:      { fontSize: 11, padding: "2px 8px", borderRadius: 12, background: "#F5F3FF", color: "#5B21B6", border: "1px solid #DDD6FE" },
   btnCreate:   { padding: "8px 14px", fontSize: 12, fontWeight: 600, border: "1.5px solid #1565C0", borderRadius: 8, background: "#fff", color: "#1565C0", cursor: "pointer", fontFamily: "inherit" },
 
