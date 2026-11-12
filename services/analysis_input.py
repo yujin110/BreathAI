@@ -21,6 +21,9 @@ def read_analysis_csv(path, *, encoding=None):
     reader = csv.DictReader(io.StringIO(text, newline=''), strict=True)
     fields = [name.replace('\n', '') for name in (reader.fieldnames or [])]
     reader.fieldnames = fields
+    if '답변확률' in fields and not {'keywordMatchPercent', 'ai_percent'} & set(fields):
+        fields = ['keywordMatchPercent' if name == '답변확률' else name for name in fields]
+        reader.fieldnames = fields
     columns = set(fields)
     if CANONICAL_COLUMNS <= columns:
         return fields, list(reader)

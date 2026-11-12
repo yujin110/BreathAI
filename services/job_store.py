@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 import time
+from datetime import datetime, timezone
 
 
 class Conflict(ValueError):
@@ -30,7 +31,8 @@ class JobStore:
             for name, kind in (('process_pid', 'INTEGER'), ('process_started', 'REAL'),
                                ('process_namespace', 'TEXT'), ('execution_managed', 'INTEGER NOT NULL DEFAULT 0'),
                                ('cancel_requested', 'REAL'), ('cancel_completed', 'REAL'),
-                               ('cleanup_error', 'TEXT')):
+                               ('cleanup_error', 'TEXT'), ('progress', 'TEXT'), ('run_started', 'REAL'),
+                               ('queued_at', 'REAL')):
                 if name not in columns:
                     db.execute(f'ALTER TABLE jobs ADD COLUMN {name} {kind}')
 
@@ -52,9 +54,11 @@ class JobStore:
                        "payload=NULL,delivery='SUPPRESSED',updated=? WHERE id=? AND state IN ('QUEUED','RUNNING')",
                        (time.time(), time.time(), analysis_id))
             db.execute("UPDATE progress_callbacks SET delivery='SUPPRESSED' WHERE job_id=?", (analysis_id,))
+            self._heartbeat(db, analysis_id)
 
     def complete_cancel(self, analysis_id):
         with self.connect() as db:
+            self._heartbeat(db, analysis_id)
             db.execute("UPDATE jobs SET state='CANCELED',cancel_completed=?,cleanup_error=NULL,updated=? "
                        "WHERE id=? AND state='CANCELLING'", (time.time(), time.time(), analysis_id))
 
@@ -101,8 +105,12 @@ class JobStore:
                 if row[0] != fingerprint:
                     raise Conflict("analysisId already has different input or options")
                 return False
-            db.execute("INSERT INTO jobs(id,fingerprint,metadata,input_path,updated) VALUES(?,?,?,?,?)",
-                       (analysis_id, fingerprint, json.dumps(metadata), str(input_path), time.time()))
+            submitted = time.time()
+            db.execute("INSERT INTO jobs(id,fingerprint,metadata,input_path,updated,queued_at) VALUES(?,?,?,?,?,?)",
+                       (analysis_id, fingerprint, json.dumps(metadata), str(input_path), submitted, submitted))
+            if 'analysisMode' in metadata:
+                self._heartbeat(db, analysis_id, {'phase': 'QUEUED', 'completedUnits': None,
+                                                'totalUnits': None, 'unit': None})
             return True
 
     def get(self, analysis_id):
@@ -120,13 +128,69 @@ class JobStore:
                 return None
             row = db.execute("SELECT id FROM jobs WHERE state='QUEUED' ORDER BY updated,id LIMIT 1").fetchone()
             if row:
-                db.execute("UPDATE jobs SET state='RUNNING',execution_managed=1,updated=? WHERE id=?", (time.time(), row[0]))
+                db.execute("UPDATE jobs SET state='RUNNING',execution_managed=1,updated=?,run_started=? WHERE id=?",
+                           (time.time(), time.monotonic(), row[0]))
         return self.get(row[0]) if row else None
 
     def finish(self, analysis_id, payload):
         with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            self._heartbeat(db, analysis_id)
             db.execute("UPDATE jobs SET state=?,payload=?,delivery='PENDING',updated=? WHERE id=? AND state='RUNNING'",
                        (payload["status"], json.dumps(payload, ensure_ascii=False, allow_nan=False), time.time(), analysis_id))
+
+    def _heartbeat(self, db, analysis_id, event=None):
+        row = db.execute('SELECT state,progress,run_started FROM jobs WHERE id=?', (analysis_id,)).fetchone()
+        if not row or row[0] not in {'QUEUED', 'RUNNING', 'CANCELLING'}:
+            return
+        value = json.loads(row[1]) if row[1] else None
+        if value is None and event is None:
+            return  # Historical jobs have no fabricated progress.
+        value = value or {'sequence': 0}
+        if event is not None and row[0] != 'CANCELLING':
+            from services.analysis_progress import PHASES
+            phase = event['phase']
+            if phase not in PHASES:
+                raise ValueError('Invalid progress phase')
+            old_phase = value.get('phase', 'QUEUED')
+            if PHASES.index(phase) < PHASES.index(old_phase):
+                event = None
+            if event is not None:
+                completed, total, unit = event['completedUnits'], event['totalUnits'], event['unit']
+                if ((completed is None) != (total is None) or
+                        (total is not None and (type(total) is not int or type(completed) is not int or
+                         not 0 <= completed <= total or unit not in {'LOG', 'CLUSTER', 'STEP'})) or
+                        (total is None and unit is not None)):
+                    raise ValueError('Invalid progress counters')
+                if phase == old_phase and value.get('completedUnits') is not None and completed is not None:
+                    event = {**event, 'completedUnits': max(value['completedUnits'], completed)}
+                    if event['completedUnits'] > total:
+                        raise ValueError('Progress total changed inconsistently')
+                value.update({key: event[key] for key in ('phase', 'completedUnits', 'totalUnits', 'unit')})
+        value.update(sequence=value['sequence'] + 1,
+                     elapsedSeconds=round(max(0, time.monotonic() - row[2]), 3) if row[2] else 0,
+                     heartbeatAt=datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'))
+        db.execute('UPDATE jobs SET progress=? WHERE id=?', (json.dumps(value), analysis_id))
+
+    def heartbeat(self):
+        """Supervisor persists child snapshots; terminal writes cannot be resurrected."""
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            rows = db.execute("SELECT id,state FROM jobs WHERE state IN ('QUEUED','RUNNING') AND progress IS NOT NULL").fetchall()
+            for analysis_id, state in rows:
+                event = None
+                if state == 'RUNNING':
+                    path = self.root / f'analysis-{analysis_id}' / 'progress.json'
+                    try:
+                        event = json.loads(path.read_text(encoding='utf-8'))
+                    except FileNotFoundError:
+                        pass
+                self._heartbeat(db, analysis_id, event)
+
+    def update_progress(self, analysis_id, event):
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            self._heartbeat(db, analysis_id, event)
 
     def pending_callback(self):
         with self.connect() as db:

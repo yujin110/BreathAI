@@ -255,7 +255,7 @@ function ClusterScatterPlot({ points, clusterNames }) {
               style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: c.clusterLabel < 0 ? "#9CA3AF" : "#374151" }}
             >
               <span style={{ width: 9, height: 9, borderRadius: "50%", background: colorOf(c.clusterLabel), flexShrink: 0 }} />
-              {c.name || `클러스터 ${c.clusterLabel}`}
+              {c.name ? `${c.name} (C${c.clusterLabel})` : `클러스터 ${c.clusterLabel}`}
               <span style={{ color: "#9CA3AF" }}>({(c.size || 0).toLocaleString()})</span>
             </span>
           ))}
@@ -474,8 +474,8 @@ export default function AnalyzePage() {
   //
   // 주의: 이 개수가 occurrenceCount와 같지 않을 수 있다. 한 군집에서 후보가 여러 개 나오면
   // (예: 분석 #3의 cluster 3에서 후보 2개) 후보마다 occurrenceCount는 자기 몫이지만
-  // points는 군집 전체라 더 많다. 후보별로 어떤 로그가 묶였는지는 응답에 없어서
-  // 군집 단위까지만 보여 줄 수 있다.
+  // points는 군집 전체라 더 많다. 새 후보는 analysisProvenance의 모든 참조 군집을
+  // 펼치고, 예전 후보는 대표 군집 하나를 표시한다.
   //
   // text는 마스킹·정규화를 거친 문장이다(예: 열차번호가 [METRO_TRAIN]).
   const clusterPoints = analyzeResult?.clusteringView?.points;
@@ -1382,7 +1382,8 @@ export default function AnalyzePage() {
               const isOpen = openQuestions.has(c.candidateId);
               // 시각화 결과를 아직 못 받았거나 후보에 군집 번호가 없으면 펼칠 수 없다.
               const canExpand = Boolean(clusterPoints?.length) && typeof c.clusterLabel === "number";
-              const questions = isOpen ? questionsOf(c.clusterLabel) : [];
+              const labels = c.analysisProvenance?.finalClusterIds || [c.clusterLabel];
+              const questions = isOpen ? labels.flatMap(questionsOf) : [];
               return (
               <div key={c.candidateId} style={{ ...S.card, marginBottom: 12, padding: isMobile ? 14 : 18 }}>
                 {/* 폰에서는 제목 옆에 버튼 3개가 들어갈 폭이 없어 글자가 세로로 쪼개진다.
@@ -1406,7 +1407,7 @@ export default function AnalyzePage() {
                       ) : (
                         <span style={{ color: "#9CA3AF" }}>매칭 {c.occurrenceCount}건</span>
                       )}
-                      <MatchedFaqBadge matches={c.matchedFaqs} candidateType={c.candidateType} />
+                      <MatchedFaqBadge matches={c.matchedFaqs} candidateType={c.candidateType} provenance={c.analysisProvenance} />
                     </div>
                   </div>
                   {/* reviewStatus: PENDING 이면 버튼, REJECTED "반려됨", APPLIED "반영됨" */}

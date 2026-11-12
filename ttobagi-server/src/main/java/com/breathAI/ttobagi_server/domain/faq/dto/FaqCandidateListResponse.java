@@ -41,6 +41,7 @@ public class FaqCandidateListResponse {
         private Integer occurrenceCount;
         private List<SynonymItem> synonyms;
         private List<MatchedFaqItem> matchedFaqs;
+        private java.util.Map<String, Object> analysisProvenance;
 
         @JsonFormat(
             shape = JsonFormat.Shape.STRING,

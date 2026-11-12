@@ -22,7 +22,8 @@ from services.runtime_config import runtime_path
 from services.llm_runtime import model_id, load_chat_model, generate_chat
 
 import pandas as pd
-import torch
+import numpy as np
+from services.question_identity import normalize, diverse_indices, merge_partitions, IntentVerifier
 
 
 def _nfd(p: Path) -> Path:
@@ -38,19 +39,20 @@ OUTPUT_JSON = DATA_DIR / 'faq_candidates.json'
 OUTPUT_JSONL = DATA_DIR / 'faq_candidates.jsonl'  # per-cluster checkpoint
 
 MODEL_NAME = model_id()
-DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+DEVICE = 'auto'  # The shared loader selects the actual device only when needed.
 
 MAX_NEW_TOKENS = 800
 TEMPERATURE = 0.3       # 사실성 우선
 TOP_P = 0.9
-MIN_CLUSTER_SIZE = 5    # 이보다 작은 클러스터는 LLM 호출 안 함
+from services.analysis_selection import FAQ_MIN_CLUSTER_SIZE
+MIN_CLUSTER_SIZE = FAQ_MIN_CLUSTER_SIZE
 MAX_SAMPLES_PER_CLUSTER = 12  # 프롬프트에 넣을 대표 샘플 수
 
 
 # 1. 프롬프트 빌더
 PROMPT_TEMPLATE = """당신은 서울교통공사 챗봇 '또타24'의 FAQ 작성자입니다. 또타24는 지하철 이용에 관한 안내 챗봇입니다(노선/역/요금/환승/유실물/냉난방/시설 등).
 
-아래는 사용자들이 보낸 미답변 질문들을 군집화한 결과입니다. 같은 군집의 질문들을 보고 표준 FAQ 1개를 작성하세요.
+아래는 분석 대상으로 선택된 사용자 질문들을 군집화한 결과입니다. 같은 군집의 질문들을 보고 표준 FAQ 1개를 작성하세요.
 
 [군집 #{cluster_id}]  (총 {size}건)
 대표 키워드: {keywords}
@@ -94,6 +96,7 @@ tag가 FAQ가 아니면 standardQuestion/answerDraft/synonyms는 빈 값으로:
 
 def build_prompt(cluster_id: int, size: int, keywords: list[str],
                  samples: list[str]) -> str:
+    samples = list(dict.fromkeys(normalize(s) for s in samples))
     samples_str = '\n'.join(f'  - {s}' for s in samples[:MAX_SAMPLES_PER_CLUSTER])
     return PROMPT_TEMPLATE.format(
         cluster_id=cluster_id,
@@ -193,24 +196,56 @@ def load_clusters() -> list[dict]:
         keywords = json.load(f)
 
     out = []
+    embedding_path = DATA_DIR / 'embeddings.npy'
+    embeddings = np.load(embedding_path) if embedding_path.exists() else None
+    if embeddings is not None and len(embeddings) != len(cdf):
+        raise ValueError('Cluster/embedding row mismatch; rerun clustering')
     for _, row in sdf.iterrows():
         cid = int(row['clusterId'])
         if row['isNoise']:
             continue
         if row['size'] < MIN_CLUSTER_SIZE:
             continue
-        samples = cdf[cdf['clusterId'] == cid]['text'].astype(str).tolist()
+        subset = cdf[cdf['clusterId'] == cid]
+        unique = subset.drop_duplicates('text')
+        indices = (diverse_indices(embeddings[unique.index], MAX_SAMPLES_PER_CLUSTER)
+                   if embeddings is not None else list(range(min(len(unique), MAX_SAMPLES_PER_CLUSTER))))
+        samples = unique.iloc[indices]['text'].astype(str).tolist()
         out.append({
             'clusterId': cid,
             'size': int(row['size']),
             'keywords': keywords.get(str(cid), []),
             'samples': samples,
+            'logIds': subset['logId'].tolist(),
         })
     return out
 
 
 # 5. 산출물 저장 — 백엔드 페이로드 키 네이밍
-def save(results: list[dict]) -> None:
+def consolidate(candidates, vectors, verify):
+    """Preserve the legacy primary label and add full many-to-many provenance."""
+    faq = [c for c in candidates if c['tag'] == 'FAQ']
+    if not faq:
+        return candidates, []
+    partitions, history = merge_partitions(
+        [dict(question=c['standardQuestion'], samples=c.get('similarQuestions', [])) for c in faq],
+        vectors, verify, exact_keys=[normalize(c['standardQuestion']) for c in faq])
+    merged = []
+    for partition in partitions:
+        result = dict(faq[partition[0]])
+        sources = [faq[i] for i in partition]
+        result['finalClusterIds'] = sorted({cid for c in sources for cid in c['finalClusterIds']})
+        result['logIds'] = list(dict.fromkeys(log for c in sources for log in c['logIds']))
+        result['clusterSize'] = len(result['logIds'])
+        result['sourceCandidateIds'] = [c['candidateId'] for c in sources]
+        result['similarQuestions'] = list(dict.fromkeys(q for c in sources for q in c.get('similarQuestions', [])))
+        result['synonyms'] = [dict(text=text, type=kind) for text, kind in dict.fromkeys(
+            (s['text'], s['type']) for c in sources for s in c['synonyms'])]
+        merged.append(result)
+    return merged + [c for c in candidates if c['tag'] != 'FAQ'], history
+
+
+def save(results: list[dict], verifier=None) -> None:
     payload = {
         'faqCandidates': [
             {
@@ -224,10 +259,36 @@ def save(results: list[dict]) -> None:
                 'matchedFaqs': [],                # EXPAND 후보일 때만 채움 (현재 NEW only)
                 'reason': r['reason'],
                 'topKeywords': r['topKeywords'],
+                'candidateId': f"candidate:{r['clusterId']}",
+                'sourceCandidateIds': [f"candidate:{r['clusterId']}"],
+                'finalClusterIds': [r['clusterId']],
+                'logIds': r.get('logIds', []),
+                'similarQuestions': r.get('samples', []),
             }
             for r in results
         ]
     }
+    faqs = [c for c in payload['faqCandidates'] if c['tag'] == 'FAQ']
+    history = []
+    if len(faqs) > 1 and verifier is not None:
+        # CPU embeddings avoid keeping a second GPU model beside the generator.
+        try:
+            from services.clustering import MODEL_NAME as EMBED_MODEL, encode
+            from transformers import AutoTokenizer, AutoModel
+            tok = AutoTokenizer.from_pretrained(EMBED_MODEL)
+            mdl = AutoModel.from_pretrained(EMBED_MODEL).to('cpu').eval()
+            vectors = encode([c['standardQuestion'] for c in faqs], tok, mdl, progress_enabled=False)
+            payload['faqCandidates'], history = consolidate(payload['faqCandidates'], vectors, verifier)
+        except Exception as exc:
+            history = [dict(decision='unknown', reason=f'{type(exc).__name__}: {exc}')]
+    (DATA_DIR / 'faq_merge_history.json').write_text(
+        json.dumps({'sourceCandidateOrder': [c['candidateId'] for c in faqs],
+                    'decisions': history, 'merges': [
+            dict(sourceCandidateId=source, mergedCandidateId=c['candidateId'])
+            for c in payload['faqCandidates'] for source in c['sourceCandidateIds']
+            if source != c['candidateId']], 'relations': [
+            {key: c.get(key) for key in ('candidateId', 'sourceCandidateIds', 'finalClusterIds', 'logIds')}
+            for c in payload['faqCandidates']]}, ensure_ascii=False, indent=2), encoding='utf-8')
     with open(OUTPUT_JSON, 'w', encoding='utf-8') as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
     print(f'산출물: {OUTPUT_JSON.name} ({OUTPUT_JSON.stat().st_size:,} bytes, {len(results)}건)')
@@ -235,12 +296,18 @@ def save(results: list[dict]) -> None:
 
 # 6. 메인
 def main() -> None:
+    from services.analysis_progress import report, measure, count
     if OUTPUT_JSONL.exists():
         OUTPUT_JSONL.unlink()
     clusters = load_clusters()
+    report('FAQ_GENERATION', 0, len(clusters), 'CLUSTER')
+    if not clusters:
+        save([])
+        return
     print(f'대상 클러스터: {len(clusters)}개 (MIN_CLUSTER_SIZE={MIN_CLUSTER_SIZE} 이상, 노이즈 제외)\n')
 
-    tokenizer, model = load_model()
+    with measure('FAQ_MODEL_LOAD'):
+        tokenizer, model = load_model()
     print(f'GPU: {DEVICE} / dtype: {model.dtype}\n')
 
     results = []
@@ -248,10 +315,14 @@ def main() -> None:
         prompt = build_prompt(c['clusterId'], c['size'], c['keywords'], c['samples'])
         t0 = time.time()
         validated, _trials = generate_candidate(prompt, tokenizer, model)
+        count('faqGenerationAttempts', len(_trials))
         validated['clusterId'] = c['clusterId']
         validated['size'] = c['size']
         validated['topKeywords'] = c['keywords'][:5]
+        validated['logIds'] = c['logIds']
+        validated['samples'] = c['samples']
         results.append(validated)
+        report('FAQ_GENERATION', i, len(clusters), 'CLUSTER')
         with open(OUTPUT_JSONL, 'a', encoding='utf-8') as fp:
             fp.write(json.dumps(validated, ensure_ascii=False) + '\n')
         elapsed = time.time() - t0
@@ -267,7 +338,7 @@ def main() -> None:
     for k, v in sorted(by_tag.items()):
         print(f'  {k}: {v}건')
     print()
-    save(results)
+    save(results, IntentVerifier(tokenizer, model))
 
 
 if __name__ == '__main__':

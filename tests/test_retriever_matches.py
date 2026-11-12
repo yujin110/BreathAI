@@ -32,9 +32,11 @@ class RetrieverMatchesTest(unittest.TestCase):
             module.build_or_load_index = lambda kb: None
             module.load_faq_candidates = lambda: candidates
             module.load_similar_questions = lambda: {}
-            module.search = lambda **kwargs: []
-            module.rerank = lambda **kwargs: top
-            module.run_for_faqs()
+            module.search = lambda *args, **kwargs: []
+            module.rerank = lambda *args, **kwargs: top
+            with patch('services.question_identity.IntentVerifier', return_value=lambda a, b: dict(
+                    decision='same', reason='controlled matching intent')):
+                module.run_for_faqs()
             record = json.loads(module.OUTPUT_JSON.read_text(encoding='utf-8'))['faqRetrieval'][0]
             saved = json.loads(module.FAQ_JSON.read_text(encoding='utf-8'))['faqCandidates'][0]
         self.assertEqual(saved['matchedFaqs'], record['matchedFaqs'])
@@ -51,18 +53,17 @@ class RetrieverMatchesTest(unittest.TestCase):
                 self.assertEqual(result['matchedFaqs'], [dict(
                     matchedFaqId=123, matchedFaqSeqNum=seq, matchScore=.87)])
 
-    def test_missing_operational_id_is_new_even_with_lower_ranked_approved_faq(self):
+    def test_lower_ranked_valid_operational_faq_can_expand(self):
         for seq in (45, None):
             with self.subTest(seq=seq):
                 result = self.run_retrieval([
                     dict(source_type='general_consultation', source_seq_num=seq, rerank_score=.95),
                     dict(source_type='approved_faq', faq_id=123, rerank_score=.87)])
-                self.assertEqual(result['candidateType'], 'NEW')
+                self.assertEqual(result['candidateType'], 'EXPAND')
                 self.assertIsNone(result['qType'])
                 self.assertIsNone(result['category'])
-                self.assertEqual(result['matchedFaqs'][0], dict(
-                    matchedFaqId=None, matchedFaqSeqNum=seq, matchScore=.95))
-                self.assertEqual(result['matchedFaqs'][1]['matchedFaqId'], 123)
+                self.assertEqual(result['matchEvidence'][0]['matchStatus'], 'ID_LINK_ERROR')
+                self.assertEqual(result['matchedFaqs'][0]['matchedFaqId'], 123)
 
     def test_threshold_documents_and_empty_search_still_produce_new(self):
         for top in ([], [dict(source_type='approved_faq', faq_id=123, rerank_score=.79)],

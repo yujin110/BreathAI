@@ -52,7 +52,7 @@ class FaqKbTest(unittest.TestCase):
             ''')
             self.assertEqual([1], [r[0] for r in db.execute(captured.fake_cursor.sql)])
 
-    def test_fallback_only_applies_without_handcrafted_records(self):
+    def test_operational_ids_remain_searchable_with_handcrafted_records(self):
         with patch('services.faq_kb.load_base_kb', return_value=[]), \
              patch('services.faq_kb.load_handcrafted_faqs') as sources, \
              patch('services.faq_kb.load_approved_faqs', return_value=[]) as approved:
@@ -61,7 +61,7 @@ class FaqKbTest(unittest.TestCase):
             approved.assert_called_with(None, include_source_copies=True)
             sources.return_value = ([{'question': 'original', 'text': 'answer'}], {})
             load_current_kb(Path('missing'))
-            approved.assert_called_with(None, include_source_copies=False)
+            approved.assert_called_with(None, include_source_copies=True)
 
     def test_explicit_env_file_uses_shared_db_settings(self):
         with patch.dict("os.environ", {"TTOBAGI_DB_ENV_FILE": "ttobagi-server/.env"}), \
