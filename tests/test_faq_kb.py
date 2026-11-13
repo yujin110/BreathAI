@@ -46,9 +46,9 @@ class FaqKbTest(unittest.TestCase):
         load_approved_faqs(lambda: captured, include_source_copies=True)
         with sqlite3.connect(':memory:') as db:
             db.executescript('''
-                CREATE TABLE gold_faq (faq_id,source_seq_num,q_type,category,question,answer,keywords,is_active);
-                INSERT INTO gold_faq VALUES (1,100,1,NULL,'seeded','answer','[]',1),
-                                           (2,101,1,NULL,'inactive','answer','[]',0);
+                CREATE TABLE gold_faq (faq_id,source_seq_num,q_type,category,question,answer,keywords,synonyms,is_active);
+                INSERT INTO gold_faq VALUES (1,100,1,NULL,'seeded','answer','[]','[]',1),
+                                           (2,101,1,NULL,'inactive','answer','[]','[]',0);
             ''')
             self.assertEqual([1], [r[0] for r in db.execute(captured.fake_cursor.sql)])
 
@@ -76,6 +76,7 @@ class FaqKbTest(unittest.TestCase):
                 "question": "분실물은 어디서 찾나요?",
                 "answer": "유실물센터에서 확인해 주세요.",
                 "keywords": json.dumps(["분실물", "유실물"], ensure_ascii=False),
+                "synonyms": '["열차에 두고 내렸어요"]',
             }
         ])
 
@@ -84,6 +85,7 @@ class FaqKbTest(unittest.TestCase):
         self.assertEqual(1, len(records))
         self.assertEqual("gold_faq:7", records[0]["chunk_id"])
         self.assertIn("분실물, 유실물", records[0]["text"])
+        self.assertEqual(["열차에 두고 내렸어요"], records[0]["synonyms"])
         self.assertTrue(conn.closed)
         self.assertIn("WHERE f.is_active = 1", conn.fake_cursor.sql)
 
@@ -94,16 +96,16 @@ class FaqKbTest(unittest.TestCase):
             conn.executescript("""
                 CREATE TABLE gold_faq (
                     faq_id INTEGER, source_seq_num INTEGER, q_type INTEGER,
-                    category TEXT, question TEXT, answer TEXT, keywords TEXT,
+                    category TEXT, question TEXT, answer TEXT, keywords TEXT, synonyms TEXT,
                     is_active INTEGER
                 );
                 CREATE TABLE gold_faq_edit_history (faq_id INTEGER);
                 INSERT INTO gold_faq VALUES
-                    (1, NULL, 1, 'category', 'new', 'answer', '[]', 1),
-                    (2, 100, 1, 'category', 'copied', 'answer', '[]', 1),
-                    (3, 101, 1, 'category', 'edited', 'answer', '[]', 1),
-                    (4, NULL, 1, 'category', 'inactive new', 'answer', '[]', 0),
-                    (5, 102, 1, 'category', 'inactive edit', 'answer', '[]', 0);
+                    (1, NULL, 1, 'category', 'new', 'answer', '[]', '[]', 1),
+                    (2, 100, 1, 'category', 'copied', 'answer', '[]', '[]', 1),
+                    (3, 101, 1, 'category', 'edited', 'answer', '[]', '[]', 1),
+                    (4, NULL, 1, 'category', 'inactive new', 'answer', '[]', '[]', 0),
+                    (5, 102, 1, 'category', 'inactive edit', 'answer', '[]', '[]', 0);
                 INSERT INTO gold_faq_edit_history VALUES (3), (3), (5);
             """)
             rows = conn.execute(captured.fake_cursor.sql).fetchall()

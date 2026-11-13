@@ -268,7 +268,7 @@ def report(cluster_labels: np.ndarray, keywords: dict[int, list[str]],
         print()
 
 
-def main() -> None:
+def main(route=None) -> None:
     policy = get_policy()  # Fail before importing/loading inference models.
     df = load()
     if len(df) == 0:
@@ -279,11 +279,17 @@ def main() -> None:
     groups, inverse = group_questions(df['normalizedForClustering'].astype(str).tolist(),
                                      df['logId'].tolist())
     texts = [group['normalizedText'] for group in groups]
+    unmatched = np.arange(len(groups))
+    if route is not None:
+        decisions, active, verify, faq_version = route(texts)
+        for group, decision in zip(groups, decisions, strict=True):
+            group['routing'] = decision
+        unmatched = np.asarray([i for i, d in enumerate(decisions) if d['status'] == 'UNMATCHED'], dtype=int)
     print(f'[1/4] KoSimCSE 임베딩 ({MODEL_NAME})')
     progress('EMBEDDING', 0, len(groups), 'LOG')
     t0 = time.time()
-    small = len(groups) < max(3, HDBSCAN_MIN_CLUSTER_SIZE, HDBSCAN_MIN_SAMPLES + 1)
-    if small:
+    small = len(unmatched) < max(3, HDBSCAN_MIN_CLUSTER_SIZE, HDBSCAN_MIN_SAMPLES + 1)
+    if small and (route is None or len(unmatched) < 2):
         # Never run UMAP on a singleton, nor invent a semantic noise cluster.
         embeddings = np.zeros((len(groups), 1))
     else:
@@ -291,7 +297,9 @@ def main() -> None:
         with measure('EMBEDDING_MODEL_LOAD'):
             tokenizer, model = load_model()
         with measure('EMBEDDING'):
-            embeddings = encode(texts, tokenizer, model)
+            remaining = encode([texts[i] for i in unmatched], tokenizer, model)
+            embeddings = np.zeros((len(groups), remaining.shape[1]), dtype=remaining.dtype)
+            embeddings[unmatched] = remaining
         del tokenizer, model
         import gc
         gc.collect()
@@ -305,21 +313,64 @@ def main() -> None:
         if small:
             emb_clu, emb_viz = embeddings, np.zeros((len(groups), 2))
         else:
-            emb_clu, emb_viz = reduce_dims(embeddings)
+            emb_clu, remaining_viz = reduce_dims(embeddings[unmatched])
+            emb_viz = np.zeros((len(groups), 2))
+            emb_viz[unmatched] = remaining_viz
     print(f'  clustering={emb_clu.shape}, viz={emb_viz.shape}, {time.time()-t0:.1f}s')
 
     print(f'[3/4] HDBSCAN (min_cluster_size={HDBSCAN_MIN_CLUSTER_SIZE})')
     progress('CLUSTERING', 0, 1, 'STEP')
     t0 = time.time()
     with measure('HDBSCAN'):
-        cluster_labels = np.full(len(groups), -1, dtype=int) if small else cluster(emb_clu)
+        cluster_labels = np.full(len(groups), -1, dtype=int)
+        if not small:
+            cluster_labels[unmatched] = cluster(emb_clu)
     progress('CLUSTERING', 1, 1, 'STEP')
     print(f'  {time.time()-t0:.1f}s')
 
     initial_labels = cluster_labels.copy()
     ids = sorted(set(cluster_labels.tolist()) - {-1})
     merge_history = []
-    if len(ids) > 1:
+    if route is not None:
+        from collections import defaultdict
+        from services.analysis_selection import write_json
+        from services.faq_routing import expansion_candidate, recover_noise, split_by_intent
+        next_label = max(ids, default=-1) + 1
+        for cid in ids:
+            indices = np.flatnonzero(initial_labels == cid).tolist()
+            partitions, deferred = split_by_intent(indices, texts, verify)
+            cluster_labels[indices] = -1
+            for i in deferred:
+                groups[i]['routing'].update(status='REVIEW', reason='CLUSTER_INTENT_UNCERTAIN')
+            for partition in partitions:
+                cluster_labels[partition] = next_label
+                next_label += 1
+        noise = unmatched[initial_labels[unmatched] == -1]
+        recovered = []
+        with measure('NOISE_INTENT_RECOVERY'):
+            for partition in recover_noise(noise, texts, embeddings, verify):
+                cluster_labels[partition] = next_label
+                recovered.append(next_label)
+                next_label += 1
+        for i in noise:
+            if cluster_labels[i] == -1:
+                groups[i]['routing'].update(status='REVIEW', reason='NOISE_INTENT_UNCONFIRMED')
+        write_json(DATA_DIR / 'recovered_noise_labels.json', recovered)
+        faq_groups = defaultdict(list)
+        for i, group in enumerate(groups):
+            if group['routing']['status'] == 'MATCHED':
+                faq_groups[group['routing']['faqId']].append(i)
+        expansions = []
+        for faq_id, indices in sorted(faq_groups.items()):
+            cluster_labels[indices] = next_label
+            expansions.append(expansion_candidate(next_label, active[faq_id], [groups[i] for i in indices]))
+            next_label += 1
+        write_json(DATA_DIR / 'faq_expansions.json', expansions)
+        write_json(DATA_DIR / 'faq_routing.json', {'faqVersion': faq_version, 'questions': [
+            {'logId': int(log_id), 'clusterId': int(cluster_labels[i]), **group['routing']}
+            for i, group in enumerate(groups) for log_id in group['logIds']
+        ]})
+    elif len(ids) > 1:
         members = [[texts[i] for i in np.flatnonzero(initial_labels == cid)] for cid in ids]
         centers = np.asarray([unit(embeddings[initial_labels == cid]).mean(axis=0) for cid in ids])
         verifier = IntentVerifier()
