@@ -102,11 +102,14 @@ def _faq_to_kb_record(row: dict) -> dict:
     question = _clean_text(row.get("question"))
     answer = _clean_text(row.get("answer"))
     keywords = _parse_keywords(row.get("keywords"))
+    synonyms = _parse_keywords(row.get("synonyms"))
     keyword_text = ", ".join(keywords)
 
     parts = [f"질문: {question}", f"답변: {answer}"]
     if keyword_text:
         parts.append(f"키워드: {keyword_text}")
+    if synonyms:
+        parts.append(f"유사 표현: {', '.join(synonyms)}")
 
     return {
         "source_type": "approved_faq",
@@ -121,6 +124,7 @@ def _faq_to_kb_record(row: dict) -> dict:
         "question": question,
         "answer": answer,
         "keywords": keywords,
+        "synonyms": synonyms,
         "text": "\n".join(parts),
     }
 
@@ -151,7 +155,7 @@ def load_approved_faqs(
             cursor.execute(
                 f"""
                 SELECT f.faq_id, f.source_seq_num, f.q_type, f.category,
-                       f.question, f.answer, f.keywords
+                       f.question, f.answer, f.keywords, f.synonyms
                 FROM gold_faq f
                 WHERE f.is_active = 1
                   {source_filter}

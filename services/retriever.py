@@ -241,6 +241,35 @@ def rerank(
     return candidates[:top_k]
 
 
+def rank_questions(questions, kb):
+    if not questions:
+        return []
+    from services.faq_matching import FAQ_SOURCES
+    sources = [row for row in kb if row.get('source_type') in FAQ_SOURCES]
+    if not sources:
+        return [[] for _ in questions]
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    vectors = build_or_load_index(sources)
+    enc = SentenceTransformer(DENSE_MODEL, device=DEVICE)
+    enc.max_seq_length = MAX_SEQ_LENGTH
+    queries = enc.encode(questions, batch_size=BATCH_SIZE, normalize_embeddings=True, convert_to_numpy=True)
+    del enc
+    model = CrossEncoder(RERANK_MODEL, max_length=512, device=DEVICE, activation_fn=torch.nn.Sigmoid())
+    active = np.asarray([i for i, row in enumerate(sources) if valid_faq_id(row.get('faq_id'))], dtype=int)
+    ranked = []
+    for query, vector in zip(questions, queries, strict=True):
+        scores = vectors @ vector
+        indices = list(np.argsort(-scores)[:TOP_K2])
+        indices.extend(active[np.argsort(-scores[active])[:TOP_K2]])
+        candidates = [{**sources[i], 'dense_score': float(scores[i])} for i in dict.fromkeys(indices)]
+        ranked.append(rerank(query, candidates, model, len(candidates)))
+    del model
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return ranked
+
+
 def load_faq_candidates() -> list[dict]:
     """
     faq_generator.py가 생성한 FAQ 후보 JSON을 로드한다.
@@ -273,7 +302,7 @@ def load_similar_questions() -> dict[int, list[str]]:
     return grouped
 
 
-def run_for_faqs() -> None:
+def run_for_faqs(kb=None) -> None:
     """
     FAQ 후보를 기존 FAQ와 비교하고 검색·분류 필드를 보강한다.
 
@@ -292,7 +321,9 @@ def run_for_faqs() -> None:
     if not faqs:
         OUTPUT_JSON.write_text(json.dumps({'faqRetrieval': []}), encoding='utf-8')
         return
-    kb = load_kb()
+    routed = kb is not None
+    if kb is None:
+        kb = load_kb()
     print(f'KB chunks: {len(kb)}')
 
     kb_emb = build_or_load_index(kb)
@@ -341,6 +372,8 @@ def run_for_faqs() -> None:
         torch.cuda.empty_cache()
     from services.question_identity import IntentVerifier
     verifier = IntentVerifier()
+    recovered_path = DATA_DIR / 'recovered_noise_labels.json'
+    recovered = set(json.loads(recovered_path.read_text(encoding='utf-8'))) if routed and recovered_path.exists() else set()
 
     for i, (c, all_ranked) in enumerate(zip(faqs, ranked), 1):
         q = c['standardQuestion']
@@ -375,7 +408,12 @@ def run_for_faqs() -> None:
             ],
         }
 
-        decision = decide_match(q, all_ranked, verifier, FAQ_MATCH_THRESHOLD)
+        decision = (dict(candidateType='NEW', qType=None, category=None, matchedFaqs=[],
+                         matchStatus='NEW', matchDecisionReason='원천 질문별 운영 FAQ 검증을 완료했습니다.',
+                         matchEvidence=[]) if routed else decide_match(q, all_ranked, verifier, FAQ_MATCH_THRESHOLD))
+        if c['clusterLabel'] in recovered:
+            decision.update(matchStatus='REVIEW_REQUIRED',
+                            matchDecisionReason='초기 군집에서 제외된 소수 질문의 공통 의도를 확인했습니다.')
         record.update(decision)
         record['similarQuestions'] = c.get('similarQuestions') or similar_by_cluster.get(c['clusterLabel'], [])
         # 후속 답변 생성·백엔드 payload 단계가 같은 파일을 읽을 수 있도록

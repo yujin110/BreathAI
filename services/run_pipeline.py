@@ -183,7 +183,7 @@ def stage_oos_case(cluster: dict, retrieval: dict, templates: dict,
 # ---------------------------------------------------------------------------
 # 메인 — 답변 파이프라인 (steps 5-8 통합)
 # ---------------------------------------------------------------------------
-def run_answer_pipeline() -> None:
+def run_answer_pipeline(expansions=()) -> None:
     import services.answer_regenerator as AR
     import services.answer_evaluator as AE
     _ensure_logs()
@@ -193,6 +193,10 @@ def run_answer_pipeline() -> None:
     progress('ANSWER_PIPELINE', 0, len(candidates), 'CLUSTER')
     retrieval = AR.load_retrieval()
     candidates = bind_retrieval(candidates, retrieval)
+    if not candidates:
+        from services.analysis_selection import write_json
+        write_json(OUTPUT_JSON, {'faqCandidates': list(expansions)})
+        return
     templates = AR.load_templates()
     AR.templates_meta = templates['_meta']
     clu_df = pd.read_csv(CLUSTERS_CSV, encoding='utf-8-sig')
@@ -311,7 +315,7 @@ def run_answer_pipeline() -> None:
     _log(f'  oos_corp 채택   = {n_oos_corp_adopted}건')
 
     OUTPUT_JSON.write_text(
-        json.dumps({'faqCandidates': results}, ensure_ascii=False, indent=2),
+        json.dumps({'faqCandidates': [*expansions, *results]}, ensure_ascii=False, indent=2),
         encoding='utf-8',
     )
     _log(f'저장: {OUTPUT_JSON.name} ({OUTPUT_JSON.stat().st_size:,}B)')
@@ -331,7 +335,7 @@ def run_full_pipeline() -> None:
 def _run_full_pipeline() -> None:
     import os
     from services.analysis_selection import (prepare_selection, finalize_selection, write_json,
-                                             write_csv, PREPARED_COLUMNS, empty_clusters, FAQ_MIN_CLUSTER_SIZE)
+                                             read_csv, write_csv, PREPARED_COLUMNS, empty_clusters, FAQ_MIN_CLUSTER_SIZE)
     policy = get_policy()
     _ensure_logs()
     performance = Performance(DATA_DIR.parent / 'performance.json')
@@ -358,9 +362,48 @@ def _run_full_pipeline() -> None:
         return
     import services.preprocess as PRE
     import services.clustering as CLU
+    kb = None
+
+    def cluster_with_faq():
+        nonlocal kb
+        from services.faq_routing import route_questions
+        from services.question_identity import IntentVerifier
+        import services.retriever as RET
+        with performance.stage('KB_PREFLIGHT'):
+            snapshot = DATA_DIR / 'faq_kb_snapshot.json'
+            kb = json.loads(snapshot.read_text(encoding='utf-8')) if snapshot.exists() else RET.load_kb()
+            if not snapshot.exists():
+                write_json(snapshot, kb)
+        verifier = IntentVerifier()
+        threshold_path = DATA_DIR / 'faq_routing_config.json'
+        if threshold_path.exists():
+            settings = json.loads(threshold_path.read_text(encoding='utf-8'))
+        else:
+            settings = dict(threshold=RET.FAQ_MATCH_THRESHOLD, margin=.02)
+            write_json(threshold_path, settings)
+        version = RET.kb_fingerprint(kb)
+
+        def rank(questions, records):
+            if questions:
+                verifier.tokenizer = verifier.model = None
+            return RET.rank_questions(questions, records)
+
+        def route(texts):
+            decisions, active = route_questions(texts, kb, rank, verifier, **settings)
+            return decisions, active, verifier, version
+
+        CLU.main(route=route)
+
+    def cluster_questions():
+        prepared = DATA_DIR / 'preprocessed_full.csv'
+        if prepared.exists() and any(len(row['normalizedForClustering']) >= 2 for row in read_csv(prepared)):
+            cluster_with_faq()
+        else:
+            CLU.main()
+
     for name, operation, status in (
         ('PREPROCESSING', PRE.main, None),
-        ('CLUSTERING', CLU.main, 'ANALYZING'),
+        ('CLUSTERING', cluster_questions, 'ANALYZING'),
     ):
         _log(f'=== STAGE {name} ===')
         if status:
@@ -393,10 +436,15 @@ def _run_full_pipeline() -> None:
         import services.faq_generator as FAQ
         import services.retriever as RET
         # Discover bad KB configuration before expensive generation.
-        with performance.stage('KB_PREFLIGHT'):
-            RET.load_kb()
-        for name, operation in [('FAQ_GENERATION', FAQ.main), ('RETRIEVING', RET.main),
-                                ('ANSWER_PIPELINE', run_answer_pipeline)]:
+        expansions_path = DATA_DIR / 'faq_expansions.json'
+        expansions = json.loads(expansions_path.read_text(encoding='utf-8')) if expansions_path.exists() else []
+        if kb is None:
+            with performance.stage('KB_PREFLIGHT'):
+                RET.load_kb()
+        for name, operation in [('FAQ_GENERATION', lambda: FAQ.main(exclude_labels={
+                                     c['clusterLabel'] for c in expansions})),
+                                ('RETRIEVING', lambda: RET.run_for_faqs(kb)),
+                                ('ANSWER_PIPELINE', lambda: run_answer_pipeline(expansions))]:
             with performance.stage(name):
                 operation()
             import gc

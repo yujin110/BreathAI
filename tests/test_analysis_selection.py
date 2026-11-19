@@ -263,8 +263,75 @@ class ModeApiTest(unittest.TestCase):
 
 
 class SmallPipelineTest(unittest.TestCase):
+    def test_two_noise_questions_are_eligible_for_faq_generation(self):
+        import numpy as np
+        import sys
+        from types import SimpleNamespace
+        from services import clustering, faq_generator
+        from services.analysis_selection import prepare_selection, finalize_selection
+        with tempfile.TemporaryDirectory() as directory:
+            data = Path(directory)
+            texts = ['지하철 라이트 꺼짐', '지하철 전등이 안 켜져요']
+            write_csv(data / 'tota24_unanswered_2026Q1.csv', ['번호', '질문', '날짜', 'logType'],
+                      [{'번호': i, '질문': text, '날짜': '2026-11-05', 'logType': 'UNANSWER'}
+                       for i, text in enumerate(texts, 1)])
+            prepare_selection(data, 'IMPROVEMENT')
+            write_csv(data / 'preprocessed_full.csv', ['logId', 'normalizedForClustering', 'logType'],
+                      [{'logId': i, 'normalizedForClustering': text, 'logType': 'UNANSWER'}
+                       for i, text in enumerate(texts, 1)])
+            with patch.dict(sys.modules, {'torch': SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False))}), \
+                 patch.multiple(clustering, DATA_DIR=data, INPUT_CSV=data / 'preprocessed_full.csv'), \
+                 patch.object(clustering, 'load_model', return_value=(None, None)), \
+                 patch.object(clustering, 'encode', return_value=np.ones((2, 2))), \
+                 patch.object(clustering, 'plot_2d', side_effect=lambda *args: args[-1].write_bytes(b'plot')):
+                clustering.main(route=lambda _: ([{'status': 'UNMATCHED'} for _ in texts], {},
+                                                 lambda *_: {'decision': 'same'}, 'fixture'))
+            scope = finalize_selection(data, min_cluster_size=5, min_samples=2, faq_min_size=5)
+            self.assertEqual('RESULTS_GENERATED', scope['completionReason'])
+            self.assertEqual(0, scope['analysisScope']['noiseLogCount'])
+            with patch.multiple(faq_generator, DATA_DIR=data, CLUSTERS_CSV=data / 'clusters.csv',
+                                SUMMARY_CSV=data / 'cluster_summary.csv', KEYWORDS_JSON=data / 'cluster_keywords.json'):
+                cluster, = faq_generator.load_clusters()
+            self.assertEqual([1, 2], cluster['logIds'])
+
+    def test_single_confirmed_faq_keeps_cluster_and_callback_provenance(self):
+        from services import clustering
+        from services.analysis_selection import prepare_selection, finalize_selection, write_json
+        with tempfile.TemporaryDirectory() as directory:
+            job = Path(directory)
+            data = job / 'dataset'
+            data.mkdir()
+            (job / 'keyword_policy.json').write_bytes(get_policy().source_bytes)
+            write_csv(data / 'tota24_unanswered_2026Q1.csv', ['번호', '질문', '날짜', 'logType'],
+                      [{'번호': 1, '질문': '지하철 악취', '날짜': '2026-11-05', 'logType': 'UNANSWER'}])
+            prepare_selection(data, 'IMPROVEMENT')
+            write_csv(data / 'preprocessed_full.csv', ['logId', 'normalizedForClustering', 'logType'],
+                      [{'logId': 1, 'normalizedForClustering': '지하철 악취', 'logType': 'UNANSWER'}])
+            faq = dict(faq_id=42, source_seq_num=6099, question='객실에서 불쾌한 냄새가 날 때', answer='신고 안내')
+            decisions = [dict(status='MATCHED', faqId=42, path='SEMANTIC', reason='SAME_APPLICABLE_ANSWER')]
+            with patch.multiple(clustering, DATA_DIR=data, INPUT_CSV=data / 'preprocessed_full.csv'), \
+                 patch.object(clustering, 'load_model', side_effect=AssertionError('model loaded')), \
+                 patch.object(clustering, 'plot_2d', side_effect=lambda *args: args[-1].write_bytes(b'plot')):
+                clustering.main(route=lambda texts: (decisions, {42: faq}, None, 'fixture'))
+            finalize_selection(data, min_cluster_size=5, min_samples=2, faq_min_size=5)
+            expansions = json.loads((data / 'faq_expansions.json').read_text(encoding='utf-8'))
+            write_json(data / 'faq_candidates_final.json', {'faqCandidates': expansions})
+            result = build_callback(job)
+            candidate, = result['faqCandidates']
+            self.assertEqual('RESULTS_GENERATED', result['completionReason'])
+            self.assertEqual(1, candidate['occurrenceCount'])
+            self.assertEqual(42, candidate['matchedFaqs'][0]['matchedFaqId'])
+            self.assertEqual([1], candidate['analysisProvenance']['logIds'])
+            self.assertEqual([{'text': '지하철 악취', 'type': 'SYNONYM'}], candidate['synonyms'])
+
     def test_real_preprocessing_and_small_branch_skip_models(self):
+        import sys
+        from types import SimpleNamespace
+        import services
         from services import run_pipeline as pipeline, preprocess, clustering
+        retriever = SimpleNamespace(load_kb=lambda: [], FAQ_MATCH_THRESHOLD=.8,
+                                    kb_fingerprint=lambda kb: 'fixture',
+                                    rank_questions=lambda questions, kb: [[] for _ in questions])
         for text, reason in [('', 'NO_ELIGIBLE_TEXT'), ('환승 문의', 'NO_FAQ_CLUSTERS')]:
             with self.subTest(reason=reason), tempfile.TemporaryDirectory() as directory:
                 job = Path(directory)
@@ -273,7 +340,9 @@ class SmallPipelineTest(unittest.TestCase):
                 (job / 'keyword_policy.json').write_bytes(get_policy().source_bytes)
                 write_csv(data / 'tota24_unanswered_2026Q1.csv', ['번호', '질문', '날짜', 'logType'],
                           [{'번호': i, '질문': text, '날짜': '2026-11-05', 'logType': 'LOW_QUALITY'} for i in (1, 2)])
-                with patch.multiple(pipeline, DATA_DIR=data, OUTPUT_JSON=data / 'faq_candidates_final.json',
+                with patch.dict(sys.modules, {'services.retriever': retriever}), \
+                     patch.object(services, 'retriever', retriever, create=True), \
+                     patch.multiple(pipeline, DATA_DIR=data, OUTPUT_JSON=data / 'faq_candidates_final.json',
                                     LOG_DIR=job / 'logs', RUN_LOG=job / 'logs/run_pipeline.log'), \
                      patch.multiple(preprocess, DATA_DIR=data, OUTPUT_CSV=data / 'preprocessed_full.csv'), \
                      patch.multiple(clustering, DATA_DIR=data, INPUT_CSV=data / 'preprocessed_full.csv'), \

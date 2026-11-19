@@ -139,7 +139,17 @@ def finalize_selection(data, *, min_cluster_size, min_samples, faq_min_size):
     summary_counts = {int(row['clusterId']): int(row['size']) for row in summaries}
     if len(summary_counts) != len(summaries) or dict(labels) != summary_counts:
         raise ValueError('Cluster summary mismatch')
-    faq_count = sum(label != -1 and size >= faq_min_size for label, size in labels.items())
+    expansion_path = data / 'faq_expansions.json'
+    expansion_labels = ({item['clusterLabel'] for item in json.loads(expansion_path.read_text(encoding='utf-8'))}
+                        if expansion_path.exists() else set())
+    recovered_path = data / 'recovered_noise_labels.json'
+    recovered_labels = set(json.loads(recovered_path.read_text(encoding='utf-8'))) if recovered_path.exists() else set()
+    routing_path = data / 'faq_routing.json'
+    routing = ({item['logId']: item for item in json.loads(routing_path.read_text(encoding='utf-8'))['questions']}
+               if routing_path.exists() else {})
+    faq_labels = {label for label, size in labels.items()
+                  if label != -1 and (size >= faq_min_size or label in expansion_labels or label in recovered_labels)}
+    faq_count = len(faq_labels)
     sources = Counter(classification_source(row) for row in rows)
     scope = dict(totalLogCount=len(rows), targetLogCount=len(targets),
                  excludedByModeCount=len(rows)-len(targets), excludedByTextCount=len(targets)-len(eligible),
@@ -156,10 +166,12 @@ def finalize_selection(data, *, min_cluster_size, min_samples, faq_min_size):
     label_by_id = {int(row['logId']): int(row['clusterId']) for row in clustered}
     unclustered = [dict(sourceLogSeqNum=key, logType=row['logType'],
                         reason='EMPTY_OR_TOO_SHORT' if key not in eligible else
-                        'INSUFFICIENT_TARGET_LOGS' if deferred else 'NOISE' if label_by_id.get(key) == -1 else 'BELOW_FAQ_MIN_SIZE',
+                        'INSUFFICIENT_TARGET_LOGS' if deferred else
+                        routing[key]['reason'] if routing.get(key, {}).get('status') == 'REVIEW' else
+                        'NOISE' if label_by_id.get(key) == -1 else 'BELOW_FAQ_MIN_SIZE',
                         normalizedText=row['normalizedForClustering'])
                    for key, row in prepared.items() if key not in eligible or deferred or
-                   label_by_id.get(key) == -1 or labels[label_by_id[key]] < faq_min_size]
+                   label_by_id.get(key) not in faq_labels]
     write_json(data / 'unclustered.json', unclustered)
     for key, item in manifest_by_id.items():
         item['exclusionReason'] = ('EXCLUDED_BY_MODE' if key not in targets else

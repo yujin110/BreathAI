@@ -24,7 +24,8 @@ export default function AdminPromotePage() {
     setLoading(true);
     setError("");
     try {
-      const res = await authApi.promote(user?.email, adminCode);
+      // 가입 화면과 같은 이유로 공백을 뗀다 (서버가 equals로 비교한다)
+      const res = await authApi.promote(user?.email, adminCode.trim());
       const data = res.data || {};
 
       // 백엔드가 응답에 새 토큰을 담아 주면 그대로 쓰고(fix/auth/promote/BE),

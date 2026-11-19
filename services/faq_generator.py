@@ -189,22 +189,24 @@ def validate(obj: dict) -> dict:
 
 
 # 4. 데이터 로드
-def load_clusters() -> list[dict]:
+def load_clusters(exclude_labels=()) -> list[dict]:
     cdf = pd.read_csv(CLUSTERS_CSV, encoding='utf-8-sig')
     sdf = pd.read_csv(SUMMARY_CSV, encoding='utf-8-sig')
     with open(KEYWORDS_JSON, encoding='utf-8') as f:
         keywords = json.load(f)
 
     out = []
+    recovered_path = DATA_DIR / 'recovered_noise_labels.json'
+    recovered = set(json.loads(recovered_path.read_text(encoding='utf-8'))) if recovered_path.exists() else set()
     embedding_path = DATA_DIR / 'embeddings.npy'
     embeddings = np.load(embedding_path) if embedding_path.exists() else None
     if embeddings is not None and len(embeddings) != len(cdf):
         raise ValueError('Cluster/embedding row mismatch; rerun clustering')
     for _, row in sdf.iterrows():
         cid = int(row['clusterId'])
-        if row['isNoise']:
+        if row['isNoise'] or cid in exclude_labels:
             continue
-        if row['size'] < MIN_CLUSTER_SIZE:
+        if row['size'] < MIN_CLUSTER_SIZE and cid not in recovered:
             continue
         subset = cdf[cdf['clusterId'] == cid]
         unique = subset.drop_duplicates('text')
@@ -295,11 +297,11 @@ def save(results: list[dict], verifier=None) -> None:
 
 
 # 6. 메인
-def main() -> None:
+def main(exclude_labels=()) -> None:
     from services.analysis_progress import report, measure, count
     if OUTPUT_JSONL.exists():
         OUTPUT_JSONL.unlink()
-    clusters = load_clusters()
+    clusters = load_clusters(exclude_labels)
     report('FAQ_GENERATION', 0, len(clusters), 'CLUSTER')
     if not clusters:
         save([])
@@ -311,10 +313,25 @@ def main() -> None:
     print(f'GPU: {DEVICE} / dtype: {model.dtype}\n')
 
     results = []
+    routed = (DATA_DIR / 'faq_routing.json').exists()
+    verifier = IntentVerifier(tokenizer, model)
     for i, c in enumerate(clusters, 1):
         prompt = build_prompt(c['clusterId'], c['size'], c['keywords'], c['samples'])
         t0 = time.time()
         validated, _trials = generate_candidate(prompt, tokenizer, model)
+        if routed and validated['tag'] == 'FAQ':
+            from services.faq_routing import AMBIGUOUS_EXPRESSIONS, key
+            reference = validated['standardQuestion']
+            seen = {key(reference), '', *AMBIGUOUS_EXPRESSIONS}
+            verified = []
+            for synonym in validated['synonyms']:
+                text = synonym['text']
+                normalized = key(text)
+                if normalized not in seen and len(text) <= 100:
+                    seen.add(normalized)
+                    if verifier(reference, text)['decision'] == 'same':
+                        verified.append(synonym)
+            validated['synonyms'] = verified
         count('faqGenerationAttempts', len(_trials))
         validated['clusterId'] = c['clusterId']
         validated['size'] = c['size']
@@ -338,7 +355,7 @@ def main() -> None:
     for k, v in sorted(by_tag.items()):
         print(f'  {k}: {v}건')
     print()
-    save(results, IntentVerifier(tokenizer, model))
+    save(results, None if routed else verifier)
 
 
 if __name__ == '__main__':

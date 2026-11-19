@@ -1,5 +1,4 @@
 """No GPU, network or production DB is used by these boundary tests."""
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -82,32 +81,27 @@ class RuntimeJobsTest(unittest.TestCase):
 
 
 class PreprocessOptionsTest(unittest.TestCase):
-    @staticmethod
-    def load_preprocessor():
-        # Only translation is mocked; the real normalization and masking run.
-        translator = types.ModuleType("deep_translator")
-        translator.GoogleTranslator = object
-        exceptions = types.ModuleType("deep_translator.exceptions")
-        exceptions.TranslationNotFound = type("TranslationNotFound", (Exception,), {})
-        exceptions.NotValidPayload = type("NotValidPayload", (Exception,), {})
-        path = Path(__file__).resolve().parents[1] / "services/preprocess.py"
-        spec = importlib.util.spec_from_file_location("tested_preprocess", path)
-        module = importlib.util.module_from_spec(spec)
-        with patch.dict("sys.modules", {"deep_translator": translator, "deep_translator.exceptions": exceptions}):
-            spec.loader.exec_module(module)
-        return module
-
     def test_options_control_real_preprocessing_and_keep_legacy_defaults(self):
-        module = self.load_preprocessor()
+        from services import preprocess as module
+
         data = module.pd.DataFrame([{"번호": 1, "질문": "hello a@example.com", "날짜": "2026-10-17"}])
-        with patch.object(module, "translate_to_ko", return_value="문의 a@example.com") as translate:
+        with patch.object(module, "translate_with_azure", return_value="문의 [EMAIL]") as translate:
             output = module.run(data, masking_enabled=False, translation_enabled=False)
             translate.assert_not_called()
             self.assertIn("a@example.com", output.iloc[0]["normalizedForGeneration"])
             output = module.run(data)
-            translate.assert_called_once()
+            translate.assert_called_once_with("hello [EMAIL]")
             self.assertIn("[EMAIL]", output.iloc[0]["normalizedForGeneration"])
             self.assertNotIn("a@example.com", output.iloc[0]["normalizedForGeneration"])
+
+    def test_translation_failure_stops_preprocessing(self):
+        from services import preprocess
+        from services.translation import TranslationError
+
+        data = preprocess.pd.DataFrame([{"번호": 1, "질문": "Where is the station?", "날짜": "2026-10-17"}])
+        with patch.object(preprocess, "translate_with_azure", side_effect=TranslationError("HTTP 429")):
+            with self.assertRaisesRegex(TranslationError, "HTTP 429"):
+                preprocess.run(data)
 
 
 if __name__ == "__main__":
