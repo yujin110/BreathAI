@@ -79,8 +79,10 @@ export default function SignupPage() {
     setLoading(true);
     setError("");
     try {
-      // 코드는 대소문자를 구분하므로 공백만 제거하고 그대로 보낸다
-      await authApi.signup(email.trim(), pw, code.trim(), adminCode || undefined);
+      // 코드는 대소문자를 구분하므로 공백만 제거하고 그대로 보낸다.
+      // 관리자 코드도 마찬가지다 — 서버가 equals로 비교하기 때문에(AuthService.signUp)
+      // 복사해 붙여 넣으며 공백이 하나만 딸려와도 조용히 일반 계정으로 가입된다.
+      await authApi.signup(email.trim(), pw, code.trim(), adminCode.trim() || undefined);
       toast.success("가입 완료! 로그인 해주세요.");
       navigate("/login", { replace: true });
     } catch (err) {
