@@ -264,6 +264,84 @@ class FaqImportIntegrationTest {
         assertThat(snapshot()).isEqualTo(before);
     }
 
+    // ===== 공사 양식·같은 질문의 운영 FAQ =====
+
+    @Test
+    @DisplayName("공사 양식(붙임2)의 '관련키워드'·'관련 유사어' 열도 키워드·유사어로 읽고, 다시 올리면 빈 키워드를 채운다")
+    void acceptsTemplateColumnNames() throws Exception {
+        String t = tail();
+        long existing = createFaq("붙임2 기존 " + t, "답", List.of(), List.of(), 176);
+
+        String csv = "카테고리,질문,답변,관련키워드,관련 유사어\n"
+                + "영업/제도,붙임2 신규 " + t + ",답,\"k1, k2\",s1\n"
+                + "영업/제도,붙임2 기존 " + t + ",답,k3,\"s2, s3\"\n";
+        String response = body(upload(admin, csvFile(csv)).andExpect(status().isOk()));
+        assertThat((Integer) read(response, "$.data.addedCount")).isEqualTo(1);
+        assertThat(changedFields(response, existing)).containsExactly("keywords", "synonyms");
+
+        Map<String, Object> added = faqByQuestion("붙임2 신규 " + t);
+        assertThat(json(added.get("keywords"))).containsExactly("k1", "k2");
+        assertThat(json(added.get("synonyms"))).containsExactly("s1");
+        assertThat(json(faqRow(existing).get("keywords"))).containsExactly("k3");
+        assertThat(json(faqRow(existing).get("synonyms"))).containsExactly("s2", "s3");
+    }
+
+    @Test
+    @DisplayName("같은 질문의 운영 FAQ가 여러 개면 파일 안 같은 질문 행을 ID로 구분해 각각 반영한다")
+    void distinguishesSameQuestionRowsById() throws Exception {
+        String t = tail();
+        String question = "ID 구분 " + t;
+        long a = insertFaq(question, "답A", 172);
+        long b = insertFaq(question, "답B", 176);
+
+        String csv = "ID,질문,답변\n"
+                + a + "," + question + ",고친 답A\n"
+                + b + "," + question + ",답B\n";
+        String response = body(upload(admin, csvFile(csv)).andExpect(status().isOk()));
+        assertThat((Integer) read(response, "$.data.updatedCount")).isEqualTo(1);
+        assertThat((Integer) read(response, "$.data.unchangedCount")).isEqualTo(1);
+        assertThat(changedFields(response, a)).containsExactly("answer");
+        assertThat(faqRow(a).get("answer")).isEqualTo("고친 답A");
+        assertThat(faqRow(b).get("answer")).isEqualTo("답B");
+    }
+
+    @Test
+    @DisplayName("같은 질문의 운영 FAQ가 있어도 내려받은 파일을 그대로 다시 올리면 오류 없이 변경 없음이다")
+    void reimportingDownloadWithSameQuestionFaqs() throws Exception {
+        String t = tail();
+        String question = "중복 운영 " + t;
+        insertFaq(question, "답A", 172);
+        insertFaq(question, "답B", 176);
+        // 다운로드는 버전 사본을 내려주므로, 이력이 남는 변경을 하나 만들어 새 버전에 위 FAQ가 담기게 한다
+        createFaq("버전 갱신 " + t, "답", List.of(), List.of(), 176);
+
+        String csv = mvc.perform(get("/api/v1/faq/download").header(HttpHeaders.AUTHORIZATION, bearer(admin)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        String response = body(upload(admin, csvFile(rewriteCsvKeeping(csv, t))).andExpect(status().isOk()));
+        assertThat((Integer) read(response, "$.data.unchangedCount")).isEqualTo(3);
+        assertThat((Integer) read(response, "$.data.updatedCount")).isZero();
+        assertThat((Object) read(response, "$.data.versionId")).isNull();
+    }
+
+    @Test
+    @DisplayName("같은 질문 행에 ID가 없거나, 그 질문이 아닌 FAQ의 ID거나, 같은 ID인데 내용이 다르면 지금처럼 400이다")
+    void sameQuestionRowsWithoutValidIdsAreRejected() throws Exception {
+        String t = tail();
+        String question = "ID 검사 " + t;
+        long a = insertFaq(question, "답A", 172);
+        long other = insertFaq("다른 FAQ " + t, "답", 172);
+        Snapshot before = snapshot();
+
+        String noId = "ID,질문,답변\n" + a + "," + question + ",답1\n," + question + ",답2\n";
+        String wrongId = "ID,질문,답변\n" + a + "," + question + ",답1\n" + other + "," + question + ",답2\n";
+        String sameId = "ID,질문,답변\n" + a + "," + question + ",답1\n" + a + "," + question + ",답2\n";
+        for (String csv : List.of(noId, wrongId, sameId)) {
+            String response = body(upload(admin, csvFile(csv)).andExpect(status().isBadRequest()));
+            assertThat((String) read(response, "$.data.errors[0].reason")).isEqualTo("2행과 질문이 같은데 내용이 다릅니다.");
+        }
+        assertThat(snapshot()).isEqualTo(before);
+    }
+
     // ===== DB에 같은 질문의 FAQ가 여러 개 =====
 
     @Test
