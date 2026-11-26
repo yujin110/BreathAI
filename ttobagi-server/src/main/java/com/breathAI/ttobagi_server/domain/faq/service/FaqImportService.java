@@ -55,6 +55,8 @@ public class FaqImportService {
     static final String EDIT_REASON = "파일 일괄 업로드";
     static final String SKIP_REASON = "같은 질문의 FAQ가 여러 개라 고칠 FAQ를 정할 수 없음";
     private static final int MAX_CATEGORY_LENGTH = 100;
+    // 공사 양식(붙임2)의 열 이름, 공백을 지운 이름으로 찾는다
+    private static final Map<String, String> COLUMN_ALIASES = Map.of("관련키워드", "키워드", "관련유사어", "유사어");
 
     private final AnalysisUploadReader uploadReader;
     private final FaqService faqService;
@@ -74,12 +76,16 @@ public class FaqImportService {
     public FaqImportResponse importFaqs(MultipartFile file, String email) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
-        ParsedFile parsed = parse(uploadReader.read(file));
+        List<Faq> activeFaqs = faqRepository.findByIsActiveTrue();
+        // 활성 FAQ 번호별 질문(공백 정리), 파일 안 같은 질문 행을 ID로 구분할 때 쓴다
+        Map<Long, String> activeKeys = activeFaqs.stream()
+                .collect(Collectors.toMap(Faq::getFaqId, f -> questionKey(f.getQuestion())));
+        ParsedFile parsed = parse(uploadReader.read(file), activeKeys);
 
         Map<Integer, String> masterNames = faqRepository.findLatestCategories().stream()
                 .collect(Collectors.toMap(FaqRepository.CategoryRow::getCode, FaqRepository.CategoryRow::getName));
         // 질문(공백 정리)별 활성 FAQ
-        Map<String, List<Faq>> activeByKey = faqRepository.findByIsActiveTrue().stream()
+        Map<String, List<Faq>> activeByKey = activeFaqs.stream()
                 .collect(Collectors.groupingBy(f -> questionKey(f.getQuestion()), LinkedHashMap::new, Collectors.toList()));
 
         List<FaqImportResponse.AddedItem> added = new ArrayList<>();
@@ -252,7 +258,7 @@ public class FaqImportService {
 
     // ===== 파일 읽기와 검사 =====
 
-    private ParsedFile parse(AnalysisUploadReader.PipelineFile file) {
+    private ParsedFile parse(AnalysisUploadReader.PipelineFile file, Map<Long, String> activeKeys) {
         Report report = new Report();
         String text;
         try {
@@ -282,7 +288,8 @@ public class FaqImportService {
         CSVRecord header = records.get(0);
         Map<String, Integer> columns = new HashMap<>();
         for (int i = 0; i < header.size(); i++) {
-            columns.putIfAbsent(header.get(i).strip(), i);
+            String name = header.get(i).replaceAll("(?U)\\s+", "");
+            columns.putIfAbsent(COLUMN_ALIASES.getOrDefault(name, name), i);
         }
         for (String required : List.of("질문", "답변")) {
             if (!columns.containsKey(required)) {
@@ -330,16 +337,25 @@ public class FaqImportService {
             throw report.single("데이터 행이 없습니다.");
         }
 
-        // 파일 안에서 질문이 같으면 내용까지 같을 때만 한 건으로 합친다
+        // 같은 질문의 모든 행이 그 질문의 운영 FAQ ID를 가지면 ID별로 다른 FAQ로 본다
+        // (운영 FAQ에 질문이 같은 FAQ가 여러 개면 내려받은 파일에 그대로 들어 있다)
+        Map<String, Boolean> byFaqId = new HashMap<>();
+        for (ImportRow row : rows) {
+            boolean linked = row.id() != null && row.key().equals(activeKeys.get(row.id()));
+            byFaqId.merge(row.key(), linked, Boolean::logicalAnd);
+        }
+
+        // 파일 안에서 같은 FAQ로 보는 행은 내용까지 같을 때만 한 건으로 합친다
         Map<String, ImportRow> firstByKey = new LinkedHashMap<>();
         Map<String, List<Integer>> mergedRows = new LinkedHashMap<>();
         List<ImportRow> unique = new ArrayList<>();
         for (ImportRow row : rows) {
-            ImportRow first = firstByKey.putIfAbsent(row.key(), row);
+            String key = byFaqId.get(row.key()) ? row.key() + "#" + row.id() : row.key();
+            ImportRow first = firstByKey.putIfAbsent(key, row);
             if (first == null) {
                 unique.add(row);
             } else if (sameContent(first, row)) {
-                mergedRows.computeIfAbsent(row.key(), k -> new ArrayList<>(List.of(first.row()))).add(row.row());
+                mergedRows.computeIfAbsent(key, k -> new ArrayList<>(List.of(first.row()))).add(row.row());
             } else {
                 report.add(row.row(), "질문", first.row() + "행과 질문이 같은데 내용이 다릅니다.");
             }
