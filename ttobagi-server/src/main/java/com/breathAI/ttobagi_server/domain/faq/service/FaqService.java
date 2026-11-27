@@ -729,7 +729,7 @@ public class FaqService {
                             .matchedFaqId(matched != null ? matched.getFaqId() : null)
                             .matchedFaqSeqNum(m.getMatchedFaqSeqNum())
                             .question(matched != null ? matched.getQuestion() : null)
-                            .matchScore(m.getMatchScore().doubleValue())
+                            .matchScore(m.getMatchScore() == null ? null : m.getMatchScore().doubleValue())
                             .build();
                 })
                 .collect(Collectors.toList());

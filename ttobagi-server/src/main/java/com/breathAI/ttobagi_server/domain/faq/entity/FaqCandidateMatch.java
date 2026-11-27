@@ -45,7 +45,7 @@ public class FaqCandidateMatch {
             columnDefinition = "INT COMMENT 'counselling_info.seq_num (Bronze 참조)'")
     private Integer matchedFaqSeqNum;
 
-    @Column(name = "match_score", nullable = false, precision = 5, scale = 4, 
+    @Column(name = "match_score", precision = 5, scale = 4,
             columnDefinition = "DECIMAL(5,4) COMMENT '매칭 유사도 점수'")
     private BigDecimal matchScore;
 

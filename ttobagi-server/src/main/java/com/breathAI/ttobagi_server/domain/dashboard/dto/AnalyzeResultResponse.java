@@ -149,7 +149,7 @@ public class AnalyzeResultResponse {
         public static class MatchedFaq {
             private Long matchedFaqId;
             private Integer matchedFaqSeqNum;
-            private double matchScore;
+            private Double matchScore;
         }
     }
 

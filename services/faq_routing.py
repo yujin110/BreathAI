@@ -116,12 +116,13 @@ def route_questions(texts, kb, rank, verify, threshold, margin):
                                           'text': row.get('text')})['decision'])
             if outcome == 'same' and faq_id in active and (
                     path != 'SEMANTIC' or row['rerank_score'] > threshold + margin):
-                confirmed[faq_id] = path
+                confirmed[faq_id] = (path, row['rerank_score'] if path == 'SEMANTIC' else None)
             elif outcome != 'different':
                 review = True
         if len(confirmed) == 1 and not review:
-            faq_id, path = next(iter(confirmed.items()))
-            decisions.append(dict(status='MATCHED', faqId=faq_id, path=path, reason='SAME_APPLICABLE_ANSWER'))
+            faq_id, (path, score) = next(iter(confirmed.items()))
+            decisions.append(dict(status='MATCHED', faqId=faq_id, path=path,
+                                  reason='SAME_APPLICABLE_ANSWER', rerankerScore=score))
         elif confirmed or review or len(exact | aliases) > 1:
             decisions.append(dict(status='REVIEW', reason='FAQ_MATCH_UNCERTAIN'))
         else:
@@ -206,13 +207,17 @@ def expansion_candidate(label, faq, groups):
             synonyms.append(dict(text=text, type='SYNONYM'))
             known.add(normalized)
     log_ids = [int(log_id) for group in groups for log_id in group['logIds']]
+    scores = [g['routing']['rerankerScore'] for g in groups
+              if g['routing'].get('rerankerScore') is not None]
+    match_score = round(max(scores), 4) if scores else None
     candidate_id = f'candidate:{label}'
     return dict(clusterLabel=label, clusterSize=len(log_ids), tag='FAQ', candidateType='EXPAND',
                 standardQuestion=question, answerDraft=faq['answer'], qType=faq.get('q_type'),
                 category=faq.get('category'), matchedFaqs=[dict(matchedFaqId=faq['faq_id'],
-                matchedFaqSeqNum=faq.get('source_seq_num'), matchScore=1.0)],
+                matchedFaqSeqNum=faq.get('source_seq_num'), matchScore=match_score)],
                 synonyms=synonyms[:10], similarQuestions=samples[:12], logIds=log_ids,
                 candidateId=candidate_id, sourceCandidateIds=[candidate_id], finalClusterIds=[label],
                 matchStatus='CONFIRMED', matchDecisionReason='질문별로 동일한 운영 FAQ를 확인했습니다.',
                 matchEvidence=[dict(logIds=g['logIds'], matchPath=g['routing']['path'],
-                                    reason=g['routing']['reason']) for g in groups])
+                                    reason=g['routing']['reason'],
+                                    rerankerScore=g['routing'].get('rerankerScore')) for g in groups])
