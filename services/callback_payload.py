@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from services.dashboard_metrics import build_dashboard
 from services.faq_tag_quality import clean_keywords, clean_tag
+from services.grounded_answer import is_insufficient_answer
 from services.keyword_policy import KeywordPolicy, get_policy, normalize
 
 
@@ -76,6 +77,8 @@ def build_callback(job_dir):
                 'matchStatus', 'matchDecisionReason', 'matchEvidence')}
         if not all(isinstance(mapped[key], str) for key in ("standardQuestion", "answerDraft")):
             raise ValueError("Question and answer must be strings")
+        if is_insufficient_answer(mapped['answerDraft']):
+            continue
         candidates.append(mapped)
     dashboard = build_dashboard(data, keywords, summaries, policy=policy)
     points = dashboard.pop('points')

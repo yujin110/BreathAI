@@ -45,6 +45,7 @@ public enum ErrorCode {
     FAQ_VERSION_NOT_FOUND(404, "F-005", "FAQ 버전을 찾을 수 없습니다."),
     FAQ_CANDIDATE_NOT_REVIEWABLE(409, "F-006", "검토할 수 없는 상태의 FAQ 후보입니다."),
     FAQ_CATEGORY_DUPLICATED(409, "F-007", "이미 있는 카테고리입니다."),
+    FAQ_ANSWER_INSUFFICIENT(400, "F-008", "확인 불가 안내는 FAQ로 반영할 수 없습니다. 근거가 있는 답변으로 수정해 주세요."),
 
     // 409 CONFLICT: 중복된 리소스
     EMAIL_DUPLICATED(409, "U-002", "이미 등록된 이메일입니다."),

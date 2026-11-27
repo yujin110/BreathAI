@@ -29,6 +29,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 // 운영 FAQ 관리 및 AI 생성 FAQ 후보 반영 처리
@@ -36,6 +37,12 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class FaqService {
+    // Keep this legacy fallback check aligned with services/grounded_answer.py.
+    private static final Pattern INSUFFICIENT_ANSWER = Pattern.compile(
+            "제공된\\s+(?:정보|자료|안내)(?:만)?으로는\\s*"
+                    + "(?:(?:문의\\s*하신|해당)\\s*(?:내용|사항|정보)을\\s*)?"
+                    + "(?:확인|답변)할\\s*수\\s*없습니다",
+            Pattern.UNICODE_CHARACTER_CLASS);
 
     private final FaqRepository faqRepository;
     private final FaqCandidateRepository faqCandidateRepository;
@@ -394,6 +401,10 @@ public class FaqService {
         // 이미 반영되었거나 반려된 후보는 재반영할 수 없다
         if (beforeStatus != ReviewStatus.PENDING && beforeStatus != ReviewStatus.ACCEPTED) {
             throw new CustomException(ErrorCode.FAQ_CANDIDATE_NOT_APPLICABLE);
+        }
+
+        if (INSUFFICIENT_ANSWER.matcher(request.getFinalAnswer()).find()) {
+            throw new CustomException(ErrorCode.FAQ_ANSWER_INSUFFICIENT);
         }
 
         boolean isExpand = candidate.getCandidateType() == CandidateType.EXPAND;

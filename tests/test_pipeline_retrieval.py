@@ -29,6 +29,7 @@ class PipelineRetrievalTest(unittest.TestCase):
                                           {'prefix': '또타24입니다.', 'suffix': '감사합니다.'})
         self.assertNotIn('무료 수리', out)
         self.assertIn('확인할 수 없습니다', out)
+        self.assertFalse(ar.validate_answer(out, 'FAQ')[0])
 
     def test_empty_kb_stops_before_expensive_generation(self):
         names = ['answer_regenerator', 'answer_evaluator', 'answer_refiner', 'oos_refresher',

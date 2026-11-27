@@ -309,6 +309,21 @@ class ExpandTargetIntegrationTest {
     }
 
     @Test
+    @DisplayName("확인 불가 초안은 반영을 막고 근거 답변으로 바꾸면 반영한다")
+    void insufficientDraftCannotBeApplied() throws Exception {
+        Long analysisId = analysis(candidate("NEW", "분실물 신고 문의", List.of()));
+        Number candidateId = onlyCandidateId(analysisId);
+        long before = faqCount();
+        apply(analysisId, candidateId, "분실물 신고 방법", List.of("분실물"),
+                "안녕하세요. 또타24입니다. 제공된 정보만으로는 문의하신 내용을 확인할 수 없습니다.")
+                .andExpect(status().isBadRequest());
+        assertThat(faqCount()).isEqualTo(before);
+        apply(analysisId, candidateId, "분실물 신고 방법", List.of("분실물"),
+                "역무실에 방문해 분실물을 신고해 주세요.").andExpect(status().isOk());
+        assertThat(faqCount()).isEqualTo(before + 1);
+    }
+
+    @Test
     @DisplayName("분석 결과 응답의 유사 FAQ에도 matchedFaqId가 나온다")
     void analysisResultIncludesMatchedFaqId() throws Exception {
         long target = createFaq("결과 응답 FAQ " + UUID.randomUUID(), List.of("결과"));
@@ -392,6 +407,11 @@ class ExpandTargetIntegrationTest {
 
     private ResultActions apply(Long analysisId, Number candidateId, String question, List<String> keywords)
             throws Exception {
+        return apply(analysisId, candidateId, question, keywords, "확장 반영 답변");
+    }
+
+    private ResultActions apply(Long analysisId, Number candidateId, String question, List<String> keywords,
+                                String answer) throws Exception {
         Number clusterId = read(recommendations(analysisId),
                 "$.data.recommendations[?(@.candidateId == " + candidateId + ")].clusterId", 0);
         Map<String, Object> request = new LinkedHashMap<>();
@@ -400,7 +420,7 @@ class ExpandTargetIntegrationTest {
         request.put("candidateId", candidateId);
         request.put("qType", Q_TYPE);
         request.put("finalQuestion", question);
-        request.put("finalAnswer", "확장 반영 답변");
+        request.put("finalAnswer", answer);
         request.put("keywords", keywords);
         request.put("isManualPatchConfirmed", true);
         return mvc.perform(post("/api/v1/faq/apply").contentType(MediaType.APPLICATION_JSON)
