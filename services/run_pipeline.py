@@ -81,6 +81,11 @@ def _evaluate(cluster: dict, ce, tok, mdl) -> dict:
         'llm_mean': llm_mean,
         'needs_review_v2': needs,
         'review_reasons': reasons,
+        'question_answer_mismatch': (
+            cluster['tag'] == 'FAQ'
+            and e2 is not None and e2 < AE.E2_THRESHOLD
+            and judge is not None and judge['accuracy'] <= AE.LLM_AXIS_MIN
+        ),
     }
 
 
@@ -319,8 +324,10 @@ def run_answer_pipeline(expansions=()) -> None:
     _log(f'  refine 발동     = {n_refined}건')
     _log(f'  oos_corp 채택   = {n_oos_corp_adopted}건')
 
+    eligible = [r for r in results if not r['evaluation'].get('question_answer_mismatch')]
+    _log(f'  질문·답변 불일치로 후보 제외 = {len(results) - len(eligible)}건')
     OUTPUT_JSON.write_text(
-        json.dumps({'faqCandidates': [*expansions, *results]}, ensure_ascii=False, indent=2),
+        json.dumps({'faqCandidates': [*expansions, *eligible]}, ensure_ascii=False, indent=2),
         encoding='utf-8',
     )
     _log(f'저장: {OUTPUT_JSON.name} ({OUTPUT_JSON.stat().st_size:,}B)')

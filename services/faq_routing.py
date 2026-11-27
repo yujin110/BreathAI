@@ -7,6 +7,7 @@ import numpy as np
 
 from services.faq_matching import FAQ_SOURCES, valid_faq_id
 from services.faq_tag_quality import clean_tag
+from services.grounded_answer import clean_faq_body
 from services.question_identity import normalize, unit
 
 AMBIGUOUS_EXPRESSIONS = {'지하철', '공항철도', '카드', '시설', '서울'}
@@ -216,7 +217,7 @@ def expansion_candidate(label, faq, groups):
     match_score = round(max(scores), 4) if scores else None
     candidate_id = f'candidate:{label}'
     return dict(clusterLabel=label, clusterSize=len(log_ids), tag='FAQ', candidateType='EXPAND',
-                standardQuestion=question, answerDraft=faq['answer'], qType=faq.get('q_type'),
+                standardQuestion=question, answerDraft=clean_faq_body(faq['answer']), qType=faq.get('q_type'),
                 category=faq.get('category'), matchedFaqs=[dict(matchedFaqId=faq['faq_id'],
                 matchedFaqSeqNum=faq.get('source_seq_num'), matchScore=match_score)],
                 synonyms=synonyms[:10], similarQuestions=samples[:12], logIds=log_ids,
