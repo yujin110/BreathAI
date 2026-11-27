@@ -27,6 +27,7 @@ import shutil
 import time
 import unicodedata
 from pathlib import Path
+from services.question_identity import IntentVerifier, question_copy_key, standard_question_error
 from services.runtime_config import runtime_path
 
 import numpy as np
@@ -112,12 +113,12 @@ def refine_question(tok, mdl, prev_q: str, samples: list[str],
         f'재작성된 표준질문 (한국어 한 문장만, 다른 설명 없이):'
     )
     raw = AE.call_llm(tok, mdl, QUESTION_SYSTEM, user)
-    # 첫 줄만 채택
-    line = (raw.strip().split('\n')[0] or '').strip()
-    # 따옴표 제거
-    line = line.strip('"').strip("'").strip('「』').strip()
-    # 한자가 또 섞이면 그래도 그대로 채택 (fallback)
-    return line or prev_q
+    question = raw.strip().strip('"\'「」').strip()
+    if standard_question_error(question, {question_copy_key(sample) for sample in samples}):
+        return prev_q
+    if IntentVerifier(tok, mdl)(question, [prev_q, *samples[:5]])['decision'] != 'same':
+        return prev_q
+    return question
 
 
 # ---------------------------------------------------------------------------
@@ -199,14 +200,13 @@ def main() -> None:
         prev_eval = c.get('evaluation', {})
         prev_axes = prev_eval.get('llm_axes') or {}
         prev_reasons = prev_eval.get('review_reasons', [])
-        synonyms = c.get('synonyms', [])
         topkw = c.get('topKeywords', [])
 
         # 1) 표준질문 정제 (한자 포함 시만)
         q_refined = False
         if has_foreign(prev_q):
-            new_q = refine_question(tok, mdl, prev_q, synonyms, topkw)
-            q_refined = True
+            new_q = refine_question(tok, mdl, prev_q, c.get('similarQuestions', []), topkw)
+            q_refined = new_q != prev_q
         else:
             new_q = prev_q
 

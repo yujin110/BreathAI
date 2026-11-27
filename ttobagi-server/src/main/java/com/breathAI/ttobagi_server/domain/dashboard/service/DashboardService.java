@@ -833,7 +833,8 @@ public class DashboardService {
                                 .candidate(candidate)
                                 .matchedFaqId(matchedFaq.getMatchedFaqId())
                                 .matchedFaqSeqNum(matchedFaq.getMatchedFaqSeqNum())
-                                .matchScore(BigDecimal.valueOf(matchedFaq.getMatchScore()))
+                                .matchScore(matchedFaq.getMatchScore() == null ? null
+                                        : BigDecimal.valueOf(matchedFaq.getMatchScore()))
                                 .build();
                         faqCandidateMatchRepository.save(match);
                     }
@@ -954,7 +955,7 @@ public class DashboardService {
                         .map(m -> AnalyzeResultResponse.FaqCandidate.MatchedFaq.builder()
                                 .matchedFaqId(m.getMatchedFaqId())
                                 .matchedFaqSeqNum(m.getMatchedFaqSeqNum())
-                                .matchScore(m.getMatchScore().doubleValue())
+                                .matchScore(m.getMatchScore() == null ? null : m.getMatchScore().doubleValue())
                                 .build())
                         .collect(Collectors.toList());
     

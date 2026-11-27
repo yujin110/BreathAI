@@ -133,6 +133,85 @@ class DashboardMetricsTest(unittest.TestCase):
         self.assertIn(-1, [r['clusterLabel'] for r in payload['clusteringView']['clusterNames']])
         json.dumps(payload, allow_nan=False)
 
+    def test_callback_filters_polluted_faq_tags_and_preserves_search_terms(self):
+        self.write_callback_artifacts({'0': ['분실물', 'la']})
+        polluted = [
+            'lost', 'and', 'found', 'de', 'th', 'la', 'froid', 'climatisation',
+            'Contactgegevens van de betreffende afdeling', 'Th?t L?c T?m Th?y',
+            'Servicios de la estaci?n', '분?룰', '살려주세요', '빨리해주셈',
+            '지하철 바닥에 앉아잇음', '환승 시간 얼마나 걸리나요', '[TEL]',
+        ]
+        tags = [
+            {'text': '잃어버린거', 'type': 'TYPO'},
+            {'text': 'KTX', 'type': 'ABBR'},
+            {'text': 'Lost and Found', 'type': 'SYNONYM'},
+        ]
+        candidates = [
+            dict(clusterLabel=0, candidateType=kind, standardQuestion='분실물은 어디에 신고하나요?',
+                 answerDraft='검토', topKeywords=polluted + good_keywords,
+                 similarQuestions=['환승 시간 얼마나 걸리나요'],
+                 synonyms=[{'text': text, 'type': 'SYNONYM'} for text in polluted] + tags)
+            for kind, good_keywords in [('NEW', ['분실물', 'KTX', 'ktx']), ('EXPAND', [])]
+        ]
+        (self.data / 'faq_candidates_final.json').write_text(
+            json.dumps({'faqCandidates': candidates}), encoding='utf-8')
+        new, expand = build_callback(self.job)['faqCandidates']
+        self.assertEqual(new['representativeKeywords'], ['분실물', 'KTX'])
+        self.assertEqual(expand['representativeKeywords'], ['분실물'])
+        for candidate in (new, expand):
+            self.assertEqual(candidate['synonyms'], tags)
+            self.assertEqual(candidate['similarQuestions'], ['환승 시간 얼마나 걸리나요'])
+
+    def test_callback_omits_insufficient_drafts_and_keeps_actionable_answers(self):
+        from services.grounded_answer import INSUFFICIENT
+
+        self.write_callback_artifacts()
+        drafts = [
+            f'안녕하세요. 또타24입니다.\n\n{INSUFFICIENT}\n\n감사합니다.',
+            '제공된 정보만으로는 확인할 수 없습니다.',
+            '역무실에 방문해 분실물을 신고해 주세요. 제공된 정보로는 문의하신 기한을 확인할 수 없습니다.',
+        ]
+        candidates = [dict(clusterLabel=0, standardQuestion='분실물은 어떻게 신고하나요?', answerDraft=draft)
+                      for draft in drafts]
+        (self.data / 'faq_candidates_final.json').write_text(
+            json.dumps({'faqCandidates': candidates}), encoding='utf-8')
+        payload = build_callback(self.job)
+        self.assertEqual(payload['status'], 'COMPLETED')
+        self.assertEqual([item['answerDraft'] for item in payload['faqCandidates']], drafts[2:])
+
+    def test_empty_cluster_recovers_keywords_from_confirmed_faq(self):
+        from services.faq_routing import expansion_candidate
+
+        self.write_callback_artifacts({'0': ['de', '유사?']})
+        candidate = expansion_candidate(
+            0, dict(faq_id=1, question='객실 분실물은 어디에 신고하나요?', answer='역무실에 신고하세요.',
+                    keywords=['Lost and Found', 'de', '분실물']),
+            [dict(normalizedText='분실물 신고', logIds=[10, 20],
+                  routing=dict(path='FAQ_TITLE', reason='confirmed'))])
+        (self.data / 'faq_candidates_final.json').write_text(
+            json.dumps({'faqCandidates': [candidate]}), encoding='utf-8')
+        result = build_callback(self.job)
+        self.assertEqual(result['faqCandidates'][0]['representativeKeywords'], ['Lost and Found', '분실물'])
+        cluster = next(c for c in result['clusteringView']['clusterNames'] if c['clusterLabel'] == 0)
+        self.assertEqual(cluster['name'], 'Lost and Found, 분실물')
+        self.assertEqual(cluster['topKeywords'], ['Lost and Found', '분실물'])
+        self.assertEqual(len(result['clusteringView']['points']), 3)
+
+    def test_keywordless_faq_uses_question_terms_or_explicit_missing_label(self):
+        self.write_callback_artifacts({'0': []})
+        output = self.data / 'faq_candidates_final.json'
+        candidate = dict(clusterLabel=0, standardQuestion='분실물 신고 방법은 무엇인가요?',
+                         answerDraft='역무실에 신고하세요.')
+        output.write_text(json.dumps({'faqCandidates': [candidate]}), encoding='utf-8')
+        result = build_callback(self.job)
+        self.assertEqual(result['faqCandidates'][0]['representativeKeywords'], ['분실물', '신고'])
+        candidate['standardQuestion'] = '지하철 어디인가요?'
+        output.write_text(json.dumps({'faqCandidates': [candidate]}), encoding='utf-8')
+        result = build_callback(self.job)
+        self.assertEqual(result['faqCandidates'][0]['representativeKeywords'], [])
+        cluster = next(c for c in result['clusteringView']['clusterNames'] if c['clusterLabel'] == 0)
+        self.assertEqual(cluster['name'], '대표 키워드 없음')
+
     def test_merged_candidate_callback_preserves_all_relations_and_checks_log_coverage(self):
         self.clustered[2]['clusterId'] = 1
         self.summaries = {0: {'size': '2'}, 1: {'size': '1'}}

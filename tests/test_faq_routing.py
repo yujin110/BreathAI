@@ -44,7 +44,7 @@ class FaqRoutingTest(unittest.TestCase):
     def test_match_review_new_and_approved_expression_round_trip(self):
         faq = dict(faq_id=21, source_seq_num=6099, source_type='approved_faq',
                    question='객실에서 불쾌한 냄새가 날 때', answer='객실 악취 신고 안내', keywords=['악취'])
-        texts = ['객실 악취', '객실에서 이상한 냄새가 나요', '전등이 꺼졌어요', '공항철도']
+        texts = ['객실 악취', '객실에서 이상한 냄새', '전등이 꺼졌어요', '공항철도']
 
         def rank(queries, kb):
             return [[{**faq, 'rerank_score': .96}] for _ in queries]
@@ -58,7 +58,18 @@ class FaqRoutingTest(unittest.TestCase):
         candidate = expansion_candidate(2, active[21], [
             dict(normalizedText=text, logIds=[i + 1], routing=decisions[i]) for i, text in enumerate(texts[:2])])
         self.assertEqual([1, 2], candidate['logIds'])
+        self.assertEqual(['악취'], candidate['approvedFaqKeywords'])
         self.assertEqual(21, candidate['matchedFaqs'][0]['matchedFaqId'])
+        self.assertEqual(.96, candidate['matchedFaqs'][0]['matchScore'])
+        self.assertEqual([None, .96], [e['rerankerScore'] for e in candidate['matchEvidence']])
+        keyword_only = expansion_candidate(3, active[21], [
+            dict(normalizedText=texts[0], logIds=[1], routing=decisions[0])])
+        self.assertIsNone(keyword_only['matchedFaqs'][0]['matchScore'])
+        utterance = '객실에서 이상한 냄새가 나요'
+        filtered = expansion_candidate(4, active[21], [
+            dict(normalizedText=utterance, logIds=[2], routing=decisions[1])])
+        self.assertEqual(filtered['synonyms'], [])
+        self.assertEqual(filtered['similarQuestions'], [utterance])
         faq['synonyms'] = [s['text'] for s in candidate['synonyms']]
         approved, _ = route_questions([texts[1]], [faq], lambda queries, kb: [], verify, .8, .02)
         self.assertEqual('APPROVED_SYNONYM', approved[0]['path'])

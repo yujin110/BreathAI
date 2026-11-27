@@ -280,6 +280,8 @@ APOLOGY_PAT = re.compile(r'(죄송|사과|안타까|불편을 드려)')
 
 def validate_answer(text: str, tag: str) -> tuple[bool, list[str]]:
     missing = []
+    if tag == 'FAQ' and GA.is_insufficient_answer(text):
+        missing.append('질문에 대한 근거 있는 답변 없음')
     if '또타' not in text:
         missing.append('"또타" 누락')
     if tag == 'EMERGENCY' and not APOLOGY_PAT.search(text):

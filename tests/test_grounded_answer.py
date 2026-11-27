@@ -90,6 +90,24 @@ class GroundedAnswerTest(unittest.TestCase):
         self.assertNotIn('무료', out)
         self.assertNotIn('1시간', out)
 
+    def test_faq_cleans_inline_metadata_duplicate_greetings_and_repeated_paragraphs(self):
+        c = self.contract([{
+            'text': ('질문: 문자 상담 방법\n답변: 안녕하세요. 또타24입니다. 문자로 문의하세요.\n'
+                     '문자로 문의하세요.\n감사합니다. 키워드: 문자 상담\n유사 표현: 문자 문의'),
+        }])
+        output = G.answer(c, lambda _: '{"status":"answer","selected_ids":["K1S1"]}')
+        self.assertEqual(output, '또타24입니다.\n\n문자로 문의하세요.\n\n감사합니다.')
+
+    def test_faq_does_not_concatenate_distinct_source_answers(self):
+        c = self.contract([{'text': '문자 상담은 지정된 번호로 문의하세요.'},
+                           {'text': '소리 민원은 역 직원에게 신고하세요.'}])
+        output = G.answer(c, lambda _: '{"status":"answer","selected_ids":["K1S1","K2S1"]}')
+        self.assertIn('확인할 수 없습니다', output)
+        self.assertNotIn('문자 상담', output)
+        self.assertNotIn('소리 민원', output)
+        selected = G.answer(c, lambda _: '{"status":"answer","selected_ids":["K1S1","K1S1"]}')
+        self.assertEqual(selected.count('문자 상담'), 1)
+
     def test_unknown_source_id_fails_closed(self):
         c = self.contract([{'text': '역 직원에게 문의하세요.'}])
         self.assertIn('확인할 수 없습니다', G.render(c, {'status': 'answer', 'selected_ids': ['fake']}))

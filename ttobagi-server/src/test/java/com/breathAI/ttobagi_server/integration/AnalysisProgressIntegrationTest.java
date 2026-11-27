@@ -21,8 +21,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -123,7 +125,7 @@ class AnalysisProgressIntegrationTest {
     }
 
     @Test
-    @DisplayName("AI가 접수하지 않았거나, 취소를 요청했거나, 끝난 분석은 AI에 묻지 않는다")
+    @DisplayName("AI가 접수하지 않았거나 끝난 분석은 AI에 묻지 않고, 취소를 요청한 분석은 묻되 진행 정보를 저장하지 않는다")
     void onlyAcceptedRunningAnalysesArePolled() throws Exception {
         String admin = adminToken();
         Long notSent = upload(admin);
@@ -131,13 +133,94 @@ class AnalysisProgressIntegrationTest {
         jdbcTemplate.update("UPDATE gold_analysis_job SET cancel_requested_at = NOW() WHERE analysis_id=?", canceling);
         Long completed = acceptedAnalysis(admin);
         callback(completed, completedCallback());
+        when(webClientUtil.job(canceling)).thenReturn(aiJob(fixture()));
 
         clearInvocations(webClientUtil);
         progressService.poll();
 
         verify(webClientUtil, never()).job(notSent);
-        verify(webClientUtil, never()).job(canceling);
+        verify(webClientUtil).job(canceling);
         verify(webClientUtil, never()).job(completed);
+        checkStatus(admin, canceling).andExpect(jsonPath("$.data.progressDetail").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("AI가 3분 넘게 계속 작업을 모르면(404) 실패로 끝내고, 그 뒤에 온 콜백은 저장하지 않는다")
+    void lostJobFailsAfterGrace() throws Exception {
+        String admin = adminToken();
+        Long id = acceptedAnalysis(admin);
+        when(webClientUtil.job(id)).thenThrow(notFound());
+        LocalDateTime start = LocalDateTime.now();
+
+        progressService.poll(start);
+        progressService.poll(start.plusMinutes(2));
+        checkStatus(admin, id).andExpect(jsonPath("$.data.status").value("PENDING"));
+
+        progressService.poll(start.plusMinutes(3));
+        checkStatus(admin, id).andExpect(jsonPath("$.data.status").value("FAIL"));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT error_message FROM gold_analysis_job WHERE analysis_id=?", String.class, id))
+                .isEqualTo("AI 서버에서 이 분석 작업을 찾을 수 없습니다. 다시 업로드해 주세요.");
+
+        callback(id, completedCallback());
+        checkStatus(admin, id).andExpect(jsonPath("$.data.status").value("FAIL"));
+    }
+
+    @Test
+    @DisplayName("취소를 요청한 분석이 AI에서 사라지면 3분 뒤 취소로 확정한다")
+    void lostJobWithCancelRequestIsCanceled() throws Exception {
+        String admin = adminToken();
+        Long id = acceptedAnalysis(admin);
+        jdbcTemplate.update("UPDATE gold_analysis_job SET cancel_requested_at = NOW() WHERE analysis_id=?", id);
+        when(webClientUtil.job(id)).thenThrow(notFound());
+        LocalDateTime start = LocalDateTime.now();
+
+        progressService.poll(start);
+        progressService.poll(start.plusMinutes(3));
+
+        checkStatus(admin, id).andExpect(jsonPath("$.data.status").value("CANCELED"));
+    }
+
+    @Test
+    @DisplayName("중간에 AI가 작업을 찾으면 404 시간을 처음부터 다시 재고, 연결 실패는 판단을 바꾸지 않는다")
+    void temporaryNotFoundIsReset() throws Exception {
+        String admin = adminToken();
+        Long id = acceptedAnalysis(admin);
+        LocalDateTime start = LocalDateTime.now();
+
+        doThrow(notFound()).when(webClientUtil).job(id);
+        progressService.poll(start);
+        doReturn(aiJob(fixture())).when(webClientUtil).job(id);
+        progressService.poll(start.plusMinutes(1));
+        doThrow(notFound()).when(webClientUtil).job(id);
+        progressService.poll(start.plusMinutes(2));
+        progressService.poll(start.plusMinutes(4));
+        checkStatus(admin, id).andExpect(jsonPath("$.data.status").value("PENDING"));
+
+        // 연결 실패는 AI에 작업이 있는지 모르므로 처음 404 시각을 그대로 둔다
+        doThrow(new IllegalStateException("AI 연결 실패")).when(webClientUtil).job(id);
+        progressService.poll(start.plusMinutes(4).plusSeconds(30));
+        doThrow(notFound()).when(webClientUtil).job(id);
+        progressService.poll(start.plusMinutes(5));
+        checkStatus(admin, id).andExpect(jsonPath("$.data.status").value("FAIL"));
+    }
+
+    @Test
+    @DisplayName("AI가 404가 아닌 오류(503)를 보내면 작업이 사라진 것으로 보지 않는다")
+    void otherErrorsDoNotEndAnalysis() throws Exception {
+        String admin = adminToken();
+        Long id = acceptedAnalysis(admin);
+        when(webClientUtil.job(id)).thenThrow(new WebClientResponseException(503, "busy", null, null, null));
+        LocalDateTime start = LocalDateTime.now();
+
+        progressService.poll(start);
+        progressService.poll(start.plusMinutes(10));
+
+        checkStatus(admin, id).andExpect(jsonPath("$.data.status").value("PENDING"));
+    }
+
+    private WebClientResponseException notFound() {
+        return new WebClientResponseException(404, "Not Found", null, null, null);
     }
 
     @Test

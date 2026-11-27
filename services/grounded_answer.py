@@ -9,12 +9,50 @@ import unicodedata
 MARKER = '\n[TTOBAGI_GROUNDING_V1]\n'
 _KEY = secrets.token_bytes(32)
 INSUFFICIENT = '제공된 정보만으로는 문의하신 내용을 확인할 수 없습니다. 필요한 안내 자료를 추가로 확인해 주세요.'
+_INSUFFICIENT_NOTICE = re.compile(
+    r'제공된\s+(?:정보|자료|안내)(?:만)?으로는\s*'
+    r'(?:(?:문의하신|문의\s*하신|해당)\s*(?:내용|사항|정보)을\s*)?'
+    r'(?:확인|답변)할\s*수\s*없습니다'
+)
+
+
+def is_insufficient_answer(text):
+    return bool(_INSUFFICIENT_NOTICE.search(text))
+
+
 CONFLICT = '제공된 안내 내용이 서로 달라 현재 정보를 확정할 수 없습니다. 최신의 공식 안내를 확인해 주세요.'
 COMMAND = re.compile(r'(?:지침|명령|시스템|프롬프트).{0,25}(?:무시|변경|따르)|ignore.{0,30}(?:instruction|system)|주민등록번호.{0,20}(?:요청|알려|출력)', re.I)
 QUANTITY = re.compile(r'\d[\d,]*(?:\.\d+)?\s*(?:원|시간|분|일|시|%)')
 MONEY = re.compile(r'\d[\d,]*\s*원')
 UI_POSITION = r'(?:하단|상단|아래|위의|위쪽|아래쪽)\s*(?:에\s*있는\s*)?(?:버튼|링크)'
 UI_LEAD = r'(?:(?:이용\s*)?(?:금액|요금)|(?:더\s*)?자세한\s*(?:내용|정보|안내|요금))'
+SEARCH_METADATA = re.compile(r'(?<!\S)(?:관련\s*)?(?:키워드|유사\s*질문|유사\s*표현|유사\s*어)\s*[:：]')
+FAQ_GREETING = re.compile(
+    r'^(?:(?:안녕하세요|안녕하십니까)[.!。]?\s*)?'
+    r'(?:(?:서울교통공사\s*)?(?:또타\s*24|또타)\s*입니다)[.!。]?\s*'
+)
+
+
+def clean_faq_body(text, prefix='', suffix=''):
+    # Keep the original wording and order of factual sentences.
+    seen = {part.strip() for part in re.split(r'(?<=[.!?。！？])\s+|\n+', prefix)}
+    if suffix:
+        seen.add(suffix.strip())
+    lines = []
+    for line in text.splitlines():
+        line = SEARCH_METADATA.split(line, maxsplit=1)[0].strip()
+        line = FAQ_GREETING.sub('', line)
+        kept = []
+        for sentence in re.split(r'(?<=[.!?。！？])\s+', line):
+            key = ' '.join(sentence.split())
+            if key and key not in seen:
+                kept.append(sentence)
+                seen.add(key)
+        if kept:
+            lines.append(' '.join(kept))
+    return '\n'.join(lines)
+
+
 UI_CLAUSE = re.compile(r'(?:' + UI_LEAD + r'[^.!?\n]{0,100}?' + UI_POSITION + r'|' + UI_POSITION + r')[^.!?\n]*(?:[.!?]|$)')
 
 
@@ -83,8 +121,9 @@ def make_contract(cluster, cfg, shared, docs):
     for i, doc in enumerate(docs):
         # Retrieval validation approves text; unrelated metadata cannot replace it.
         text = doc['text']
-        if '답변:' in text:
-            text = text.split('답변:', 1)[1].split('유사질문:', 1)[0]
+        answer_label = re.search(r'(?<!\S)답변\s*[:：]', text)
+        if answer_label:
+            text = text[answer_label.end():].split('유사질문:', 1)[0]
         # Treat the complete retrieved answer as one unit, so a heading cannot
         # be separated from its fees, exceptions or safety qualifications.
         kept = []
@@ -95,6 +134,8 @@ def make_contract(cluster, cfg, shared, docs):
             if not line.strip().startswith(('질문:', '유사질문:')):
                 kept.append(line)
         paragraph = remove_unresolved_ui('\n'.join(kept).strip())
+        if cluster.get('tag') == 'FAQ':
+            paragraph = clean_faq_body(paragraph, cfg['prefix'], cfg['suffix'])
         if paragraph:
             units.append(dict(id=f'K{i + 1}S1', text=paragraph, kind='kb',
                               document=str(doc.get('chunk_id', i)),
@@ -159,7 +200,10 @@ def render(contract, selection):
         body = CONFLICT
     elif (status == 'answer' and isinstance(ids, list) and ids
           and all(isinstance(i, str) and i in known for i in ids)):
-        body = ' '.join(known[i] for i in dict.fromkeys(ids))
+        unique_ids = list(dict.fromkeys(ids))
+        if contract['tag'] == 'FAQ' and len(unique_ids) != 1:
+            return render(contract, {'status': 'insufficient', 'selected_ids': []})
+        body = ' '.join(known[i] for i in unique_ids)
         notes = missing_coverage_notes(contract['question'], body)
         if notes:
             body += ' ' + ' '.join(notes)
@@ -185,7 +229,10 @@ def answer(contract, call):
         'and statements about unavailable information, not just headings. Sources '
         'may use a different spelling or language for the same product. Return one JSON object only: '
         '{"status":"answer","selected_ids":["K1S1"]}. '
-        'Allowed statuses: answer, insufficient, conflict. Select at most five IDs.')),
+        'Allowed statuses: answer, insufficient, conflict. ' +
+        ('For a FAQ, select exactly one complete source that directly answers the question. '
+         'If no single source suffices, return insufficient. Do not combine different FAQs.'
+         if contract['tag'] == 'FAQ' else 'Select at most five IDs.'))),
         dict(role='user', content=json.dumps(dict(question=contract['question'],
              keywords=contract['keywords'], sources=contract['units'],
              feedback=contract.get('review_feedback', [])), ensure_ascii=False))]

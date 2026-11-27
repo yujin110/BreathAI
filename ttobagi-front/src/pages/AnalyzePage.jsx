@@ -203,9 +203,14 @@ function ClusterScatterPlot({ points, clusterNames }) {
     if (b.clusterLabel < 0) return -1;
     return (b.size || 0) - (a.size || 0);
   });
-  const nameOf = (label) =>
-    clusterNames.find((c) => c.clusterLabel === label)?.name
-    || (label < 0 ? "노이즈" : `클러스터 ${label}`);
+  const displayName = (cluster) => {
+    if (cluster?.clusterLabel < 0) return "노이즈";
+    const name = cluster?.name?.trim();
+    if (name && !/^(?:클러스터\s*|C)\d+$/i.test(name)) return name;
+    return cluster?.topKeywords?.slice(0, 3).join(", ") || "대표 키워드 없음";
+  };
+  const nameOf = (label) => label < 0 ? "노이즈"
+    : displayName(clusterNames.find((c) => c.clusterLabel === label));
 
   // 노이즈를 먼저 그려 실제 군집이 위에 오게 한다 (recharts는 배열 순서대로 렌더한다)
   const ordered = [...points].sort((a, b) => (a.clusterLabel < 0 ? -1 : 0) - (b.clusterLabel < 0 ? -1 : 0));
@@ -251,11 +256,11 @@ function ClusterScatterPlot({ points, clusterNames }) {
           {legend.map((c) => (
             <span
               key={c.clusterId ?? c.clusterLabel}
-              title={(c.topKeywords || []).join(", ")}
+              title={[...(c.topKeywords || []), `군집 ID: C${c.clusterLabel}`].join(" · ")}
               style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: c.clusterLabel < 0 ? "#9CA3AF" : "#374151" }}
             >
               <span style={{ width: 9, height: 9, borderRadius: "50%", background: colorOf(c.clusterLabel), flexShrink: 0 }} />
-              {c.name ? `${c.name} (C${c.clusterLabel})` : `클러스터 ${c.clusterLabel}`}
+              {displayName(c)}
               <span style={{ color: "#9CA3AF" }}>({(c.size || 0).toLocaleString()})</span>
             </span>
           ))}
@@ -1413,7 +1418,8 @@ export default function AnalyzePage() {
                   {/* reviewStatus: PENDING 이면 버튼, REJECTED "반려됨", APPLIED "반영됨" */}
                   {c.reviewStatus === "PENDING" && isAdmin ? (
                     <div style={{ display: "flex", gap: 6 }}>
-                      <button style={S.btnAccept} disabled={reviewing === c.candidateId}
+                      <button style={S.btnAccept} disabled={reviewing === c.candidateId || !c.representativeKeywords?.length}
+                        title={!c.representativeKeywords?.length ? "수정에서 대표 키워드를 추가해 주세요." : undefined}
                         onClick={() => handleAccept(c.candidateId)}>
                         {reviewing === c.candidateId ? "처리 중..." : "승인"}
                       </button>
@@ -1427,6 +1433,13 @@ export default function AnalyzePage() {
                   )}
                 </div>
                 <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.6, marginBottom: 10 }}>{toPlainText(c.answerDraft)}</div>
+                <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 8 }}>
+                  {c.representativeKeywords?.length
+                    ? `대표 키워드 · ${c.representativeKeywords.join(", ")}`
+                    : c.reviewStatus === "PENDING" && isAdmin
+                      ? "대표 키워드 없음 · 수정에서 키워드를 추가해 주세요."
+                      : "대표 키워드 없음"}
+                </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
                   {(c.synonyms || []).map((s, i) => {
                     const kind = SYNONYM_KIND[s.type] || SYNONYM_KIND.SYNONYM;
