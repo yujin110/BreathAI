@@ -3,7 +3,8 @@ import csv
 import json
 from pathlib import Path
 from services.dashboard_metrics import build_dashboard
-from services.keyword_policy import KeywordPolicy, get_policy
+from services.faq_tag_quality import clean_keywords, clean_tag
+from services.keyword_policy import KeywordPolicy, get_policy, normalize
 
 
 def build_callback(job_dir):
@@ -49,16 +50,23 @@ def build_callback(job_dir):
         kind = candidate.get("candidateType", "NEW")
         if kind not in {"NEW", "EXPAND"}:
             raise ValueError("Invalid candidateType")
-        synonyms = candidate.get("synonyms") or []
-        for synonym in synonyms:
-            if not isinstance(synonym.get("text"), str) or synonym.get("type") not in {"TYPO", "ABBR", "SYNONYM"}:
+        synonyms = []
+        seen = set()
+        for synonym in candidate.get("synonyms") or []:
+            if (not isinstance(synonym, dict) or not isinstance(synonym.get("text"), str)
+                    or synonym.get("type") not in ("TYPO", "ABBR", "SYNONYM")):
                 raise ValueError("Invalid synonym")
+            text = clean_tag(synonym["text"], policy=policy)
+            if text is not None and normalize(text) not in seen:
+                synonyms.append({"text": text, "type": synonym["type"]})
+                seen.add(normalize(text))
         mapped = {key: candidate.get(key) for key in (
             "standardQuestion", "answerDraft", "qType", "category")}
         mapped.update({
             "clusterLabel": label, "candidateType": kind,
             "occurrenceCount": len(set(candidate['logIds'])) if 'logIds' in candidate else int(summaries[label]["size"]),
-            "representativeKeywords": candidate.get("topKeywords") or keywords.get(str(label), []),
+            "representativeKeywords": clean_keywords(candidate.get("topKeywords") or [], policy=policy)
+                or clean_keywords(keywords.get(str(label), []), policy=policy),
             "similarQuestions": candidate.get("similarQuestions") or [],
             "synonyms": synonyms, "matchedFaqs": candidate.get("matchedFaqs") or [],
         })

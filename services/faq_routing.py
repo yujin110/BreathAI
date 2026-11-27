@@ -6,6 +6,7 @@ import re
 import numpy as np
 
 from services.faq_matching import FAQ_SOURCES, valid_faq_id
+from services.faq_tag_quality import clean_tag
 from services.question_identity import normalize, unit
 
 AMBIGUOUS_EXPRESSIONS = {'지하철', '공항철도', '카드', '시설', '서울'}
@@ -201,9 +202,12 @@ def expansion_candidate(label, faq, groups):
     samples = list(dict.fromkeys(g['normalizedText'] for g in groups))
     known = {key(question), *(key(s) for s in faq.get('synonyms', []))}
     synonyms = []
-    for text in samples:
+    for sample in samples:
+        text = clean_tag(sample)
+        if text is None:
+            continue
         normalized = key(text)
-        if normalized and normalized not in known and len(text) <= 100:
+        if normalized and normalized not in known:
             synonyms.append(dict(text=text, type='SYNONYM'))
             known.add(normalized)
     log_ids = [int(log_id) for group in groups for log_id in group['logIds']]
