@@ -162,6 +162,23 @@ class PipelineRetrievalTest(unittest.TestCase):
         self.assertEqual(len(result['retrievalEvidence']['used']), 5)
         self.assertTrue(result['retrievalEvidence']['questionChangedAfterRetrieval'])
 
+    def test_question_answer_mismatch_requires_both_relevance_signals(self):
+        import services
+        from services import run_pipeline as pipeline
+
+        evaluator = types.ModuleType('services.answer_evaluator')
+        evaluator.E2_THRESHOLD, evaluator.LLM_AXIS_MIN = .20, 2
+        evaluator.e2_score = Mock(return_value=.1)
+        evaluator.llm_judge = Mock(return_value=(dict(accuracy=2, politeness=4,
+                                                      actionability=4, essential_info=4), ''))
+        evaluator.decide_review = Mock(return_value=(True, []))
+        cluster = dict(tag='FAQ', standardQuestion='문자 상담 방법은?', answerDraft='소리 민원 안내')
+        with patch.dict(sys.modules, {'services.answer_evaluator': evaluator}), \
+                patch.object(services, 'answer_evaluator', evaluator, create=True):
+            self.assertTrue(pipeline._evaluate(cluster, None, None, None)['question_answer_mismatch'])
+            evaluator.e2_score.return_value = .5
+            self.assertFalse(pipeline._evaluate(cluster, None, None, None)['question_answer_mismatch'])
+
     def test_regeneration_helper_remains_callable_before_pipeline_entry(self):
         # The GPU smoke runner calls these helpers directly, without run_answer_pipeline.
         import services
