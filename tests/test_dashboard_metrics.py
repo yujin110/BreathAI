@@ -179,6 +179,39 @@ class DashboardMetricsTest(unittest.TestCase):
         self.assertEqual(payload['status'], 'COMPLETED')
         self.assertEqual([item['answerDraft'] for item in payload['faqCandidates']], drafts[2:])
 
+    def test_empty_cluster_recovers_keywords_from_confirmed_faq(self):
+        from services.faq_routing import expansion_candidate
+
+        self.write_callback_artifacts({'0': ['de', '유사?']})
+        candidate = expansion_candidate(
+            0, dict(faq_id=1, question='객실 분실물은 어디에 신고하나요?', answer='역무실에 신고하세요.',
+                    keywords=['Lost and Found', 'de', '분실물']),
+            [dict(normalizedText='분실물 신고', logIds=[10, 20],
+                  routing=dict(path='FAQ_TITLE', reason='confirmed'))])
+        (self.data / 'faq_candidates_final.json').write_text(
+            json.dumps({'faqCandidates': [candidate]}), encoding='utf-8')
+        result = build_callback(self.job)
+        self.assertEqual(result['faqCandidates'][0]['representativeKeywords'], ['Lost and Found', '분실물'])
+        cluster = next(c for c in result['clusteringView']['clusterNames'] if c['clusterLabel'] == 0)
+        self.assertEqual(cluster['name'], 'Lost and Found, 분실물')
+        self.assertEqual(cluster['topKeywords'], ['Lost and Found', '분실물'])
+        self.assertEqual(len(result['clusteringView']['points']), 3)
+
+    def test_keywordless_faq_uses_question_terms_or_explicit_missing_label(self):
+        self.write_callback_artifacts({'0': []})
+        output = self.data / 'faq_candidates_final.json'
+        candidate = dict(clusterLabel=0, standardQuestion='분실물 신고 방법은 무엇인가요?',
+                         answerDraft='역무실에 신고하세요.')
+        output.write_text(json.dumps({'faqCandidates': [candidate]}), encoding='utf-8')
+        result = build_callback(self.job)
+        self.assertEqual(result['faqCandidates'][0]['representativeKeywords'], ['분실물', '신고'])
+        candidate['standardQuestion'] = '지하철 어디인가요?'
+        output.write_text(json.dumps({'faqCandidates': [candidate]}), encoding='utf-8')
+        result = build_callback(self.job)
+        self.assertEqual(result['faqCandidates'][0]['representativeKeywords'], [])
+        cluster = next(c for c in result['clusteringView']['clusterNames'] if c['clusterLabel'] == 0)
+        self.assertEqual(cluster['name'], '대표 키워드 없음')
+
     def test_merged_candidate_callback_preserves_all_relations_and_checks_log_coverage(self):
         self.clustered[2]['clusterId'] = 1
         self.summaries = {0: {'size': '2'}, 1: {'size': '1'}}

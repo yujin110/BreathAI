@@ -218,6 +218,7 @@ def expansion_candidate(label, faq, groups):
     candidate_id = f'candidate:{label}'
     return dict(clusterLabel=label, clusterSize=len(log_ids), tag='FAQ', candidateType='EXPAND',
                 standardQuestion=question, answerDraft=clean_faq_body(faq['answer']), qType=faq.get('q_type'),
+                approvedFaqKeywords=faq.get('keywords') or [],
                 category=faq.get('category'), matchedFaqs=[dict(matchedFaqId=faq['faq_id'],
                 matchedFaqSeqNum=faq.get('source_seq_num'), matchScore=match_score)],
                 synonyms=synonyms[:10], similarQuestions=samples[:12], logIds=log_ids,
