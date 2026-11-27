@@ -58,6 +58,7 @@ class FaqRoutingTest(unittest.TestCase):
         candidate = expansion_candidate(2, active[21], [
             dict(normalizedText=text, logIds=[i + 1], routing=decisions[i]) for i, text in enumerate(texts[:2])])
         self.assertEqual([1, 2], candidate['logIds'])
+        self.assertEqual(['악취'], candidate['approvedFaqKeywords'])
         self.assertEqual(21, candidate['matchedFaqs'][0]['matchedFaqId'])
         self.assertEqual(.96, candidate['matchedFaqs'][0]['matchScore'])
         self.assertEqual([None, .96], [e['rerankerScore'] for e in candidate['matchEvidence']])
