@@ -9,6 +9,17 @@ import unicodedata
 MARKER = '\n[TTOBAGI_GROUNDING_V1]\n'
 _KEY = secrets.token_bytes(32)
 INSUFFICIENT = '제공된 정보만으로는 문의하신 내용을 확인할 수 없습니다. 필요한 안내 자료를 추가로 확인해 주세요.'
+_INSUFFICIENT_NOTICE = re.compile(
+    r'제공된\s+(?:정보|자료|안내)(?:만)?으로는\s*'
+    r'(?:(?:문의하신|문의\s*하신|해당)\s*(?:내용|사항|정보)을\s*)?'
+    r'(?:확인|답변)할\s*수\s*없습니다'
+)
+
+
+def is_insufficient_answer(text):
+    return bool(_INSUFFICIENT_NOTICE.search(text))
+
+
 CONFLICT = '제공된 안내 내용이 서로 달라 현재 정보를 확정할 수 없습니다. 최신의 공식 안내를 확인해 주세요.'
 COMMAND = re.compile(r'(?:지침|명령|시스템|프롬프트).{0,25}(?:무시|변경|따르)|ignore.{0,30}(?:instruction|system)|주민등록번호.{0,20}(?:요청|알려|출력)', re.I)
 QUANTITY = re.compile(r'\d[\d,]*(?:\.\d+)?\s*(?:원|시간|분|일|시|%)')

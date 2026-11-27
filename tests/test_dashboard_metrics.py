@@ -162,6 +162,23 @@ class DashboardMetricsTest(unittest.TestCase):
             self.assertEqual(candidate['synonyms'], tags)
             self.assertEqual(candidate['similarQuestions'], ['환승 시간 얼마나 걸리나요'])
 
+    def test_callback_omits_insufficient_drafts_and_keeps_actionable_answers(self):
+        from services.grounded_answer import INSUFFICIENT
+
+        self.write_callback_artifacts()
+        drafts = [
+            f'안녕하세요. 또타24입니다.\n\n{INSUFFICIENT}\n\n감사합니다.',
+            '제공된 정보만으로는 확인할 수 없습니다.',
+            '역무실에 방문해 분실물을 신고해 주세요. 제공된 정보로는 문의하신 기한을 확인할 수 없습니다.',
+        ]
+        candidates = [dict(clusterLabel=0, standardQuestion='분실물은 어떻게 신고하나요?', answerDraft=draft)
+                      for draft in drafts]
+        (self.data / 'faq_candidates_final.json').write_text(
+            json.dumps({'faqCandidates': candidates}), encoding='utf-8')
+        payload = build_callback(self.job)
+        self.assertEqual(payload['status'], 'COMPLETED')
+        self.assertEqual([item['answerDraft'] for item in payload['faqCandidates']], drafts[2:])
+
     def test_merged_candidate_callback_preserves_all_relations_and_checks_log_coverage(self):
         self.clustered[2]['clusterId'] = 1
         self.summaries = {0: {'size': '2'}, 1: {'size': '1'}}

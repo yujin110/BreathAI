@@ -20,6 +20,7 @@ import json
 import time
 import unicodedata
 from pathlib import Path
+from services.grounded_answer import is_insufficient_answer
 from services.runtime_config import runtime_path
 from services.keyword_policy import get_policy
 
@@ -252,12 +253,16 @@ def run_answer_pipeline(expansions=()) -> None:
                 c, retrieval, templates, tok, mdl)
             count('refinedCandidates')
             count('refineAttempts', ref_attempts)
-            c['standardQuestion'] = new_q
-            c['answerDraft'] = new_body
-            c['evaluation'] = _evaluate(c, ce, judge_tok, judge_mdl)
+            adopted = not (tag == 'FAQ' and is_insufficient_answer(new_body)
+                           and prev['answerDraft'] and not is_insufficient_answer(prev['answerDraft']))
+            if adopted:
+                c['standardQuestion'] = new_q
+                c['answerDraft'] = new_body
+                c['evaluation'] = _evaluate(c, ce, judge_tok, judge_mdl)
             c['refinement'] = {
                 'stage': 'refine',
-                'question_refined': q_refined,
+                'question_refined': q_refined and adopted,
+                'adopted': adopted,
                 'prev': prev,
                 'attempts': ref_attempts,
             }
