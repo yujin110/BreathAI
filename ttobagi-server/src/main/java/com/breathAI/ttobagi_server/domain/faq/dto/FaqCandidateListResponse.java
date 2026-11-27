@@ -60,7 +60,7 @@ public class FaqCandidateListResponse {
             private Long matchedFaqId;
             private Integer matchedFaqSeqNum;
             private String question;
-            private double matchScore;
+            private Double matchScore;
         }
 
         @Getter
