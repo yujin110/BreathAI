@@ -18,6 +18,7 @@ import re
 import time
 import unicodedata
 from pathlib import Path
+from services.faq_tag_quality import clean_tag
 from services.runtime_config import runtime_path
 from services.llm_runtime import model_id, load_chat_model, generate_chat
 
@@ -72,7 +73,9 @@ PROMPT_TEMPLATE = """당신은 서울교통공사 챗봇 '또타24'의 FAQ 작�
   - standardQuestion: 자연스러운 한국어 한 문장 (구체적이고 답변 가능한 형태)
   - answerDraft: 운영자 가이드 톤. 사실 기반(hallucination 금지). 모르면 "○○로 문의" 식으로 안내
   - 검색 근거가 없는 단계이므로 전화번호, URL, 운영시간, 요금, 구체적인 처리 절차를 추측해 넣지 마세요.
-  - synonyms: 10개. 각각 type 분류 (TYPO=오타, ABBR=약어, SYNONYM=동의어/유사 표현)
+  - synonyms: 최대 10개의 짧은 검색 표현. 쓸 만한 표현이 없으면 빈 배열.
+  - 사용자 발화 전체, 명령문, 단어 조각, 깨진 문자열은 제외하세요.
+  - 각각 type 분류 (TYPO=오타, ABBR=약어, SYNONYM=동의어/유사 표현)
   - 한글 등록 원칙: 모든 출력은 자연스러운 한국어로
 
 ▶ 출력은 반드시 아래 JSON 형식 하나만 (다른 텍스트 금지):
@@ -178,7 +181,8 @@ def validate(obj: dict) -> dict:
             t = s.get('type', 'SYNONYM')
             if not isinstance(t, str) or t not in {'TYPO', 'ABBR', 'SYNONYM'}:
                 t = 'SYNONYM'
-            synonyms.append({'text': s['text'], 'type': t})
+            if (text := clean_tag(s['text'])) is not None:
+                synonyms.append({'text': text, 'type': t})
     return {
         'tag': tag,
         'standardQuestion': obj.get('standardQuestion', '') if tag == 'FAQ' else '',
