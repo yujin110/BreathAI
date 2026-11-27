@@ -4,6 +4,7 @@ Only explicit intent confirmation permits semantic merges. Failures preserve inp
 """
 import hashlib
 import json
+import re
 import unicodedata
 
 import numpy as np
@@ -11,6 +12,30 @@ import numpy as np
 
 def normalize(text):
     return ' '.join(unicodedata.normalize('NFC', str(text)).split())
+
+
+_QUESTION_END = re.compile(
+    r'(?:나요|까요|습니까|는가|인가|한가|는지요|인지요|은지요|을지요|하는지|있는지|없는지)$'
+)
+_SHORT_QUESTION_END = re.compile(r'(?:방법|절차|위치|요금|시간|기준|대상|조건|여부|번호|연락처|신고처)(?:은|는)$')
+
+
+def question_copy_key(text):
+    return ''.join(char for char in unicodedata.normalize('NFKC', text).casefold()
+                   if char.isalnum())
+
+
+def standard_question_error(question, source_keys=()):
+    text = unicodedata.normalize('NFKC', question).strip()
+    body = text.removesuffix('?').rstrip()
+    if (not body or any(char in text for char in '\r\n')
+            or re.search(r'[?!。！？]|\.(?!\d)|[\u3400-\u9fff\u3040-\u30ff]', body)
+            or re.match(r'^(?:표준\s*질문|질문)\s*[:：]', body)
+            or not (_QUESTION_END.search(body) or (text.endswith('?') and _SHORT_QUESTION_END.search(body)))):
+        return '표준 질문을 자연스러운 한국어 의문문 한 문장으로 작성하세요.'
+    if question_copy_key(body) in source_keys:
+        return '사용자 발화를 복사하지 말고 같은 문의 의도를 FAQ 질문으로 재작성하세요.'
+    return None
 
 
 def group_questions(texts, log_ids):

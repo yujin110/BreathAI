@@ -24,7 +24,10 @@ from services.llm_runtime import model_id, load_chat_model, generate_chat
 
 import pandas as pd
 import numpy as np
-from services.question_identity import normalize, diverse_indices, merge_partitions, IntentVerifier
+from services.question_identity import (
+    IntentVerifier, diverse_indices, merge_partitions, normalize, question_copy_key,
+    standard_question_error,
+)
 
 
 def _nfd(p: Path) -> Path:
@@ -71,6 +74,8 @@ PROMPT_TEMPLATE = """당신은 서울교통공사 챗봇 '또타24'의 FAQ 작�
 
 ▶ FAQ 작성 시:
   - standardQuestion: 자연스러운 한국어 한 문장 (구체적이고 답변 가능한 형태)
+  - 사용자 발화를 복사하거나 문장부호만 바꾸지 말고, 같은 문의를 대표하는 질문으로 다시 작성하세요.
+  - 진술·불만·명령은 질문으로 바꾸되, 대상·방향·상황은 유지하고 새 조건이나 사실을 추가하지 마세요.
   - answerDraft: 운영자 가이드 톤. 사실 기반(hallucination 금지). 모르면 "○○로 문의" 식으로 안내
   - 검색 근거가 없는 단계이므로 전화번호, URL, 운영시간, 요금, 구체적인 처리 절차를 추측해 넣지 마세요.
   - synonyms: 최대 10개의 짧은 검색 표현. 쓸 만한 표현이 없으면 빈 배열.
@@ -141,14 +146,14 @@ def parse_response(text: str) -> dict | None:
     return None
 
 
-def generate_candidate(prompt: str, tokenizer, model) -> tuple[dict, list[str]]:
-    """Retry malformed JSON once; preserve the existing FAQ payload contract."""
+def generate_candidate(prompt: str, tokenizer, model, *, samples=(), source_keys=(),
+                       verify=None) -> tuple[dict, list[str]]:
+    """Retry invalid FAQ structure or questions once."""
     trials = []
-    for attempt in range(2):
-        suffix = '' if attempt == 0 else (
-            '\n\n직전 응답은 FAQ JSON 스키마를 따르지 않았습니다. '
-            '필수 키 5개를 포함한 JSON 객체 하나만 다시 출력하세요. '
-            'tag는 FAQ, OUT_OF_SCOPE, EMERGENCY, REJECT 중 하나입니다.')
+    feedback = ''
+    source_keys = set(source_keys) | {question_copy_key(sample) for sample in samples}
+    for _ in range(2):
+        suffix = f'\n\n직전 응답 수정: {feedback} JSON 객체 하나만 출력하세요.' if feedback else ''
         raw = generate(prompt + suffix, tokenizer, model)
         trials.append(raw)
         obj = parse_response(raw)
@@ -160,9 +165,18 @@ def generate_candidate(prompt: str, tokenizer, model) -> tuple[dict, list[str]]:
                 and (obj['tag'] != 'FAQ' or (obj['standardQuestion'].strip() and obj['answerDraft'].strip()))):
             result = validate(obj)
             if result['tag'] == 'FAQ':
+                question = result['standardQuestion']
+                feedback = standard_question_error(question, source_keys)
+                if feedback:
+                    continue
+                if samples and verify is not None and verify(question, list(samples))['decision'] != 'same':
+                    feedback = '원본 샘플과 동일한 대상·상황·요청 방향의 질문을 작성하세요.'
+                    continue
+                result['standardQuestion'] = question.strip().removesuffix('？').removesuffix('?').rstrip() + '?'
                 result['answerDraft'] = '확인된 안내 자료가 없어 답변 내용을 확정할 수 없습니다.'
             return result, trials
-    return validate({'tag': 'REJECT', 'reason': 'FAQ JSON schema validation failed after 2 attempts'}), trials
+        feedback = 'FAQ JSON 스키마와 허용된 tag 값을 지켜 필수 키를 출력하세요.'
+    return validate({'tag': 'REJECT', 'reason': feedback}), trials
 
 
 def validate(obj: dict) -> dict:
@@ -196,6 +210,14 @@ def validate(obj: dict) -> dict:
 def load_clusters(exclude_labels=()) -> list[dict]:
     cdf = pd.read_csv(CLUSTERS_CSV, encoding='utf-8-sig')
     sdf = pd.read_csv(SUMMARY_CSV, encoding='utf-8-sig')
+    preprocessed = DATA_DIR / 'preprocessed_full.csv'
+    original_keys = {}
+    if preprocessed.exists():
+        originals = pd.read_csv(preprocessed, usecols=lambda col: col in {'logId', 'originalText'},
+                                keep_default_na=False)
+        if {'logId', 'originalText'} <= set(originals):
+            original_keys = {log_id: question_copy_key(str(text)) for log_id, text in
+                             originals[['logId', 'originalText']].itertuples(index=False, name=None)}
     with open(KEYWORDS_JSON, encoding='utf-8') as f:
         keywords = json.load(f)
 
@@ -222,6 +244,8 @@ def load_clusters(exclude_labels=()) -> list[dict]:
             'size': int(row['size']),
             'keywords': keywords.get(str(cid), []),
             'samples': samples,
+            'sourceQuestionKeys': {question_copy_key(text) for text in unique['text'].astype(str)}
+                                  | {original_keys[log_id] for log_id in subset['logId'] if log_id in original_keys},
             'logIds': subset['logId'].tolist(),
         })
     return out
@@ -322,7 +346,8 @@ def main(exclude_labels=()) -> None:
     for i, c in enumerate(clusters, 1):
         prompt = build_prompt(c['clusterId'], c['size'], c['keywords'], c['samples'])
         t0 = time.time()
-        validated, _trials = generate_candidate(prompt, tokenizer, model)
+        validated, _trials = generate_candidate(prompt, tokenizer, model, samples=c['samples'],
+                                               source_keys=c['sourceQuestionKeys'], verify=verifier)
         if routed and validated['tag'] == 'FAQ':
             from services.faq_routing import AMBIGUOUS_EXPRESSIONS, key
             reference = validated['standardQuestion']

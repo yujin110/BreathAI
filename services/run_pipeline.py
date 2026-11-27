@@ -126,9 +126,9 @@ def stage_refine(cluster: dict, retrieval: dict, templates: dict,
     q_refined = False
     if ARF.has_foreign(prev_q):
         new_q = ARF.refine_question(tok, mdl, prev_q,
-                                    cluster.get('synonyms', []),
+                                    cluster.get('similarQuestions', []),
                                     cluster.get('topKeywords', []))
-        q_refined = True
+        q_refined = new_q != prev_q
 
     cluster_for_gen = {**cluster, 'standardQuestion': new_q}
     tag_cfg = templates[cluster['tag']]
